@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api';
 import { brl } from '../../format';
-import type { AccountDetail, PaymentMethod } from '../../types';
+import type { AccountDetail, Board, OrderItem, PaymentMethod } from '../../types';
 import { Modal, MoneyInput, useAction } from '../../components/ui';
 
 type Part = { methodId: number; amountCents: number; tenderedCents: number | null };
@@ -16,7 +16,9 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
   const [methodId, setMethodId] = useState<number | null>(null);
   const [amount, setAmount] = useState<number | null>(balance);
   const [tendered, setTendered] = useState<number | null>(null);
+  const [split, setSplit] = useState(1);
   const { busy, run } = useAction();
+  const key = useMemo(() => api.newKey(), []);
 
   const method = methods.find((m) => m.id === methodId);
   const curAmount = amount ?? 0;
@@ -36,7 +38,7 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
   };
 
   const submit = async (close: boolean) => {
-    const ok = await run(() => api.post(`/api/accounts/${account.id}/payments`, { payments: all, close }),
+    const ok = await run(() => api.post(`/api/accounts/${account.id}/payments`, { payments: all, close }, `${key}-${all.length}-${total}-${close}`),
       close && full ? `Conta #${account.number} paga e encerrada.` : 'Pagamento registrado.');
     if (ok) { onDone(); onClose(); }
   };
@@ -58,6 +60,20 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
         <span className="muted">Saldo da conta</span>
         <span className="num">{brl(balance)}</span>
       </div>
+      <div className="split-row">
+        <span className="small muted">Dividir em</span>
+        <div className="stepper">
+          <button onClick={() => setSplit((n) => Math.max(1, n - 1))} aria-label="Menos pessoas">−</button>
+          <span className="num">{split}</span>
+          <button onClick={() => setSplit((n) => Math.min(20, n + 1))} aria-label="Mais pessoas">+</button>
+        </div>
+        <span className="small muted">{split === 1 ? 'pessoa' : 'pessoas'}</span>
+        {split > 1 && <>
+          <b className="num">{brl(Math.ceil(balance / split))}</b><span className="small muted">cada</span>
+          <button className="btn sm" onClick={() => setAmount(Math.min(remaining, Math.ceil(balance / split)))}>Usar 1 parte</button>
+        </>}
+      </div>
+      {split > 1 && balance % split !== 0 && <div className="small faint" style={{ marginTop: -6, marginBottom: 8 }}>Valor arredondado para cima; a última parte fica um pouco menor ({brl(balance - Math.ceil(balance / split) * (split - 1))}).</div>}
 
       {parts.length > 0 && (
         <div className="card tight" style={{ marginBottom: 12 }}>
@@ -119,7 +135,8 @@ export function DiscountModal({ account, onClose, onDone }: { account: AccountDe
       }}>Aplicar {amount ? brl(amount) : ''}</button>
     </>}>
       <div className="col gap-lg">
-        <div className="muted small">Saldo atual: <b>{brl(account.totals.balance)}</b>. O desconto fica registrado com seu nome, horário e motivo.</div>
+        <div className="muted small">Saldo atual: <b>{brl(account.totals.balance)}</b>. Sem limite de valor, mas o motivo é obrigatório. Fica registrado com seu nome, horário, total antes e depois.</div>
+        {amount != null && amount > 0 && <div className="kv"><span>Total da conta</span><span className="v">{brl(account.totals.total)} → {brl(account.totals.total - amount)}</span></div>}
         <label className="field"><span>Valor do desconto</span><MoneyInput value={amount} onChange={setAmount} autoFocus /></label>
         <label className="field"><span>Motivo (obrigatório)</span>
           <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ex.: item lançado em duplicidade" maxLength={300} />
@@ -159,18 +176,94 @@ export function EditAccountModal({ account, onClose, onDone }: { account: Accoun
   const [name, setName] = useState(account.customerName ?? '');
   const [note, setNote] = useState(account.note ?? '');
   const [contact, setContact] = useState(account.contact ?? '');
+  const [phone, setPhone] = useState(account.phone ?? '');
+  const [table, setTable] = useState(account.tableLabel ?? '');
   const { busy, run } = useAction();
   return (
     <Modal title={`Identificação · Conta #${account.number}`} onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Voltar</button>
       <button className="btn primary" disabled={busy} onClick={async () => {
-        if (await run(() => api.patch(`/api/accounts/${account.id}`, { customerName: name, note, contact }), 'Conta atualizada.')) { onDone(); onClose(); }
+        if (await run(() => api.patch(`/api/accounts/${account.id}`, { customerName: name, note, contact, phone, tableLabel: table }), 'Conta atualizada.')) { onDone(); onClose(); }
       }}>Salvar</button>
     </>}>
       <div className="col gap-lg">
         <label className="field"><span>Cliente</span><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
         <label className="field"><span>Observação</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} /></label>
-        <label className="field"><span>Casa / telefone</span><input className="input" value={contact} onChange={(e) => setContact(e.target.value)} maxLength={120} /></label>
+        <div className="grid-2">
+          <label className="field"><span>Mesa</span><input className="input" value={table} onChange={(e) => setTable(e.target.value)} maxLength={20} /></label>
+          <label className="field"><span>Telefone</span><input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} /></label>
+        </div>
+        <label className="field"><span>Casa / contato</span><input className="input" value={contact} onChange={(e) => setContact(e.target.value)} maxLength={120} /></label>
+      </div>
+    </Modal>
+  );
+}
+
+/** Cancelar item (com quantidade parcial e devolução ao estoque). */
+export function CancelItemModal({ item, delivered, onClose, onDone }: { item: OrderItem; delivered: boolean; onClose: () => void; onDone: () => void }) {
+  const [qty, setQty] = useState(item.quantity);
+  const [reason, setReason] = useState('');
+  const { data: st } = useQuery({ queryKey: ['itemStock', item.id], queryFn: () => api.get<{ hasStock: boolean }>(`/api/order-items/${item.id}/stock`) });
+  const [ret, setRet] = useState(!delivered);
+  const { busy, run } = useAction();
+  const ok = reason.trim().length >= 3 && qty >= 1 && qty <= item.quantity;
+  return (
+    <Modal title={`Cancelar ${item.productName}`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Voltar</button>
+      <button className="btn danger solid" disabled={!ok || busy} onClick={async () => {
+        if (await run(() => api.post(`/api/order-items/${item.id}/cancel`, { reason: reason.trim(), quantity: qty, returnStock: !!st?.hasStock && ret }), qty < item.quantity ? `Quantidade reduzida para ${item.quantity - qty}.` : 'Item cancelado.')) { onDone(); onClose(); }
+      }}>Cancelar {qty}× · {brl(item.unitPriceCents * qty)}</button>
+    </>}>
+      <div className="col gap-lg">
+        {item.quantity > 1 && (
+          <div className="row between">
+            <span>Quantas unidades cancelar?</span>
+            <div className="stepper lg">
+              <button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button>
+              <span className="num">{qty}</span>
+              <button onClick={() => setQty((q) => Math.min(item.quantity, q + 1))}>+</button>
+            </div>
+          </div>
+        )}
+        {item.quantity > 1 && qty < item.quantity && <div className="small muted">Ficam {item.quantity - qty} na conta.</div>}
+        <label className="field"><span>Motivo (obrigatório)</span>
+          <input className="input" autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ex.: cliente desistiu" maxLength={300} /></label>
+        <div className="row wrap">{['Cliente desistiu', 'Lançado errado', 'Produto em falta', 'Demorou demais'].map((s) => <button key={s} className="btn sm" onClick={() => setReason(s)}>{s}</button>)}</div>
+        {st?.hasStock && (
+          <label className="check"><input type="checkbox" checked={ret} onChange={(e) => setRet(e.target.checked)} />
+            <span>Devolver ao estoque <span className="small muted">{delivered ? '(já foi entregue — marque só se o produto voltou intacto)' : '(produto não foi aberto/entregue)'}</span></span></label>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/** Escolher outra conta aberta (juntar contas / transferir pedido). */
+export function PickAccountModal({ title, description, excludeId, confirmLabel, onClose, onPick }: {
+  title: string; description: string; excludeId: number; confirmLabel: string; onClose: () => void; onPick: (id: number) => Promise<boolean>;
+}) {
+  const { data } = useQuery({ queryKey: ['board'], queryFn: () => api.get<Board>('/api/cashier/board') });
+  const [sel, setSel] = useState<number | null>(null);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const list = (data?.accounts ?? []).filter((a) => a.id !== excludeId && a.status !== 'PENDING')
+    .filter((a) => !q || String(a.number) === q.replace('#', '') || (a.customerName ?? '').toLowerCase().includes(q.toLowerCase()) || a.tableLabel === q);
+  return (
+    <Modal title={title} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Voltar</button>
+      <button className="btn primary" disabled={!sel || busy} onClick={async () => { setBusy(true); const ok = await onPick(sel!); setBusy(false); if (ok) onClose(); }}>{confirmLabel}</button>
+    </>}>
+      <p className="muted" style={{ marginTop: 0 }}>{description}</p>
+      <input className="input" placeholder="Buscar nº, nome ou mesa" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+      <div className="col mt" style={{ gap: 6, maxHeight: 340, overflowY: 'auto' }}>
+        {!list.length && <div className="empty small">Nenhuma outra conta aberta.</div>}
+        {list.map((a) => (
+          <button key={a.id} className={`pick-row${sel === a.id ? ' on' : ''}`} onClick={() => setSel(a.id)}>
+            <b className="num">#{a.number}</b>
+            <span className="grow ellipsis">{a.customerName || 'Cliente não informado'}{a.tableLabel ? ` · Mesa ${a.tableLabel}` : ''}{a.note ? ` · ${a.note}` : ''}</span>
+            <span className="num">{brl(a.balance)}</span>
+          </button>
+        ))}
       </div>
     </Modal>
   );

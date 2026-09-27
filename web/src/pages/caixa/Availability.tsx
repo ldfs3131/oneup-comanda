@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../../api';
-import { brl } from '../../format';
+import { brl, norm } from '../../format';
 import { Spinner, Toggle, useAction } from '../../components/ui';
 import { useMenu } from './OrderComposer';
 
@@ -10,7 +10,7 @@ export default function Availability() {
   const { run } = useAction();
   const [q, setQ] = useState('');
   if (isLoading || !data) return <Spinner />;
-  const s = q.trim().toLowerCase();
+  const s = norm(q);
   return (
     <div className="col gap-lg page narrow" style={{ padding: 0 }}>
       <div className="row between wrap">
@@ -21,7 +21,7 @@ export default function Availability() {
         <input className="input" style={{ maxWidth: 260 }} placeholder="Buscar produto" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {data.map((c) => {
-        const prods = c.products.filter((p) => !s || p.name.toLowerCase().includes(s));
+        const prods = c.products.filter((p) => !s || norm(p.name).includes(s));
         if (!prods.length) return null;
         return (
           <div key={c.id} className="card">

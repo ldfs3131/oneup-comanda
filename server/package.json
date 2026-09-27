@@ -1,7 +1,7 @@
 {
   "name": "happy-alpha-server",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "setup": "node dist/scripts/setup.js",
     "demo": "node dist/scripts/demo.js",
-    "test:e2e": "node dist/scripts/e2e.js"
+    "test:e2e": "node dist/scripts/e2e.js",
+    "test:insights": "node dist/scripts/insights-test.js"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

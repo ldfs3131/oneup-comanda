@@ -187,3 +187,15 @@ Todo pagamento cai no caixa aberto no momento.
 | 11 | Pacote de instalação Windows + guia |
 
 Fases futuras (fora da V1): QR Code em uso → WhatsApp oficial → Delivery → Gestão avançada (estoque, CMV, fornecedores).
+
+## R2 — o que mudou na arquitetura
+
+- **Tabelas novas:** `customers` (cadastro leve), `product_costs` (histórico de custo), `stock_movements` (entrada, ajuste, venda, devolução, divergência), `expense_categories`, `expenses`, `status_events` (aberto/fechado), `excluded_days` (dias atípicos), `order_time_corrections`, `idempotency_keys`, `insight_log`.
+- **Colunas novas:** estoque/custo/tempo em `products`; `stock_product_id` em `options` (cozumel baixa a cerveja escolhida); mesa/telefone/cliente/`merged_into` em `accounts`; consumo e previsão em `orders`; `is_custom` e `unit_cost_cents` (congelado) em `order_items`; totais antes/depois em `discounts`; quantidade, status antes/depois e devolução em `cancellations`; perfil em `audit_logs`.
+- **Travas no banco:** estoque ≥ 0, sem DELETE nas tabelas novas, custo do item gravado uma única vez.
+- **Estoque:** linhas travadas em ordem de id (`FOR UPDATE`) — sem deadlock com vendas simultâneas. Falta de estoque devolve `409 STOCK_INSUFFICIENT` com a lista; a tela pergunta e reenvia com a decisão.
+- **Idempotência:** cabeçalho `Idempotency-Key` em criar conta, lançar pedido, pagamento, despesa e encerrar o dia.
+- **Reabertura:** cada complemento é um pedido novo (`sequence > 1`); a cozinha recebe só esse lote e `previous` traz os itens anteriores apenas para leitura.
+- **Situação do pedido (Pago/Parcial/A pagar):** pagamentos e descontos da conta alocados por ordem de pedido (FIFO).
+- **Insights (`services/insights.ts`):** consultas agregadas dos últimos 70 dias; níveis por dias com venda (1: <7, 2: 7–27, 3: 28–55, 4: 56+); só confiança alta/média; ranking por magnitude × impacto; repetição registrada em `insight_log`; cache invalidado a cada mudança de dados.
+- **Porta pública opcional (`PUBLIC_PORT`):** segundo servidor que só responde `/cardapio` e `/api/public`.

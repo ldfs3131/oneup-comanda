@@ -31,9 +31,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const inv = (...keys: unknown[][]) => keys.forEach((k) => qc.invalidateQueries({ queryKey: k }));
     s.onAny((event: string, payload: any) => {
       switch (event) {
-        case 'orders:changed': inv(['board'], ['kitchen'], ['account'], ['dashboard']); break;
-        case 'accounts:changed': inv(['board'], ['account'], ['accounts'], ['receivable'], ['dashboard']); break;
-        case 'menu:changed': inv(['menu']); break;
+        case 'orders:changed': inv(['board'], ['kitchen'], ['account'], ['dashboard'], ['ordersToday'], ['order'], ['stock']); break;
+        case 'accounts:changed': inv(['board'], ['account'], ['accounts'], ['receivable'], ['dashboard'], ['ordersToday'], ['order']); break;
+        case 'menu:changed': inv(['menu'], ['stock'], ['stockDiv']); break;
         case 'settings:changed': inv(['settings']); break;
         case 'register:changed': inv(['register'], ['board'], ['dashboard'], ['registers']); break;
       }

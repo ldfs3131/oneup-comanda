@@ -54,8 +54,9 @@ async function main() {
     }
     rl.close();
     const seeded = await seedMenu();
-    console.log(seeded ? '\n✔ Cardápio oficial cadastrado (Bebidas vazia — cadastre os preços no painel).' : '\n- Cardápio já existia, mantido.');
-    console.log('\nPronto. Inicie o sistema e acesse http://localhost:3000\n');
+    console.log(seeded ? `\n✔ Cardápio oficial cadastrado/atualizado (${seeded} produto(s)). Monster: ative no painel os sabores que vocês têm.` : '\n- Cardápio já estava completo, mantido.');
+    console.log('  Lembrete: faça a contagem inicial do estoque em Caixa > Estoque antes de abrir.');
+    console.log('\nPronto. Inicie o sistema e acesse http://localhost:3010\n');
     await pool.end();
 }
 main().catch(async (e) => { console.error('Erro na configuração:', e); await pool.end(); process.exit(1); });

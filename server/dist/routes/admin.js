@@ -1,51 +1,64 @@
 import { z } from 'zod';
 import { eq, sql } from 'drizzle-orm';
+import { networkInterfaces } from 'node:os';
 import { db } from '../db/index.js';
-import { deliverySettings, restaurantSettings } from '../db/schema.js';
+import { deliverySettings, excludedDays, restaurantSettings } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
-import { parse } from '../lib/http.js';
+import { bad, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
-import { runBackup } from '../services/backup.js';
+import { runBackupAndRecord } from '../services/backup.js';
+import { setEstablishmentOpen } from '../services/day.js';
+import { computeInsights } from '../services/insights.js';
 import { config } from '../config.js';
-import { networkInterfaces } from 'node:os';
+const n = (v) => Number(v ?? 0);
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const TZ = 'America/Sao_Paulo';
+export function todayLocal() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
 function lanUrls() {
     return Object.values(networkInterfaces()).flat()
         .filter((i) => i && i.family === 'IPv4' && !i.internal)
         .map((i) => `http://${i.address}:${config.port}`);
 }
-const n = (v) => Number(v ?? 0);
-const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-function todayLocal() {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+/** Período local [from, to] (datas inclusivas). */
+export function rangeOf(q) {
+    const from = q.from ?? q.date ?? todayLocal();
+    const to = q.to ?? q.date ?? from;
+    if (from > to)
+        throw bad('Período inválido.');
+    return { from, to };
 }
+const inRange = (col, r) => sql `(${sql.raw(col)} AT TIME ZONE ${TZ})::date BETWEEN ${r.from}::date AND ${r.to}::date`;
 export async function adminRoutes(app) {
     const admin = { preHandler: requireRole('ADMIN') };
     const anyUser = { preHandler: requireRole() };
+    // ---------- Dashboard por período ----------
     app.get('/api/dashboard', admin, async (req) => {
-        const date = parse(z.object({ date: dateSchema.optional() }), req.query).date ?? todayLocal();
-        const day = (col) => sql.raw(`(${col} AT TIME ZONE 'America/Sao_Paulo')::date`);
+        const r = rangeOf(parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional(), date: dateSchema.optional() }), req.query));
         const q = async (s) => (await db.execute(s)).rows;
+        const liveOrders = sql `o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')`;
         const [sales] = await q(sql `
-      SELECT COALESCE(SUM(oi.unit_price_cents*oi.quantity),0) AS cents, COUNT(DISTINCT o.id) AS orders, COUNT(DISTINCT o.account_id) AS accounts
+      SELECT COALESCE(SUM(oi.unit_price_cents*oi.quantity),0) AS cents, COALESCE(SUM(oi.quantity),0) AS items,
+             COUNT(DISTINCT o.id) AS orders, COUNT(DISTINCT o.account_id) AS accounts
       FROM orders o JOIN order_items oi ON oi.order_id = o.id
-      WHERE ${day('o.created_at')} = ${date}::date AND oi.status='ACTIVE' AND o.status NOT IN ('AWAITING_CONFIRMATION')`);
-        const [disc] = await q(sql `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count FROM discounts WHERE ${day('created_at')} = ${date}::date`);
+      WHERE ${inRange('o.created_at', r)} AND oi.status='ACTIVE' AND ${liveOrders}`);
+        const [disc] = await q(sql `SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count FROM discounts WHERE ${inRange('created_at', r)}`);
         const discByUser = await q(sql `
       SELECT u.name, SUM(d.amount_cents) AS cents, COUNT(*) AS count FROM discounts d JOIN users u ON u.id=d.user_id
-      WHERE ${day('d.created_at')} = ${date}::date GROUP BY u.name ORDER BY cents DESC`);
+      WHERE ${inRange('d.created_at', r)} GROUP BY u.name ORDER BY cents DESC`);
         const [canc] = await q(sql `
       SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count, COALESCE(SUM(amount_cents) FILTER (WHERE was_in_preparation),0) AS loss
-      FROM cancellations WHERE ${day('created_at')} = ${date}::date`);
+      FROM cancellations WHERE ${inRange('created_at', r)}`);
         const byMethod = await q(sql `
       SELECT pm.code, pm.name, COALESCE(SUM(p.amount_cents),0) AS cents, COUNT(p.id) AS count
-      FROM payment_methods pm LEFT JOIN payments p ON p.method_id=pm.id AND p.reversed_at IS NULL AND ${day('p.created_at')} = ${date}::date
+      FROM payment_methods pm LEFT JOIN payments p ON p.method_id=pm.id AND p.reversed_at IS NULL AND ${inRange('p.created_at', r)}
       GROUP BY pm.id ORDER BY pm.sort_order`);
         const [accs] = await q(sql `
-      SELECT COUNT(*) FILTER (WHERE ${day('opened_at')} = ${date}::date AND status <> 'CANCELLED') AS opened_today,
-             COUNT(*) FILTER (WHERE status IN ('OPEN','PARTIALLY_PAID','PAID')) AS open_now,
-             COUNT(*) FILTER (WHERE status = 'CLOSED' AND ${day('closed_at')} = ${date}::date) AS closed_today,
-             COUNT(*) FILTER (WHERE status = 'PENDING') AS pending_now
+      SELECT COUNT(*) FILTER (WHERE status IN ('OPEN','PARTIALLY_PAID','PAID')) AS open_now,
+             COUNT(*) FILTER (WHERE status = 'PENDING') AS pending_now,
+             COUNT(*) FILTER (WHERE status = 'CLOSED' AND ${inRange('closed_at', r)}) AS closed_in_range
       FROM accounts`);
         const [pendingSum] = await q(sql `
       SELECT COALESCE(SUM(
@@ -57,40 +70,71 @@ export async function adminRoutes(app) {
       SELECT COUNT(*) FILTER (WHERE status='CONFIRMED') AS new, COUNT(*) FILTER (WHERE status='IN_PREPARATION') AS preparing,
              COUNT(*) FILTER (WHERE status='READY') AS ready, COUNT(*) FILTER (WHERE status='AWAITING_CONFIRMATION') AS awaiting
       FROM orders`);
-        const [year] = await q(sql `
-      SELECT COALESCE(SUM(oi.unit_price_cents*oi.quantity),0)
-             - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE date_part('year', created_at AT TIME ZONE 'America/Sao_Paulo') = date_part('year', ${date}::date)),0) AS cents
-      FROM orders o JOIN order_items oi ON oi.order_id=o.id
-      WHERE oi.status='ACTIVE' AND o.status <> 'AWAITING_CONFIRMATION'
-        AND date_part('year', o.created_at AT TIME ZONE 'America/Sao_Paulo') = date_part('year', ${date}::date)`);
         const topProducts = await q(sql `
       SELECT oi.product_name AS name, SUM(oi.quantity) AS qty, SUM(oi.unit_price_cents*oi.quantity) AS cents
       FROM orders o JOIN order_items oi ON oi.order_id=o.id
-      WHERE ${day('o.created_at')} = ${date}::date AND oi.status='ACTIVE' AND o.status <> 'AWAITING_CONFIRMATION'
+      WHERE ${inRange('o.created_at', r)} AND oi.status='ACTIVE' AND ${liveOrders}
       GROUP BY oi.product_name ORDER BY qty DESC LIMIT 8`);
+        const byCategory = await q(sql `
+      SELECT COALESCE(c.name, 'Outros') AS name, SUM(oi.unit_price_cents*oi.quantity) AS cents, SUM(oi.quantity) AS qty
+      FROM orders o JOIN order_items oi ON oi.order_id=o.id LEFT JOIN products p ON p.id = oi.product_id LEFT JOIN categories c ON c.id = p.category_id
+      WHERE ${inRange('o.created_at', r)} AND oi.status='ACTIVE' AND ${liveOrders}
+      GROUP BY 1 ORDER BY cents DESC`);
+        const byHour = await q(sql `
+      SELECT EXTRACT(HOUR FROM o.created_at AT TIME ZONE ${TZ})::int AS h, COUNT(*) AS orders
+      FROM orders o WHERE ${inRange('o.created_at', r)} AND ${liveOrders} GROUP BY 1 ORDER BY 1`);
+        const [times] = await q(sql `
+      SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (ready_at-confirmed_at))/60) AS kitchen,
+             COUNT(*) AS n
+      FROM orders WHERE goes_to_kitchen AND ready_at IS NOT NULL AND confirmed_at IS NOT NULL AND ${inRange('created_at', r)}
+        AND EXTRACT(EPOCH FROM (ready_at-confirmed_at))/60 <= 3*COALESCE(expected_minutes,15)`);
+        const lowStock = await q(sql `SELECT id, name, stock_qty AS qty, low_stock_at AS lim FROM products WHERE track_stock AND active AND stock_qty <= low_stock_at ORDER BY stock_qty, name LIMIT 10`);
+        const [s] = await db.select().from(restaurantSettings).limit(1);
+        const [year] = await q(sql `
+      SELECT COALESCE(SUM(oi.unit_price_cents*oi.quantity),0)
+             - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE date_part('year', created_at AT TIME ZONE ${TZ}) = date_part('year', ${r.to}::date)),0) AS cents
+      FROM orders o JOIN order_items oi ON oi.order_id=o.id
+      WHERE oi.status='ACTIVE' AND ${liveOrders} AND date_part('year', o.created_at AT TIME ZONE ${TZ}) = date_part('year', ${r.to}::date)`);
         const revenue = n(sales.cents) - n(disc.cents);
-        const accountsWithSales = n(sales.accounts);
+        const backupAgeH = s.lastBackupAt ? (Date.now() - new Date(s.lastBackupAt).getTime()) / 3_600_000 : null;
         return {
-            date,
-            revenueCents: revenue,
-            grossSalesCents: n(sales.cents),
-            ordersCount: n(sales.orders),
-            accountsCount: n(accs.opened_today),
-            averageTicketCents: accountsWithSales ? Math.round(revenue / accountsWithSales) : 0,
-            accountsOpenNow: n(accs.open_now),
-            accountsClosedToday: n(accs.closed_today),
-            accountsPendingNow: n(accs.pending_now),
+            from: r.from, to: r.to,
+            revenueCents: revenue, grossSalesCents: n(sales.cents), itemsSold: n(sales.items),
+            ordersCount: n(sales.orders), accountsCount: n(sales.accounts),
+            averageTicketCents: n(sales.accounts) ? Math.round(revenue / n(sales.accounts)) : 0,
+            accountsOpenNow: n(accs.open_now), accountsClosedInRange: n(accs.closed_in_range), accountsPendingNow: n(accs.pending_now),
             pendingCents: n(pendingSum.cents),
             ordersNew: n(kitchen.new), ordersPreparing: n(kitchen.preparing), ordersReady: n(kitchen.ready), ordersAwaiting: n(kitchen.awaiting),
             discountsCents: n(disc.cents), discountsCount: n(disc.count),
             discountsByUser: discByUser.map((d) => ({ name: d.name, cents: n(d.cents), count: n(d.count) })),
             cancellationsCents: n(canc.cents), cancellationsCount: n(canc.count), lossCents: n(canc.loss),
             payments: byMethod.map((m) => ({ code: m.code, name: m.name, cents: n(m.cents), count: n(m.count) })),
-            receivedCents: byMethod.reduce((s, m) => s + n(m.cents), 0),
-            yearRevenueCents: n(year.cents),
+            receivedCents: byMethod.reduce((acc, m) => acc + n(m.cents), 0),
             topProducts: topProducts.map((t) => ({ name: t.name, qty: n(t.qty), cents: n(t.cents) })),
+            byCategory: byCategory.map((c) => ({ name: c.name, cents: n(c.cents), qty: n(c.qty) })),
+            byHour: byHour.map((h) => ({ hour: n(h.h), orders: n(h.orders) })),
+            kitchenMedianMin: times?.kitchen == null ? null : Math.round(Number(times.kitchen)), kitchenSamples: n(times?.n),
+            lowStock: lowStock.map((l) => ({ id: l.id, name: l.name, qty: n(l.qty), lim: n(l.lim) })),
+            backup: { at: s.lastBackupAt, ok: s.lastBackupOk, info: s.lastBackupInfo, stale: backupAgeH == null || backupAgeH > 48 || s.lastBackupOk === false, configured: config.backupDirs.length > 0 },
+            mei: s.meiEnabled ? { yearRevenueCents: n(year.cents), limitCents: s.meiLimitCents } : null,
         };
     });
+    // ---------- Insights ----------
+    app.get('/api/insights', admin, async () => computeInsights(db));
+    app.get('/api/excluded-days', admin, async () => (await db.execute(sql `SELECT to_char(day,'YYYY-MM-DD') AS day, reason FROM excluded_days ORDER BY day DESC`)).rows);
+    app.post('/api/excluded-days', admin, async (req) => {
+        const b = parse(z.object({ day: dateSchema, reason: reasonSchema }), req.body);
+        await db.insert(excludedDays).values({ day: b.day, reason: b.reason, userId: me(req).id }).onConflictDoUpdate({ target: excludedDays.day, set: { reason: b.reason } });
+        await audit(db, { userId: me(req).id, action: 'insights.exclude', message: `${me(req).name} marcou ${b.day.split('-').reverse().join('/')} como dia atípico (fora das comparações). Motivo: ${b.reason}` });
+        return { ok: true };
+    });
+    app.delete('/api/excluded-days/:day', admin, async (req) => {
+        const { day } = parse(z.object({ day: dateSchema }), req.params);
+        await db.delete(excludedDays).where(eq(excludedDays.day, day));
+        await audit(db, { userId: me(req).id, action: 'insights.include', message: `${me(req).name} voltou a incluir ${day.split('-').reverse().join('/')} nas comparações.` });
+        return { ok: true };
+    });
+    // ---------- Auditoria ----------
     app.get('/api/audit', admin, async (req) => {
         const f = parse(z.object({
             date: dateSchema.optional(), search: z.string().trim().max(80).optional(),
@@ -98,32 +142,44 @@ export async function adminRoutes(app) {
         }), req.query);
         const conds = [sql `TRUE`];
         if (f.date)
-            conds.push(sql `(l.created_at AT TIME ZONE 'America/Sao_Paulo')::date = ${f.date}::date`);
+            conds.push(sql `(l.created_at AT TIME ZONE ${TZ})::date = ${f.date}::date`);
         if (f.search)
-            conds.push(sql `l.message ILIKE ${'%' + f.search + '%'}`);
+            conds.push(sql `unaccent_lower(l.message) LIKE unaccent_lower(${'%' + f.search + '%'})`);
         if (f.before)
             conds.push(sql `l.id < ${f.before}`);
         const rows = await db.execute(sql `
-      SELECT l.id, l.created_at AS "createdAt", l.action, l.entity_type AS "entityType", l.entity_id AS "entityId", l.message, u.name AS "userName"
+      SELECT l.id, l.created_at AS "createdAt", l.action, l.entity_type AS "entityType", l.entity_id AS "entityId", l.message,
+             u.name AS "userName", l.user_role AS "userRole"
       FROM audit_logs l LEFT JOIN users u ON u.id = l.user_id
       WHERE ${sql.join(conds, sql ` AND `)} ORDER BY l.id DESC LIMIT 200`);
         return rows.rows;
     });
     app.get('/api/cancellations', admin, async (req) => {
-        const f = parse(z.object({ date: dateSchema.optional() }), req.query);
+        const f = parse(z.object({ date: dateSchema.optional(), from: dateSchema.optional(), to: dateSchema.optional() }), req.query);
+        const hasRange = f.date || f.from || f.to;
+        const r = hasRange ? rangeOf(f) : null;
         const rows = await db.execute(sql `
       SELECT c.id, c.created_at AS "createdAt", c.target, c.description, c.amount_cents AS "amountCents", c.reason,
-             c.was_in_preparation AS "wasInPreparation", u.name AS "userName", a.number AS "accountNumber", a.id AS "accountId"
+             c.was_in_preparation AS "wasInPreparation", c.status_before AS "statusBefore", c.status_after AS "statusAfter",
+             c.stock_returned AS "stockReturned", u.name AS "userName", a.number AS "accountNumber", a.id AS "accountId"
       FROM cancellations c JOIN users u ON u.id = c.user_id JOIN accounts a ON a.id = c.account_id
-      WHERE ${f.date ? sql `(c.created_at AT TIME ZONE 'America/Sao_Paulo')::date = ${f.date}::date` : sql `TRUE`}
+      WHERE ${r ? inRange('c.created_at', r) : sql `TRUE`}
       ORDER BY c.id DESC LIMIT 300`);
         return rows.rows;
     });
-    // ----- Configurações (leitura liberada a todos os perfis logados) -----
+    // ---------- Configurações ----------
     app.get('/api/settings', anyUser, async () => {
         const [r] = await db.select().from(restaurantSettings).limit(1);
         const [d] = await db.select().from(deliverySettings).limit(1);
-        return { restaurant: r, delivery: d, backupDirs: config.backupDirs, demoMode: config.demoMode, lanUrls: lanUrls() };
+        return {
+            restaurant: {
+                name: r.name, tagline: r.tagline, isOpen: r.isOpen, qrEnabled: r.qrEnabled, whatsappNumber: r.whatsappNumber,
+                meiEnabled: r.meiEnabled, meiLimitCents: r.meiLimitCents,
+            },
+            delivery: { isOpen: d.isOpen },
+            backupDirs: config.backupDirs, demoMode: config.demoMode, lanUrls: lanUrls(),
+            publicPort: config.publicPort, version: config.version,
+        };
     });
     app.patch('/api/settings', admin, async (req) => {
         const b = parse(z.object({
@@ -131,20 +187,23 @@ export async function adminRoutes(app) {
             qrEnabled: z.boolean().optional(),
             whatsappNumber: z.string().trim().max(20).nullable().optional(),
             name: z.string().trim().min(2).max(60).optional(),
+            tagline: z.string().trim().max(60).optional(),
             deliveryOpen: z.boolean().optional(),
+            meiEnabled: z.boolean().optional(),
+            meiLimitCents: z.number().int().min(0).max(100_000_000_00).optional(),
         }), req.body);
         const user = me(req);
         const msgs = [];
         await db.transaction(async (tx) => {
-            const { deliveryOpen, ...rest } = b;
+            const { deliveryOpen, isOpen, ...rest } = b;
             if (rest.whatsappNumber !== undefined)
                 rest.whatsappNumber = rest.whatsappNumber ? rest.whatsappNumber.replace(/\D/g, '') : null;
             if (Object.keys(rest).length)
                 await tx.update(restaurantSettings).set({ ...rest, updatedAt: new Date() }).where(eq(restaurantSettings.id, 1));
+            if (isOpen !== undefined)
+                await setEstablishmentOpen(tx, user, isOpen, 'configurações');
             if (deliveryOpen !== undefined)
                 await tx.update(deliverySettings).set({ isOpen: deliveryOpen, updatedAt: new Date() }).where(eq(deliverySettings.id, 1));
-            if (b.isOpen !== undefined)
-                msgs.push(`restaurante ${b.isOpen ? 'ABERTO' : 'FECHADO'}`);
             if (b.qrEnabled !== undefined)
                 msgs.push(`QR Code ${b.qrEnabled ? 'LIGADO' : 'DESLIGADO'}`);
             if (deliveryOpen !== undefined)
@@ -153,15 +212,17 @@ export async function adminRoutes(app) {
                 msgs.push('WhatsApp atualizado');
             if (b.name)
                 msgs.push(`nome → ${b.name}`);
-            await audit(tx, { userId: user.id, action: 'settings.update', message: `${user.name} alterou configurações: ${msgs.join(', ')}.` });
+            if (b.tagline !== undefined)
+                msgs.push(`subtítulo → ${b.tagline}`);
+            if (b.meiEnabled !== undefined)
+                msgs.push(`indicador do MEI ${b.meiEnabled ? 'ligado' : 'desligado'}`);
+            if (b.meiLimitCents !== undefined)
+                msgs.push('teto do MEI alterado');
+            if (msgs.length)
+                await audit(tx, { userId: user.id, action: 'settings.update', message: `${user.name} alterou configurações: ${msgs.join(', ')}.` });
         });
         notify.settingsChanged();
         return { ok: true };
     });
-    app.post('/api/backup', admin, async (req) => {
-        const results = await runBackup();
-        const ok = results.filter((r) => r.ok).length;
-        await audit(db, { userId: me(req).id, action: 'backup.manual', message: ok ? `${me(req).name} fez backup manual (${ok} pasta(s)).` : `Backup manual FALHOU: ${results.map((r) => r.error).join('; ')}`, data: results });
-        return { results };
-    });
+    app.post('/api/backup', admin, async (req) => ({ results: await runBackupAndRecord(me(req).id, 'backup.manual') }));
 }

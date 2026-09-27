@@ -3,6 +3,16 @@ let ctx: AudioContext | null = null;
 let unlocked = false;
 const listeners = new Set<(v: boolean) => void>();
 
+let muted = (() => { try { return localStorage.getItem('ha:muted') === '1'; } catch { return false; } })();
+const muteListeners = new Set<(v: boolean) => void>();
+export function isMuted() { return muted; }
+export function setMuted(v: boolean) {
+  muted = v;
+  try { localStorage.setItem('ha:muted', v ? '1' : '0'); } catch { /* sem armazenamento */ }
+  muteListeners.forEach((l) => l(v));
+}
+export function onMuteChange(fn: (v: boolean) => void) { muteListeners.add(fn); return () => { muteListeners.delete(fn); }; }
+
 export function isAudioUnlocked() { return unlocked; }
 export function onAudioUnlock(fn: (v: boolean) => void) { listeners.add(fn); return () => listeners.delete(fn); }
 
@@ -17,7 +27,7 @@ export async function unlockAudio() {
 }
 
 function tone(freq: number, start: number, dur: number, vol = 0.35, type: OscillatorType = 'sine') {
-  if (!ctx) return;
+  if (!ctx || muted) return;
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.type = type;

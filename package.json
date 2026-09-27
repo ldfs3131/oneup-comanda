@@ -2,7 +2,10 @@
   "name": "happy-alpha",
   "private": true,
   "version": "1.0.0",
-  "workspaces": ["server", "web"],
+  "workspaces": [
+    "server",
+    "web"
+  ],
   "scripts": {
     "build": "npm run build -w web && npm run build -w server",
     "start": "npm run start -w server",
@@ -10,6 +13,7 @@
     "dev:web": "npm run dev -w web",
     "setup": "npm run setup -w server",
     "demo": "npm run demo -w server",
-    "test:e2e": "npm run test:e2e -w server"
+    "test:e2e": "npm run test:e2e -w server",
+    "test:insights": "npm run test:insights -w server"
   }
 }

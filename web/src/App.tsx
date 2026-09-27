@@ -11,6 +11,8 @@ import AccountPage from './pages/caixa/AccountPage';
 import Receivables from './pages/caixa/Receivables';
 import RegisterPage from './pages/caixa/RegisterPage';
 import Availability from './pages/caixa/Availability';
+import OrdersToday from './pages/caixa/OrdersToday';
+import StockPage from './pages/caixa/StockPage';
 import Kitchen from './pages/cozinha/Kitchen';
 import AdminLayout from './pages/admin/AdminLayout';
 import Dashboard from './pages/admin/Dashboard';
@@ -22,6 +24,10 @@ import Audit from './pages/admin/Audit';
 import Cancellations from './pages/admin/Cancellations';
 import SettingsPage from './pages/admin/SettingsPage';
 import PublicMenu from './pages/public/PublicMenu';
+import InsightsPage from './pages/admin/InsightsPage';
+import FinancePage from './pages/admin/FinancePage';
+import TimingPage from './pages/admin/TimingPage';
+import OrdersHistory from './pages/admin/OrdersHistory';
 
 function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -52,6 +58,8 @@ export default function App() {
         <Route path="receber" element={<Receivables />} />
         <Route path="registro" element={<RegisterPage />} />
         <Route path="disponibilidade" element={<Availability />} />
+        <Route path="pedidos" element={<OrdersToday />} />
+        <Route path="estoque" element={<StockPage />} />
       </Route>
       <Route path="/admin" element={<Guard roles={['ADMIN']}><AdminLayout /></Guard>}>
         <Route index element={<Dashboard />} />
@@ -64,6 +72,10 @@ export default function App() {
         <Route path="cancelamentos" element={<Cancellations />} />
         <Route path="usuarios" element={<Users />} />
         <Route path="configuracoes" element={<SettingsPage />} />
+        <Route path="insights" element={<InsightsPage />} />
+        <Route path="financeiro" element={<FinancePage />} />
+        <Route path="tempo" element={<TimingPage />} />
+        <Route path="pedidos" element={<OrdersHistory />} />
       </Route>
       <Route path="*" element={<Home />} />
     </Routes>

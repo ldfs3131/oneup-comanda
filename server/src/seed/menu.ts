@@ -1,20 +1,28 @@
+import { eq, sql } from 'drizzle-orm';
 import { db, type Executor } from '../db/index.js';
-import { categories, optionGroups, options, products } from '../db/schema.js';
+import { categories, optionGroups, options, products, restaurantSettings } from '../db/schema.js';
 
 /**
  * Cardápio oficial informado pelo proprietário (27/09/2026).
- * Bebidas: categoria criada vazia — preços ainda não informados (não inventar).
+ * Preços reais; nada inventado. Monster: sabores vendidos no Brasil, cadastrados INATIVOS
+ * até o proprietário ativar os que tem. Custos: não informados (null).
  */
 const ESPETOS = ['Contra-filé', 'Frango', 'Medalhão de Frango', 'Coração', 'Lombinho', 'Kafta', 'Queijo Coalho'];
+const MONSTER = [
+  'Energy Green', 'Green Zero Açúcar', 'Absolutely Zero', 'The Doctor', 'Ultra', 'Ultra Peachy Keen', 'Ultra Violet',
+  'Ultra Watermelon', 'Ultra Fiesta Mango', 'Ultra Strawberry Dreams', 'Khaotic', 'Mango Loco', 'Rio Punch', 'Pacific Punch', 'Pipeline Punch',
+];
 
-type Seed = {
-  name: string; sendsToKitchen: boolean;
-  products: { name: string; priceCents: number; description?: string; groups?: { name: string; required: boolean; options: [string, number][] }[] }[];
+type OptionSeed = { name: string; delta: number; stockOf?: string };
+type ProductSeed = {
+  name: string; priceCents: number; description?: string; trackStock?: boolean; active?: boolean; kitchen?: boolean;
+  groups?: { name: string; required: boolean; options: OptionSeed[] }[];
 };
+type CategorySeed = { name: string; kitchen: boolean; products: ProductSeed[] };
 
-export const MENU: Seed[] = [
+export const MENU: CategorySeed[] = [
   {
-    name: 'Petiscos', sendsToKitchen: true, products: [
+    name: 'Petiscos', kitchen: true, products: [
       { name: 'Batata Simples', priceCents: 2500 },
       { name: 'Batata Cheddar e Bacon', priceCents: 3500 },
       { name: 'Carne de Sol com Mandioca', priceCents: 6500 },
@@ -25,25 +33,25 @@ export const MENU: Seed[] = [
     ],
   },
   {
-    name: 'Espetos', sendsToKitchen: true, products: [
+    name: 'Espetos', kitchen: true, products: [
       ...ESPETOS.map((e) => ({
         name: `Espeto de ${e}`, priceCents: 1300,
-        groups: [{ name: 'Acompanhamento', required: false, options: [['Com farofa e vinagrete', 500]] as [string, number][] }],
+        groups: [{ name: 'Acompanhamento', required: false, options: [{ name: 'Com farofa e vinagrete', delta: 500 }] }],
       })),
       {
         name: 'Jantinha Completa', priceCents: 3000,
         description: 'Arroz, feijão tropeiro, mandioca, vinagrete e 1 espeto à escolha',
-        groups: [{ name: 'Espeto', required: true, options: ESPETOS.map((e) => [e, 0] as [string, number]) }],
+        groups: [{ name: 'Espeto', required: true, options: ESPETOS.map((e) => ({ name: e, delta: 0 })) }],
       },
     ],
   },
   {
-    name: 'Pratos', sendsToKitchen: true, products: [
+    name: 'Pratos', kitchen: true, products: [
       { name: 'Filé de Frango à Milanesa', priceCents: 3499 },
       { name: 'Filé de Frango Grelhado', priceCents: 2599 },
       {
         name: 'Strogonoff de Frango', priceCents: 2599,
-        groups: [{ name: 'Acompanhamento', required: true, options: [['Batata palha', 0], ['Batata frita', 300]] }],
+        groups: [{ name: 'Acompanhamento', required: true, options: [{ name: 'Batata palha', delta: 0 }, { name: 'Batata frita', delta: 300 }] }],
       },
       { name: 'Filé de Frango à Parmegiana', priceCents: 3990 },
       { name: 'Filé Mignon à Parmegiana', priceCents: 4299 },
@@ -52,25 +60,108 @@ export const MENU: Seed[] = [
       { name: 'Feijoada Completa', priceCents: 3000 },
     ],
   },
-  { name: 'Bebidas', sendsToKitchen: false, products: [] },
+  {
+    name: 'Hambúrguer', kitchen: true, products: [
+      { name: 'Hambúrguer', priceCents: 2500, groups: [{ name: 'Acompanhamento', required: false, options: [{ name: '+ Batata frita', delta: 500 }] }] },
+    ],
+  },
+  {
+    name: 'Bebidas', kitchen: false, products: [
+      ...['Coca-Cola lata', 'Coca-Cola Zero lata', 'Guaraná Antarctica lata', 'Fanta Laranja lata', 'Sprite lata']
+        .map((n) => ({ name: n, priceCents: 600, trackStock: true })),
+      { name: 'Limoneto', priceCents: 800, trackStock: true },
+      { name: 'Powerade', priceCents: 800, trackStock: true },
+      { name: 'Água sem gás', priceCents: 400, trackStock: true },
+      { name: 'Água com gás', priceCents: 500, trackStock: true },
+      { name: 'Água de coco caixinha', priceCents: 500, trackStock: true },
+      ...['Maracujá', 'Morango', 'Uva'].map((s) => ({ name: `Suco Kapo ${s}`, priceCents: 500, trackStock: true })),
+      ...['Uva', 'Pêssego', 'Goiaba'].map((s) => ({ name: `Suco Del Valle lata ${s}`, priceCents: 800, trackStock: true })),
+      ...MONSTER.map((s) => ({ name: `Monster ${s}`, priceCents: 1400, trackStock: true, active: false })),
+    ],
+  },
+  {
+    name: 'Cervejas', kitchen: false, products: [
+      { name: 'Heineken', priceCents: 1400, trackStock: true },
+      { name: 'Corona', priceCents: 1400, trackStock: true },
+      { name: 'Baden Baden', priceCents: 1400, trackStock: true },
+    ],
+  },
+  {
+    name: 'Chope', kitchen: false, products: [
+      { name: 'Chope 300 ml', priceCents: 700 },
+      { name: 'Chope 500 ml', priceCents: 1000 },
+      { name: 'Chope IPA 300 ml', priceCents: 1000 },
+      { name: 'Chope IPA 500 ml', priceCents: 1500 },
+    ],
+  },
+  {
+    name: 'Drinks', kitchen: true, products: [
+      { name: 'Caipirinha', priceCents: 2000, groups: [{ name: 'Sabor', required: true, options: [{ name: 'Limão', delta: 0 }, { name: 'Morango', delta: 0 }] }] },
+      { name: 'Caipirosca', priceCents: 2500, groups: [{ name: 'Sabor', required: true, options: [{ name: 'Limão', delta: 0 }, { name: 'Morango', delta: 0 }] }] },
+      { name: 'Cozumel com chope', priceCents: 1500 },
+      {
+        name: 'Cozumel com cerveja', priceCents: 2000,
+        groups: [{ name: 'Cerveja', required: true, options: ['Heineken', 'Corona', 'Baden Baden'].map((b) => ({ name: b, delta: 0, stockOf: b })) }],
+      },
+      { name: 'Preparo de Cozumel', priceCents: 700 },
+      { name: 'Campari (dose)', priceCents: 1800, kitchen: false },
+      { name: 'Whisky Red (dose)', priceCents: 2000, kitchen: false },
+    ],
+  },
+  { name: 'Outros', kitchen: false, products: [] },
 ];
 
-/** Cadastra o cardápio se ainda não houver nenhuma categoria. */
+/**
+ * Cadastra o que falta do cardápio (por nome), sem mexer no que o administrador já editou.
+ * Usado na instalação e na atualização da V1 → R2.
+ */
 export async function seedMenu(tx: Executor = db) {
-  const existing = await tx.select().from(categories).limit(1);
-  if (existing.length) return false;
-  for (const [ci, c] of MENU.entries()) {
-    const [cat] = await tx.insert(categories).values({ name: c.name, sendsToKitchen: c.sendsToKitchen, sortOrder: ci }).returning();
-    for (const [pi, p] of c.products.entries()) {
+  let added = 0;
+  const catsNow = await tx.select().from(categories);
+  let maxCatOrder = Math.max(0, ...catsNow.map((c) => c.sortOrder));
+  const created = new Map<string, number>();
+  const pending: { groupId: number; name: string; delta: number; stockOf: string; sortOrder: number }[] = [];
+  for (const c of MENU) {
+    let cat = catsNow.find((x) => x.name.toLowerCase() === c.name.toLowerCase());
+    if (!cat) {
+      [cat] = await tx.insert(categories).values({ name: c.name, sendsToKitchen: c.kitchen, sortOrder: ++maxCatOrder }).returning();
+    }
+    const existing = await tx.select().from(products).where(eq(products.categoryId, cat.id));
+    const all = await tx.execute(sql`SELECT lower(name) AS n FROM products`);
+    const names = new Set((all.rows as { n: string }[]).map((r) => r.n));
+    let order = Math.max(0, ...existing.map((p) => p.sortOrder));
+    for (const p of c.products) {
+      if (names.has(p.name.toLowerCase())) continue;
       const [prod] = await tx.insert(products).values({
         categoryId: cat.id, name: p.name, priceCents: p.priceCents, description: p.description ?? '',
-        sendsToKitchen: c.sendsToKitchen, sortOrder: pi,
+        sendsToKitchen: p.kitchen ?? c.kitchen, sortOrder: ++order, trackStock: p.trackStock ?? false,
+        active: p.active ?? true, prepMinutes: 15,
       }).returning();
+      created.set(p.name, prod.id);
+      added++;
       for (const [gi, g] of (p.groups ?? []).entries()) {
         const [grp] = await tx.insert(optionGroups).values({ productId: prod.id, name: g.name, required: g.required, multiple: false, sortOrder: gi }).returning();
-        await tx.insert(options).values(g.options.map(([name, delta], oi) => ({ groupId: grp.id, name, priceDeltaCents: delta, sortOrder: oi })));
+        for (const [oi, o] of g.options.entries()) {
+          if (o.stockOf) pending.push({ groupId: grp.id, name: o.name, delta: o.delta, stockOf: o.stockOf, sortOrder: oi });
+          else await tx.insert(options).values({ groupId: grp.id, name: o.name, priceDeltaCents: o.delta, sortOrder: oi });
+        }
       }
     }
   }
-  return true;
+  // opções que baixam estoque de outro produto (ex.: cerveja do cozumel)
+  for (const o of pending) {
+    const [target] = await tx.select().from(products).where(sql`lower(${products.name}) = lower(${o.stockOf})`);
+    await tx.insert(options).values({ groupId: o.groupId, name: o.name, priceDeltaCents: o.delta, sortOrder: o.sortOrder, stockProductId: target?.trackStock ? target.id : null });
+  }
+  await tx.update(restaurantSettings).set({ menuSeedVersion: 2 }).where(eq(restaurantSettings.id, 1));
+  return added;
+}
+
+/** Atualização automática V1 → R2: roda uma única vez. */
+export async function upgradeMenuIfNeeded() {
+  const [s] = await db.select().from(restaurantSettings).limit(1);
+  if (!s || s.menuSeedVersion >= 2) return 0;
+  const anyCategory = await db.select({ id: categories.id }).from(categories).limit(1);
+  if (!anyCategory.length) return 0; // instalação nova: o setup cadastra
+  return db.transaction((tx) => seedMenu(tx));
 }

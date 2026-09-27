@@ -2,36 +2,63 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { cashMovements, cashRegisters, users } from '../db/schema.js';
+import { cashMovements, cashRegisters, restaurantSettings, users } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
 import { brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
 import { currentRegister, requireOpenRegister } from '../services/accounts.js';
 import { registerSummary } from '../services/register.js';
-import { runBackup } from '../services/backup.js';
+import { runBackupAndRecord } from '../services/backup.js';
+import { setEstablishmentOpen } from '../services/day.js';
 
 export async function registerRoutes(app: FastifyInstance) {
   const ops = { preHandler: requireRole('CAIXA') };
+  const admin = { preHandler: requireRole('ADMIN') };
 
-  app.get('/api/register/current', ops, async () => {
+  app.get('/api/register/current', ops, async (req) => {
     const reg = await currentRegister(db);
-    if (!reg) return { register: null };
+    const [s] = await db.select({ isOpen: restaurantSettings.isOpen }).from(restaurantSettings).limit(1);
+    if (!reg) return { register: null, isOpen: s?.isOpen ?? false };
     const [opener] = await db.select({ name: users.name }).from(users).where(eq(users.id, reg.openedBy));
-    return { register: { ...reg, openedByName: opener?.name }, summary: await registerSummary(db, reg.id) };
+    const summary = await registerSummary(db, reg.id);
+    // Fechamento às cegas: o caixa não vê o dinheiro esperado antes de contar
+    const blind = me(req).role !== 'ADMIN';
+    return {
+      register: { ...reg, openedByName: opener?.name },
+      isOpen: s?.isOpen ?? false,
+      blind,
+      summary: blind ? { ...summary, expectedCashCents: null, cashReceivedCents: null } : summary,
+    };
   });
 
-  app.post('/api/register/open', ops, async (req) => {
+  // Abrir o dia = abrir o caixa (dinheiro inicial) + estabelecimento ABERTO
+  const openDay = async (req: any) => {
     const b = parse(z.object({ openingCashCents: z.number().int().min(0).max(100_000_00) }), req.body);
     const user = me(req);
     const reg = await db.transaction(async (tx) => {
-      if (await currentRegister(tx)) throw conflict('Já existe um caixa aberto.');
+      if (await currentRegister(tx)) throw conflict('O dia já está aberto.');
       const [reg] = await tx.insert(cashRegisters).values({ openedBy: user.id, openingCashCents: b.openingCashCents }).returning();
-      await audit(tx, { userId: user.id, action: 'register.open', entityType: 'cash_register', entityId: reg.id, message: `${user.name} abriu o caixa com ${brl(b.openingCashCents)} em dinheiro.` });
+      await audit(tx, { userId: user.id, action: 'register.open', entityType: 'cash_register', entityId: reg.id, message: `${user.name} abriu o dia/caixa com ${brl(b.openingCashCents)} em dinheiro.` });
+      await setEstablishmentOpen(tx, user, true, 'abertura do dia');
       return reg;
     });
-    notify.registerChanged();
+    notify.registerChanged(); notify.settingsChanged();
     return reg;
+  };
+  app.post('/api/day/open', ops, openDay);
+  app.post('/api/register/open', ops, openDay);
+
+  // Pausar/reabrir pedidos no meio do dia (estado único, caixa e admin)
+  app.post('/api/day/establishment', ops, async (req) => {
+    const { isOpen } = parse(z.object({ isOpen: z.boolean() }), req.body);
+    const user = me(req);
+    await db.transaction(async (tx) => {
+      if (isOpen) await requireOpenRegister(tx);
+      await setEstablishmentOpen(tx, user, isOpen, isOpen ? 'pedidos reabertos' : 'pedidos pausados');
+    });
+    notify.settingsChanged();
+    return { ok: true, isOpen };
   });
 
   app.post('/api/register/movements', ops, async (req) => {
@@ -46,7 +73,8 @@ export async function registerRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.post('/api/register/close', ops, async (req) => {
+  // Encerrar o dia = fechamento às cegas + estabelecimento FECHADO
+  const closeDay = async (req: any) => {
     const b = parse(z.object({ countedCashCents: z.number().int().min(0).max(100_000_00), note: z.string().trim().max(300).nullable().optional() }), req.body);
     const user = me(req);
     const out = await db.transaction(async (tx) => {
@@ -62,23 +90,22 @@ export async function registerRoutes(app: FastifyInstance) {
       }).where(eq(cashRegisters.id, reg.id));
       await audit(tx, {
         userId: user.id, action: 'register.close', entityType: 'cash_register', entityId: reg.id,
-        message: `${user.name} fechou o caixa. Recebido: ${brl(s.receivedCents)}. Dinheiro esperado ${brl(s.expectedCashCents)}, contado ${brl(b.countedCashCents)}, diferença ${diff > 0 ? '+' : ''}${brl(diff)}.`,
+        message: `${user.name} encerrou o dia/caixa. Recebido: ${brl(s.receivedCents)}. Dinheiro esperado ${brl(s.expectedCashCents)}, contado ${brl(b.countedCashCents)}, diferença ${diff > 0 ? '+' : ''}${brl(diff)}.`,
       });
-      return { id: reg.id, expectedCashCents: s.expectedCashCents, countedCashCents: b.countedCashCents, differenceCents: diff };
+      await setEstablishmentOpen(tx, user, false, 'encerramento do dia');
+      return {
+        id: reg.id, expectedCashCents: s.expectedCashCents, countedCashCents: b.countedCashCents, differenceCents: diff,
+        receivedCents: s.receivedCents, openAccounts: s.openAccountsNow,
+      };
     });
-    notify.registerChanged();
-    // backup em segundo plano, não trava o fechamento
-    runBackup().then(async (results) => {
-      const okCount = results.filter((r) => r.ok).length;
-      await audit(db, {
-        action: 'backup.auto', message: okCount ? `Backup automático do fechamento salvo em ${okCount} pasta(s).` : `Backup automático FALHOU: ${results.map((r) => r.error).join('; ')}`,
-        data: results,
-      });
-    }).catch(() => undefined);
+    notify.registerChanged(); notify.settingsChanged();
+    runBackupAndRecord(null, 'backup.auto').catch(() => undefined);
     return out;
-  });
+  };
+  app.post('/api/day/close', ops, closeDay);
+  app.post('/api/register/close', ops, closeDay);
 
-  app.get('/api/registers', ops, async () => {
+  app.get('/api/registers', admin, async () => {
     return db.select({
       id: cashRegisters.id, status: cashRegisters.status, openedAt: cashRegisters.openedAt, closedAt: cashRegisters.closedAt,
       openingCashCents: cashRegisters.openingCashCents, expectedCashCents: cashRegisters.expectedCashCents,
@@ -86,7 +113,7 @@ export async function registerRoutes(app: FastifyInstance) {
     }).from(cashRegisters).innerJoin(users, eq(users.id, cashRegisters.openedBy)).orderBy(desc(cashRegisters.id)).limit(120);
   });
 
-  app.get('/api/registers/:id', ops, async (req) => {
+  app.get('/api/registers/:id', admin, async (req) => {
     const { id } = parse(idParam, req.params);
     const [reg] = await db.select().from(cashRegisters).where(eq(cashRegisters.id, id));
     if (!reg) throw notFound('Caixa não encontrado.');

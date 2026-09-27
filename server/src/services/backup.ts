@@ -42,3 +42,21 @@ export async function runBackup(): Promise<{ dir: string; ok: boolean; file?: st
   }
   return results;
 }
+
+/** Executa o backup e grava o resultado (aparece no painel e no histórico). */
+export async function runBackupAndRecord(userId: number | null, action: 'backup.auto' | 'backup.manual') {
+  const { db } = await import('../db/index.js');
+  const { restaurantSettings } = await import('../db/schema.js');
+  const { audit } = await import('../lib/audit.js');
+  const { eq } = await import('drizzle-orm');
+  const results = await runBackup();
+  const okCount = results.filter((r) => r.ok).length;
+  const info = okCount ? results.filter((r) => r.ok).map((r) => r.file).join(' · ') : results.map((r) => r.error).join('; ');
+  await db.update(restaurantSettings).set({ lastBackupAt: new Date(), lastBackupOk: okCount > 0, lastBackupInfo: info }).where(eq(restaurantSettings.id, 1));
+  await audit(db, {
+    userId, action,
+    message: okCount ? `Backup ${action === 'backup.auto' ? 'automático' : 'manual'} salvo em ${okCount} pasta(s).` : `Backup ${action === 'backup.auto' ? 'automático' : 'manual'} FALHOU: ${info}`,
+    data: results,
+  });
+  return results;
+}

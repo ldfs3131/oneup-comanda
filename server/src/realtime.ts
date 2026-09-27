@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
 import { tokenFromCookieHeader, userFromToken } from './auth.js';
+import { bumpDataVersion } from './lib/cache.js';
 
 let io: Server | null = null;
 
@@ -32,11 +33,11 @@ export function emit(rooms: Room[], event: string, payload: unknown = {}) {
 
 /** Atalhos semânticos */
 export const notify = {
-  ordersChanged: () => emit(['kitchen', 'cashier'], 'orders:changed'),
-  accountsChanged: (accountId?: number) => emit(['cashier', 'admin'], 'accounts:changed', { accountId }),
+  ordersChanged: () => { bumpDataVersion(); emit(['kitchen', 'cashier'], 'orders:changed'); },
+  accountsChanged: (accountId?: number) => { bumpDataVersion(); emit(['cashier', 'admin'], 'accounts:changed', { accountId }); },
   menuChanged: () => emit(['kitchen', 'cashier', 'admin'], 'menu:changed'),
   settingsChanged: () => emit(['kitchen', 'cashier', 'admin'], 'settings:changed'),
-  registerChanged: () => emit(['cashier', 'admin'], 'register:changed'),
+  registerChanged: () => { bumpDataVersion(); emit(['cashier', 'admin'], 'register:changed'); },
   kitchenNewOrder: (p: unknown) => emit(['kitchen'], 'kitchen:new', p),
   kitchenCancelled: (p: unknown) => emit(['kitchen'], 'kitchen:cancelled', p),
   orderReady: (p: unknown) => emit(['cashier'], 'order:ready', p),

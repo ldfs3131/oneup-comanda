@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../auth';
@@ -7,6 +7,7 @@ import { api } from '../api';
 import { ROLE_LABEL } from '../format';
 import type { Settings } from '../types';
 import { Modal, useAction } from './ui';
+import { isMuted, onMuteChange, setMuted } from '../sound';
 
 export function Logo({ to = '/' }: { to?: string }) {
   return <Link to={to} aria-label="Início"><img className="logo" src="/logo.png" alt="Happy Alpha" /></Link>;
@@ -30,9 +31,52 @@ export function StatusChips() {
   if (!data) return null;
   return (
     <div className="row hide-mobile" style={{ gap: 14 }}>
-      <span className="status-chip"><span className={`dot ${data.restaurant.isOpen ? 'ok' : 'danger'}`} />Restaurante {data.restaurant.isOpen ? 'aberto' : 'fechado'}</span>
-      <span className="status-chip"><span className={`dot ${data.delivery.isOpen ? 'ok' : 'danger'}`} />Delivery {data.delivery.isOpen ? 'aberto' : 'fechado'}</span>
+      <span className={`est-chip ${data.restaurant.isOpen ? 'open' : 'closed'}`}><span className={`dot ${data.restaurant.isOpen ? 'ok' : 'danger'}`} />{data.restaurant.isOpen ? 'ABERTO' : 'FECHADO'}</span>
     </div>
+  );
+}
+
+/** Estado único do estabelecimento (tempo real). Caixa e admin podem pausar/reabrir. */
+export function EstablishmentChip({ hasRegister }: { hasRegister: boolean }) {
+  const { data } = useSettings();
+  const { busy, run } = useAction();
+  const [ask, setAsk] = useState(false);
+  if (!data) return null;
+  const open = data.restaurant.isOpen;
+  return <>
+    <button className={`est-chip btnlike ${open ? 'open' : 'closed'}`} onClick={() => setAsk(true)} title="Pausar ou reabrir pedidos">
+      <span className={`dot ${open ? 'ok' : 'danger'}`} />{open ? 'ABERTO' : 'FECHADO'}
+    </button>
+    {ask && (
+      <Modal title={open ? 'Pausar pedidos?' : 'Reabrir pedidos?'} onClose={() => setAsk(false)} footer={<>
+        <button className="btn" onClick={() => setAsk(false)}>Voltar</button>
+        <button className={`btn ${open ? 'danger solid' : 'go'}`} disabled={busy || (!open && !hasRegister)} onClick={async () => {
+          if (await run(() => api.post('/api/day/establishment', { isOpen: !open }), open ? 'Pedidos pausados: estabelecimento FECHADO.' : 'Pedidos reabertos: estabelecimento ABERTO.')) setAsk(false);
+        }}>{open ? 'Fechar para novos pedidos' : 'Reabrir pedidos'}</button>
+      </>}>
+        {open
+          ? <p className="muted">Enquanto estiver <b>FECHADO</b>, ninguém lança pedido novo (nem pelo QR Code). Continua possível consultar contas e <b>receber pagamentos</b>. Todos os aparelhos veem a mudança na hora.</p>
+          : hasRegister
+            ? <p className="muted">O estabelecimento volta a aceitar pedidos. Todos os aparelhos veem a mudança na hora.</p>
+            : <p className="muted">O dia não está aberto. Use <b>“Abrir o dia”</b> no caixa (informa o dinheiro da gaveta e já abre o estabelecimento).</p>}
+      </Modal>
+    )}
+  </>;
+}
+
+export function SoundToggle() {
+  const [m, setM] = useState(isMuted());
+  useEffect(() => onMuteChange(setM), []);
+  return <button className="btn icon ghost" title={m ? 'Som desligado — toque para ligar' : 'Som ligado — toque para silenciar'} aria-label="Som" onClick={() => setMuted(!m)}>{m ? '🔇' : '🔔'}</button>;
+}
+
+export function OneUpCredit({ version }: { version?: string }) {
+  return (
+    <a className="oneup" href="#" onClick={(e) => e.preventDefault()} aria-label="Desenvolvido por ONE UP">
+      <span>Desenvolvido por</span>
+      <img src="/oneup.png" alt="ONE UP" />
+      {version && <span className="faint">v{version}</span>}
+    </a>
   );
 }
 

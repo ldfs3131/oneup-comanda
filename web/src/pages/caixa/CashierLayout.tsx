@@ -6,8 +6,9 @@ import { brl, minutesSince } from '../../format';
 import { useRealtimeEvent } from '../../realtime';
 import { isAudioUnlocked, onAudioUnlock, playAlert, playNew, playReady, unlockAudio } from '../../sound';
 import type { Board } from '../../types';
-import { Banners, Logo, StatusChips, TopNav, UserMenu } from '../../components/layout';
+import { Banners, EstablishmentChip, Logo, SoundToggle, TopNav, UserMenu } from '../../components/layout';
 import { ReasonModal, useAction, useToast } from '../../components/ui';
+import { useStockGuard } from '../../components/stock';
 
 export function useBoard() {
   return useQuery({ queryKey: ['board'], queryFn: () => api.get<Board>('/api/cashier/board'), refetchInterval: 20_000 });
@@ -70,11 +71,14 @@ export default function CashierLayout() {
         <Logo to="/caixa" />
         <TopNav items={[
           { to: '/caixa', label: 'Contas', end: true },
+          { to: '/caixa/pedidos', label: 'Pedidos do dia' },
           { to: '/caixa/receber', label: 'A receber' },
-          { to: '/caixa/registro', label: <>Caixa {data && !data.register && <span className="count">fechado</span>}</> },
+          { to: '/caixa/estoque', label: 'Estoque' },
           { to: '/caixa/disponibilidade', label: 'Acabou?' },
+          { to: '/caixa/registro', label: <>Dia / Caixa {data && !data.register && <span className="count">fechado</span>}</> },
         ]} />
-        <StatusChips />
+        <EstablishmentChip hasRegister={!!data?.register} />
+        <SoundToggle />
         <UserMenu />
       </header>
       {data && <AlertBar board={data} flash={flash} />}
@@ -85,6 +89,7 @@ export default function CashierLayout() {
 
 function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
   const { run } = useAction();
+  const { guard, modal } = useStockGuard();
   const nav = useNavigate();
   const [reject, setReject] = useState<number | null>(null);
   const [, tick] = useState(0);
@@ -112,7 +117,8 @@ function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
           <div className="grow">
             <div className="alert-title">PEDIDO #{r.orderNumber} PRONTO</div>
             <div className="alert-sub">
-              Conta #{r.accountNumber}{r.sequence > 1 ? ' · complemento' : ''}
+              {r.consumptionType === 'VIAGEM' && <b className="viagem-tag">VIAGEM</b>}
+              Conta #{r.accountNumber}{r.tableLabel ? ` · Mesa ${r.tableLabel}` : ''}{r.sequence > 1 ? ' · complemento' : ''}
               {r.customerName ? ` · ${r.customerName}` : ''}{r.note ? ` · ${r.note}` : ''}
               {r.readyAt && <span className="alert-age"> · há {minutesSince(r.readyAt)} min</span>}
             </div>
@@ -130,9 +136,10 @@ function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
           </div>
           <Link className="btn sm ghost" to={`/caixa/conta/${o.accountId}`}>Ver itens</Link>
           <button className="btn sm danger" onClick={() => setReject(o.orderId)}>Recusar</button>
-          <button className="btn go" onClick={() => run(() => api.post(`/api/orders/${o.orderId}/confirm`), 'Pedido confirmado e enviado à cozinha.')}>Confirmar</button>
+          <button className="btn go" onClick={() => guard((stockDecisions) => api.post(`/api/orders/${o.orderId}/confirm`, { stockDecisions }, true), 'Pedido confirmado e enviado à cozinha.')}>Confirmar</button>
         </div>
       ))}
+      {modal}
       {reject && (
         <ReasonModal title="Recusar pedido do QR Code" confirmLabel="Recusar pedido" danger
           suggestions={['Produto em falta', 'Pedido duplicado', 'Cliente não encontrado']}

@@ -11,18 +11,18 @@ const DB_URL = process.env.DATABASE_URL;
 let passed = 0;
 const failures: string[] = [];
 
-function check(label: string, cond: unknown, extra?: unknown) {
+export function check(label: string, cond: unknown, extra?: unknown) {
   if (cond) { passed++; console.log(`  ✔ ${label}`); }
   else { failures.push(label); console.log(`  ✘ ${label}`, extra ?? ''); }
 }
 
-class Client {
+export class Client {
   cookie = '';
   constructor(public name: string) {}
-  async req(method: string, path: string, body?: unknown) {
+  async req(method: string, path: string, body?: unknown, extra?: Record<string, string>) {
     const res = await fetch(BASE + path, {
       method,
-      headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(this.cookie ? { cookie: this.cookie } : {}) },
+      headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(this.cookie ? { cookie: this.cookie } : {}), ...(extra ?? {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
     const set = res.headers.get('set-cookie');
@@ -45,7 +45,7 @@ class Client {
   }
 }
 
-function waitEvent(s: Socket, ev: string, ms = 3000): Promise<any> {
+export function waitEvent(s: Socket, ev: string, ms = 3000): Promise<any> {
   return new Promise((resolve) => {
     const t = setTimeout(() => resolve(null), ms);
     s.once(ev, (p) => { clearTimeout(t); resolve(p ?? true); });
@@ -60,7 +60,10 @@ async function main() {
   const menu = (await admin.get('/api/menu?all=1')).data as any[];
   const find = (name: string) => menu.flatMap((c) => c.products).find((p: any) => p.name === name);
   const bebidas = menu.find((c) => c.name === 'Bebidas');
-  check('Cardápio oficial carregado (4 categorias, Bebidas vazia)', menu.length === 4 && bebidas.products.length === 0);
+  const names = menu.map((c: any) => c.name);
+  check('Cardápio R2 carregado (9 categorias, bebidas com preço real, Monster inativo)',
+    ['Petiscos', 'Espetos', 'Pratos', 'Hambúrguer', 'Bebidas', 'Cervejas', 'Chope', 'Drinks', 'Outros'].every((n) => names.includes(n))
+    && find('Coca-Cola lata')?.priceCents === 600 && find('Monster Mango Loco')?.active === false && find('Chope IPA 500 ml')?.priceCents === 1500, names);
   const chope = await admin.post('/api/products', { categoryId: bebidas.id, name: 'Chope Teste', priceCents: 1000, sendsToKitchen: false, groups: [] });
   check('2. Administrador cadastra produto (bebida)', chope.status === 200, chope.data);
   const batata = find('Batata Simples');
@@ -186,7 +189,9 @@ async function main() {
   const din = regNow.summary.byMethod.find((m: any) => m.code === 'DINHEIRO').cents;
   const car = regNow.summary.byMethod.find((m: any) => m.code === 'CARTAO').cents;
   check('28. Totais por forma corretos', pix === 14000 && din === 3000 && car === 2699, { pix, din, car });
-  check('Dinheiro esperado = 200 abertura + 30 recebido', regNow.summary.expectedCashCents === 23000, regNow.summary.expectedCashCents);
+  check('Fechamento às cegas: caixa não vê o dinheiro esperado', regNow.summary.expectedCashCents === null && regNow.blind === true);
+  const regAdmin = (await admin.get('/api/register/current')).data;
+  check('Dinheiro esperado (admin) = 200 abertura + 30 recebido', regAdmin.summary.expectedCashCents === 23000, regAdmin.summary.expectedCashCents);
   check('Resumo mostra pendência criada no caixa', regNow.summary.pendingCreated.length === 1 && regNow.summary.pendingCreatedCents === 4800);
   check('Resumo mostra desconto por operador', regNow.summary.discountsByUser[0]?.name === 'Caixa' && regNow.summary.discountsCents === 1000);
   check('Sangria registrada', (await caixa.post('/api/register/movements', { type: 'SANGRIA', amountCents: 5000, reason: 'Troco para o banco' })).status === 200);
@@ -239,9 +244,11 @@ async function main() {
   check('Caixa confirma → cozinha recebe', (await caixa.post(`/api/orders/${aw.orderId}/confirm`)).status === 200 && await kn3);
   await admin.patch('/api/settings', { qrEnabled: false });
 
+  await r2Tests({ admin, caixa, coz, kSock, cSock, find, M: (c: string) => methods.find((m: any) => m.code === c).id });
   kSock.close(); cSock.close();
   console.log(`\nResultado: ${passed} verificações OK, ${failures.length} falhas.`);
   if (failures.length) { console.log('Falhas:\n - ' + failures.join('\n - ')); process.exit(1); }
 }
 
+import { r2Tests } from './e2e-r2.js';
 main().catch((e) => { console.error(e); process.exit(1); });

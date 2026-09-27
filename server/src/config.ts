@@ -15,8 +15,15 @@ function num(v: string | undefined, d: number) {
   return Number.isFinite(n) && n > 0 ? n : d;
 }
 
+import { readFileSync } from 'node:fs';
+const pkgVersion = (() => { try { return JSON.parse(readFileSync(resolve(SERVER_ROOT, 'package.json'), 'utf8')).version as string; } catch { return '2.0.0'; } })();
+
 export const config = {
-  port: num(process.env.PORT, 3000),
+  version: pkgVersion,
+  port: num(process.env.PORT, 3010),
+  // Porta pública opcional, só com o cardápio do cliente (para Tailscale Funnel / internet). 0 = desligada.
+  publicPort: Number(process.env.PUBLIC_PORT ?? 0) || 0,
+  cookieSecure: process.env.COOKIE_SECURE === 'true',
   host: process.env.HOST ?? '0.0.0.0',
   databaseUrl: process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/happy_alpha',
   demoMode: process.env.DEMO_MODE === 'true',

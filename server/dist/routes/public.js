@@ -32,7 +32,7 @@ export async function publicRoutes(app) {
             categories: menu.filter((c) => c.products.length).map((c) => ({
                 id: c.id, name: c.name,
                 products: c.products.map((p) => ({
-                    id: p.id, name: p.name, description: p.description, priceCents: p.priceCents, imageUrl: p.imageUrl,
+                    id: p.id, name: p.name, description: p.description, priceCents: p.priceCents, imageUrl: p.imageUrl, soldOut: p.trackStock && p.stockQty <= 0,
                     groups: p.groups.map((g) => ({ id: g.id, name: g.name, required: g.required, multiple: g.multiple, options: g.options.map((o) => ({ id: o.id, name: o.name, priceDeltaCents: o.priceDeltaCents })) })),
                 })),
             })),
@@ -70,7 +70,7 @@ export async function publicRoutes(app) {
                 number, customerName: b.customerName, note: accNote, origin: b.mode === 'ENTREGA' ? 'DELIVERY' : 'QR_CODE',
                 cashRegisterId: reg?.id ?? null,
             }).returning();
-            const o = await insertOrder(tx, { accountId: acc.id, items: b.items, note: b.note, userId: null, origin: 'QR_CODE', cashRegisterId: reg?.id ?? null });
+            const o = await insertOrder(tx, { accountId: acc.id, items: b.items, note: b.note, userId: null, origin: 'QR_CODE', cashRegisterId: reg?.id ?? null, consumptionType: b.mode === 'ENTREGA' ? 'VIAGEM' : 'LOCAL' });
             await audit(tx, { action: 'qr.order', entityType: 'order', entityId: o.order.id, message: `Cliente${b.customerName ? ` ${b.customerName}` : ''} enviou pelo QR Code o pedido #${o.order.number} (${brl(o.totalCents)}, ${modeLabel}). Aguardando confirmação do caixa.` });
             return { acc, o };
         });

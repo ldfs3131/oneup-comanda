@@ -3,10 +3,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
 import type { User } from './types';
 
-type Meta = { demoMode: boolean; restaurantName: string };
+type Meta = { demoMode: boolean; restaurantName: string; tagline: string; version: string };
 type AuthCtx = {
   user: User | null; loading: boolean; meta: Meta | null;
-  login: (u: string, p: string) => Promise<User>; logout: () => Promise<void>;
+  login: (u: string, p: string, remember?: boolean) => Promise<User>; logout: () => Promise<void>;
 };
 const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
 
@@ -24,8 +24,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('ha:unauthorized', onUnauth);
   }, []);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const r = await api.post<{ user: User }>('/api/auth/login', { username, password });
+  const login = useCallback(async (username: string, password: string, remember = true) => {
+    const r = await api.post<{ user: User }>('/api/auth/login', { username, password, remember });
     qc.clear();
     setUser(r.user);
     return r.user;

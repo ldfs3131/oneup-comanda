@@ -1,12 +1,14 @@
 import {
-  pgTable, serial, integer, text, boolean, timestamp, jsonb, pgEnum, index,
+  pgTable, serial, integer, text, boolean, timestamp, jsonb, pgEnum, index, date,
 } from 'drizzle-orm/pg-core';
 
 // ---------- Enums ----------
 export const roleCode = pgEnum('role_code', ['ADMIN', 'CAIXA', 'COZINHA']);
 export const accountStatus = pgEnum('account_status', [
-  'OPEN', 'PARTIALLY_PAID', 'PENDING', 'PAID', 'CLOSED', 'CANCELLED',
+  'OPEN', 'PARTIALLY_PAID', 'PENDING', 'PAID', 'CLOSED', 'CANCELLED', 'MERGED',
 ]);
+export const consumptionType = pgEnum('consumption_type', ['LOCAL', 'VIAGEM']);
+export const stockMovementType = pgEnum('stock_movement_type', ['ENTRADA', 'VENDA', 'CANCELAMENTO', 'AJUSTE', 'DIVERGENCIA']);
 export const orderStatus = pgEnum('order_status', [
   'NEW', 'AWAITING_CONFIRMATION', 'CONFIRMED', 'IN_PREPARATION', 'READY', 'DELIVERED', 'CANCELLED',
 ]);
@@ -68,6 +70,11 @@ export const products = pgTable('products', {
   sendsToKitchen: boolean('sends_to_kitchen').notNull().default(true),
   needsReview: boolean('needs_review').notNull().default(false),
   reviewNote: text('review_note'),
+  trackStock: boolean('track_stock').notNull().default(false),
+  stockQty: integer('stock_qty').notNull().default(0),
+  lowStockAt: integer('low_stock_at').notNull().default(3),
+  prepMinutes: integer('prep_minutes').notNull().default(15),
+  costCents: integer('cost_cents'), // custo estimado atual (histórico em product_costs)
   createdAt: createdAt(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
@@ -87,6 +94,7 @@ export const options = pgTable('options', {
   groupId: integer('group_id').notNull().references(() => optionGroups.id),
   name: text('name').notNull(),
   priceDeltaCents: integer('price_delta_cents').notNull().default(0),
+  stockProductId: integer('stock_product_id'), // opção que consome 1 unidade de um produto com estoque
   available: boolean('available').notNull().default(true),
   active: boolean('active').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
@@ -124,7 +132,11 @@ export const accounts = pgTable('accounts', {
   number: integer('number').notNull().unique(),
   customerName: text('customer_name'),
   note: text('note'),
-  contact: text('contact'),
+  contact: text('contact'),   // casa / apto / mesa / local
+  phone: text('phone'),
+  tableLabel: text('table_label'),
+  customerId: integer('customer_id').references(() => customers.id),
+  mergedInto: integer('merged_into'),
   status: accountStatus('status').notNull().default('OPEN'),
   origin: orderOrigin('origin').notNull().default('CAIXA'),
   cashRegisterId: integer('cash_register_id').references(() => cashRegisters.id),
@@ -144,6 +156,9 @@ export const orders = pgTable('orders', {
   origin: orderOrigin('origin').notNull().default('CAIXA'),
   status: orderStatus('status').notNull().default('NEW'),
   goesToKitchen: boolean('goes_to_kitchen').notNull().default(true),
+  consumptionType: consumptionType('consumption_type').notNull().default('LOCAL'),
+  expectedMinutes: integer('expected_minutes'),
+  expectedReadyAt: ts('expected_ready_at'),
   note: text('note'),
   cashRegisterId: integer('cash_register_id').references(() => cashRegisters.id),
   createdBy: integer('created_by').references(() => users.id),
@@ -170,6 +185,8 @@ export const orderItems = pgTable('order_items', {
   optionsSnapshot: jsonb('options_snapshot').$type<{ group: string; name: string; priceDeltaCents: number }[]>().notNull().default([]),
   note: text('note'),
   goesToKitchen: boolean('goes_to_kitchen').notNull(),
+  isCustom: boolean('is_custom').notNull().default(false),
+  unitCostCents: integer('unit_cost_cents'), // custo congelado no momento da venda
   status: itemStatus('status').notNull().default('ACTIVE'),
 }, (t) => [index('order_items_order_idx').on(t.orderId)]);
 
@@ -202,6 +219,8 @@ export const discounts = pgTable('discounts', {
   accountId: integer('account_id').notNull().references(() => accounts.id),
   kind: discountKind('kind').notNull(),
   amountCents: integer('amount_cents').notNull(),
+  totalBeforeCents: integer('total_before_cents'),
+  totalAfterCents: integer('total_after_cents'),
   reason: text('reason').notNull(),
   cashRegisterId: integer('cash_register_id').references(() => cashRegisters.id),
   userId: integer('user_id').notNull().references(() => users.id),
@@ -216,6 +235,10 @@ export const cancellations = pgTable('cancellations', {
   orderItemId: integer('order_item_id').references(() => orderItems.id),
   description: text('description').notNull(),
   amountCents: integer('amount_cents').notNull().default(0),
+  quantity: integer('quantity'),
+  statusBefore: text('status_before'),
+  statusAfter: text('status_after'),
+  stockReturned: boolean('stock_returned').notNull().default(false),
   wasInPreparation: boolean('was_in_preparation').notNull().default(false),
   reason: text('reason').notNull(),
   cashRegisterId: integer('cash_register_id').references(() => cashRegisters.id),
@@ -228,6 +251,7 @@ export const auditLogs = pgTable('audit_logs', {
   id: serial('id').primaryKey(),
   createdAt: createdAt(),
   userId: integer('user_id').references(() => users.id),
+  userRole: text('user_role'),
   action: text('action').notNull(),
   entityType: text('entity_type'),
   entityId: integer('entity_id'),
@@ -241,6 +265,13 @@ export const restaurantSettings = pgTable('restaurant_settings', {
   isOpen: boolean('is_open').notNull().default(false),
   qrEnabled: boolean('qr_enabled').notNull().default(false),
   whatsappNumber: text('whatsapp_number'),
+  tagline: text('tagline').notNull().default('Gourmet R2'),
+  meiEnabled: boolean('mei_enabled').notNull().default(false),
+  meiLimitCents: integer('mei_limit_cents').notNull().default(8_100_000),
+  menuSeedVersion: integer('menu_seed_version').notNull().default(1),
+  lastBackupAt: ts('last_backup_at'),
+  lastBackupOk: boolean('last_backup_ok'),
+  lastBackupInfo: text('last_backup_info'),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
@@ -256,3 +287,105 @@ export const counters = pgTable('counters', {
   name: text('name').primaryKey(),
   value: integer('value').notNull().default(0),
 });
+
+// ================= R2 =================
+export const customers = pgTable('customers', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  contact: text('contact'),
+  phone: text('phone'),
+  note: text('note'),
+  createdAt: createdAt(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => [index('customers_name_idx').on(t.name)]);
+
+export const productCosts = pgTable('product_costs', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull().references(() => products.id),
+  costCents: integer('cost_cents').notNull(),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const stockMovements = pgTable('stock_movements', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull().references(() => products.id),
+  type: stockMovementType('type').notNull(),
+  quantity: integer('quantity').notNull(),      // + entrada / − saída
+  before: integer('before').notNull(),
+  after: integer('after').notNull(),
+  missing: integer('missing').notNull().default(0), // divergência: unidades vendidas sem estoque registrado
+  reason: text('reason'),
+  orderItemId: integer('order_item_id').references(() => orderItems.id),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => [index('stock_mov_product_idx').on(t.productId)]);
+
+export const expenseCategories = pgTable('expense_categories', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  active: boolean('active').notNull().default(true),
+  sortOrder: integer('sort_order').notNull().default(0),
+});
+
+export const expenses = pgTable('expenses', {
+  id: serial('id').primaryKey(),
+  description: text('description').notNull(),
+  categoryId: integer('category_id').notNull().references(() => expenseCategories.id),
+  amountCents: integer('amount_cents').notNull(),
+  date: date('date').notNull(),
+  note: text('note'),
+  paidFromRegister: boolean('paid_from_register').notNull().default(false),
+  cashMovementId: integer('cash_movement_id').references(() => cashMovements.id),
+  userId: integer('user_id').notNull().references(() => users.id),
+  createdAt: createdAt(),
+  cancelledAt: ts('cancelled_at'),
+  cancelledBy: integer('cancelled_by').references(() => users.id),
+  cancelReason: text('cancel_reason'),
+});
+
+/** Linha do tempo aberto/fechado do estabelecimento (base dos insights). */
+export const statusEvents = pgTable('status_events', {
+  id: serial('id').primaryKey(),
+  isOpen: boolean('is_open').notNull(),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+/** Dias fora das comparações (implantação, evento, dia atípico). */
+export const excludedDays = pgTable('excluded_days', {
+  day: date('day').primaryKey(),
+  reason: text('reason').notNull(),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const orderTimeCorrections = pgTable('order_time_corrections', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id),
+  field: text('field').notNull(),
+  before: ts('before'),
+  after: ts('after'),
+  reason: text('reason').notNull(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  createdAt: createdAt(),
+});
+
+/** Respostas guardadas para evitar duplicidade (duplo clique / reenvio). */
+export const idempotencyKeys = pgTable('idempotency_keys', {
+  key: text('key').primaryKey(),
+  userId: integer('user_id'),
+  route: text('route').notNull(),
+  status: integer('status').notNull(),
+  response: jsonb('response'),
+  createdAt: createdAt(),
+});
+
+/** Insights exibidos (evita repetir o mesmo insight sem mudança relevante). */
+export const insightLog = pgTable('insight_log', {
+  id: serial('id').primaryKey(),
+  key: text('key').notNull(),
+  bucket: text('bucket').notNull(),
+  payload: jsonb('payload'),
+  createdAt: createdAt(),
+}, (t) => [index('insight_log_key_idx').on(t.key)]);

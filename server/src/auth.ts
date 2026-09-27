@@ -20,9 +20,9 @@ const sha = (t: string) => createHash('sha256').update(t).digest('hex');
 export const hashPassword = (p: string) => bcrypt.hash(p, 10);
 export const checkPassword = (p: string, h: string) => bcrypt.compare(p, h);
 
-export async function createSession(userId: number) {
+export async function createSession(userId: number, remember = true) {
   const token = randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + config.sessionDays * 86400_000);
+  const expiresAt = new Date(Date.now() + (remember ? config.sessionDays * 86400_000 : 14 * 3600_000));
   await db.insert(sessions).values({ tokenHash: sha(token), userId, expiresAt });
   // limpeza oportunista de sessões vencidas
   await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
@@ -46,8 +46,9 @@ export async function userFromToken(token: string | undefined): Promise<AuthUser
   if (!u || !u.active) return null;
   // sessão deslizante: quem usa todo dia (tablet da cozinha) não é deslogado
   const half = Date.now() + (config.sessionDays / 2) * 86400_000;
+  const dayAhead = Date.now() + 86400_000;
   await db.update(sessions).set({ expiresAt: new Date(Date.now() + config.sessionDays * 86400_000) })
-    .where(and(eq(sessions.tokenHash, sha(token)), lt(sessions.expiresAt, new Date(half))));
+    .where(and(eq(sessions.tokenHash, sha(token)), lt(sessions.expiresAt, new Date(half)), gt(sessions.expiresAt, new Date(dayAhead))));
   return { id: u.id, name: u.name, username: u.username, role: u.role };
 }
 

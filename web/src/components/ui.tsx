@@ -48,14 +48,14 @@ export const useToast = () => useContext(ToastCtx);
 export function useAction() {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
-  const run = useCallback(async (fn: () => Promise<unknown>, okMsg?: string) => {
+  const run = useCallback(async (fn: () => Promise<unknown>, okMsg?: string, onError?: (e: any) => boolean) => {
     setBusy(true);
     try {
       await fn();
       if (okMsg) toast(okMsg, 'ok');
       return true;
     } catch (e) {
-      toast((e as Error).message, 'danger');
+      if (!onError || !onError(e)) toast((e as Error).message, 'danger');
       return false;
     } finally { setBusy(false); }
   }, [toast]);

@@ -5,7 +5,7 @@ import { api } from '../../api';
 import { brl, dateTime } from '../../format';
 import { Badge, Spinner } from '../../components/ui';
 
-type C = { id: number; createdAt: string; target: string; description: string; amountCents: number; reason: string; wasInPreparation: boolean; userName: string; accountNumber: number; accountId: number };
+type C = { id: number; createdAt: string; target: string; description: string; amountCents: number; reason: string; wasInPreparation: boolean; statusBefore: string | null; statusAfter: string | null; stockReturned: boolean; userName: string; accountNumber: number; accountId: number };
 
 export default function Cancellations() {
   const [date, setDate] = useState('');
@@ -35,7 +35,8 @@ export default function Cancellations() {
                 <tr key={c.id}>
                   <td className="small">{dateTime(c.createdAt)}</td>
                   <td><Link to={`/admin/conta/${c.accountId}`} className="num">#{c.accountNumber}</Link></td>
-                  <td>{c.description} {c.wasInPreparation && <Badge tone="danger">perda</Badge>} {c.target !== 'ITEM' && <Badge>{c.target === 'ORDER' ? 'pedido' : 'conta'}</Badge>}</td>
+                  <td>{c.description} {c.wasInPreparation && <Badge tone="danger">perda</Badge>} {c.target !== 'ITEM' && <Badge>{c.target === 'ORDER' ? 'pedido' : 'conta'}</Badge>} {c.stockReturned && <Badge tone="ok">voltou ao estoque</Badge>}
+                    {c.statusBefore && <div className="small faint">{c.statusBefore}{c.statusAfter ? ` → ${c.statusAfter}` : ''}</div>}</td>
                   <td className="small">{c.reason}</td>
                   <td className="small muted">{c.userName}</td>
                   <td className="right num">{brl(c.amountCents)}</td>

@@ -21,18 +21,31 @@ export async function kitchenRoutes(app: FastifyInstance) {
     if (!list.length) return [];
     const ids = list.map((o) => o.id);
     const items = await db.select().from(orderItems).where(and(inArray(orderItems.orderId, ids), eq(orderItems.goesToKitchen, true)));
-    const accs = await db.select({ id: accounts.id, number: accounts.number, customerName: accounts.customerName, note: accounts.note })
+    const accs = await db.select({ id: accounts.id, number: accounts.number, customerName: accounts.customerName, note: accounts.note, tableLabel: accounts.tableLabel })
       .from(accounts).where(inArray(accounts.id, [...new Set(list.map((o) => o.account_id))]));
+    // Itens anteriores da mesma conta (só leitura): a cozinha vê o que já foi feito, mas trabalha só no lote novo
+    const prev = await db.execute(sql`
+      SELECT o.id AS order_id, o.account_id, o.number, o.status, oi.product_name, oi.quantity
+      FROM orders o JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.account_id IN (${sql.join([...new Set(list.map((o) => Number(o.account_id)))].map((aid) => sql`${aid}`), sql`, `)})
+        AND o.goes_to_kitchen AND oi.goes_to_kitchen AND oi.status = 'ACTIVE' AND o.status NOT IN ('CANCELLED','AWAITING_CONFIRMATION')
+      ORDER BY o.id, oi.id`);
+    const prevRows = prev.rows as any[];
     return list.map((o) => {
       const a = accs.find((x) => x.id === o.account_id)!;
       return {
         id: o.id, number: o.number, sequence: o.sequence, status: o.status, note: o.note, origin: o.origin,
+        consumptionType: o.consumption_type, expectedMinutes: o.expected_minutes ?? 15,
         createdAt: o.created_at, confirmedAt: o.confirmed_at, startedAt: o.started_at, readyAt: o.ready_at,
         problemNote: o.problem_note,
-        account: { id: a.id, number: a.number, customerName: a.customerName, note: a.note },
+        account: { id: a.id, number: a.number, customerName: a.customerName, note: a.note, tableLabel: a.tableLabel },
         items: items.filter((i) => i.orderId === o.id).map((i) => ({
-          id: i.id, name: i.productName, quantity: i.quantity, options: i.optionsSnapshot, note: i.note, cancelled: i.status === 'CANCELLED',
+          id: i.id, name: i.productName, quantity: i.quantity, options: i.optionsSnapshot, note: i.note, cancelled: i.status === 'CANCELLED', isCustom: i.isCustom,
         })),
+        previous: o.sequence > 1
+          ? prevRows.filter((p) => p.account_id === o.account_id && p.order_id < o.id)
+            .map((p) => ({ orderNumber: p.number, name: p.product_name, quantity: p.quantity, status: p.status }))
+          : [],
       };
     }).sort((a, b) => +new Date(a.confirmedAt ?? a.createdAt) - +new Date(b.confirmedAt ?? b.createdAt));
   });

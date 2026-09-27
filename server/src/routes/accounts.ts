@@ -3,25 +3,47 @@ import { z } from 'zod';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, nextNumber, type Executor } from '../db/index.js';
 import {
-  accounts, cancellations, discounts, orderItems, orders, paymentMethods, payments,
+  accounts, cancellations, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users,
 } from '../db/schema.js';
-import { me, requireRole } from '../auth.js';
+import { me, requireRole, type AuthUser } from '../auth.js';
 import { bad, brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
+import { idempotent } from '../lib/idempotency.js';
 import { notify } from '../realtime.js';
 import {
-  accountDetail, accountTotals, assertAccountEditable, currentRegister, getAccount, insertOrder,
-  listAccountsWithTotals, recomputeStatus, requireOpenRegister,
+  accountDetail, accountTotals, assertAccountEditable, assertAccountInScope, currentRegister, getAccount, insertOrder,
+  listAccountsWithTotals, recomputeStatus, requireOpenRegister, requireTakingOrders, stockNeedsForOrder, upsertCustomer,
+  estimateReady, allocateOrders,
 } from '../services/accounts.js';
+import { applyStockForSale, itemHasStock, linkStockToItem, returnStockForItem } from '../services/stock.js';
+
+export const ORDER_STATUS_PT: Record<string, string> = {
+  NEW: 'Novo', AWAITING_CONFIRMATION: 'Aguardando confirmação', CONFIRMED: 'Novo (cozinha)', IN_PREPARATION: 'Em preparo',
+  READY: 'Pronto', DELIVERED: 'Entregue', CANCELLED: 'Cancelado',
+};
+const ACCOUNT_STATUS_PT: Record<string, string> = {
+  OPEN: 'Aberta', PARTIALLY_PAID: 'Parcialmente paga', PENDING: 'Pendente', PAID: 'Paga', CLOSED: 'Encerrada',
+  CANCELLED: 'Cancelada', MERGED: 'Juntada',
+};
 
 const itemSchema = z.object({
-  productId: z.number().int().positive(),
+  productId: z.number().int().positive().nullable().optional(),
   quantity: z.number().int().min(1).max(99),
   optionIds: z.array(z.number().int().positive()).max(20).default([]),
   note: z.string().trim().max(200).nullable().optional(),
-});
+  custom: z.object({
+    description: z.string().trim().min(2, 'descreva o item').max(80),
+    priceCents: centsSchema,
+    goesToKitchen: z.boolean().default(false),
+  }).nullable().optional(),
+}).refine((i) => !!i.productId !== !!i.custom, { message: 'item inválido' });
 const itemsSchema = z.array(itemSchema).max(60);
 const optText = (n: number) => z.string().trim().max(n).nullable().optional().transform((v) => v || null);
+const consumptionSchema = z.enum(['LOCAL', 'VIAGEM']).default('LOCAL');
+const stockDecisionsSchema = z.array(z.union([
+  z.object({ productId: z.number().int().positive(), action: z.literal('CORRECT'), newQty: z.number().int().min(0).max(100000) }),
+  z.object({ productId: z.number().int().positive(), action: z.literal('RELEASE'), reason: reasonSchema }),
+])).max(30).optional();
 
 const label = (a: { number: number; customerName: string | null }) =>
   `conta #${a.number}${a.customerName ? ` (${a.customerName})` : ''}`;
@@ -30,17 +52,14 @@ async function orderWithAccount(tx: Executor, id: number, lock = false) {
   const q = tx.select().from(orders).where(eq(orders.id, id));
   const [o] = lock ? await q.for('update') : await q;
   if (!o) throw notFound('Pedido não encontrado.');
-  const acc = await getAccount(tx, o.accountId);
+  const acc = await getAccount(tx, o.accountId, lock);
   return { o, acc };
 }
 
-/** Dados que o caixa precisa para o alerta de pedido pronto. */
-async function readyPayload(tx: Executor, orderId: number) {
-  const { o, acc } = await orderWithAccount(tx, orderId);
-  return {
-    orderId: o.id, orderNumber: o.number, accountId: acc.id, accountNumber: acc.number,
-    customerName: acc.customerName, note: acc.note, sequence: o.sequence, problemNote: o.problemNote,
-  };
+async function scoped(user: AuthUser, id: number) {
+  const acc = await getAccount(db, id);
+  await assertAccountInScope(db, user, acc);
+  return acc;
 }
 
 export async function accountRoutes(app: FastifyInstance) {
@@ -56,7 +75,8 @@ export async function accountRoutes(app: FastifyInstance) {
       AND (a.origin = 'CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id = a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`);
     const ready = await db.execute(sql`
       SELECT o.id AS "orderId", o.number AS "orderNumber", o.sequence, o.ready_at AS "readyAt", o.problem_note AS "problemNote",
-             o.status, a.id AS "accountId", a.number AS "accountNumber", a.customer_name AS "customerName", a.note
+             o.status, o.consumption_type AS "consumptionType", a.id AS "accountId", a.number AS "accountNumber",
+             a.customer_name AS "customerName", a.note, a.table_label AS "tableLabel"
       FROM orders o JOIN accounts a ON a.id = o.account_id
       WHERE o.status = 'READY' OR (o.problem_note IS NOT NULL AND o.status IN ('CONFIRMED','IN_PREPARATION','READY'))
       ORDER BY o.ready_at NULLS LAST, o.id`);
@@ -70,22 +90,99 @@ export async function accountRoutes(app: FastifyInstance) {
     return { accounts: live, ready: ready.rows, awaiting: awaiting.rows, register: reg ? { id: reg.id, openedAt: reg.openedAt } : null };
   });
 
-  // Histórico / busca de contas
+  // Pedidos do dia (desde a abertura do caixa atual; sem caixa aberto: desde a meia-noite)
+  app.get('/api/orders/today', ops, async () => {
+    const reg = await currentRegister(db);
+    const since = reg ? sql`${reg.openedAt}::timestamptz` : sql`date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`;
+    const rows = (await db.execute(sql`
+      SELECT o.id, o.number, o.sequence, o.status, o.origin, o.consumption_type AS "consumptionType", o.created_at AS "createdAt",
+             o.ready_at AS "readyAt", o.expected_ready_at AS "expectedReadyAt", o.goes_to_kitchen AS "goesToKitchen",
+             a.id AS "accountId", a.number AS "accountNumber", a.customer_name AS "customerName", a.note AS "accountNote",
+             a.table_label AS "tableLabel", a.status AS "accountStatus", u.name AS "createdByName",
+             COALESCE((SELECT SUM(unit_price_cents*quantity) FROM order_items WHERE order_id = o.id AND status='ACTIVE'),0)::int AS "totalCents",
+             (SELECT string_agg(quantity || '× ' || product_name, ', ' ORDER BY id) FROM order_items WHERE order_id = o.id AND status='ACTIVE') AS "itemsText"
+      FROM orders o JOIN accounts a ON a.id = o.account_id LEFT JOIN users u ON u.id = o.created_by
+      WHERE o.created_at >= ${since}
+      ORDER BY o.id DESC LIMIT 500`)).rows as any[];
+    // situação por pedido (pago/parcial/pendente) calculada por conta
+    const accIds = [...new Set(rows.map((r) => r.accountId))];
+    const situation = new Map<number, string>();
+    for (const accId of accIds) {
+      const t = await accountTotals(db, accId);
+      const accOrders = (await db.execute(sql`
+        SELECT o.id, o.status, COALESCE((SELECT SUM(unit_price_cents*quantity) FROM order_items WHERE order_id = o.id AND status='ACTIVE'),0)::int AS total
+        FROM orders o WHERE o.account_id = ${accId} ORDER BY o.id`)).rows as any[];
+      const alloc = allocateOrders(accOrders.map((o) => ({ id: o.id, status: o.status, totalCents: Number(o.total) })), t.discounts, t.paid);
+      for (const [oid, v] of alloc) situation.set(oid, v.situation);
+    }
+    return rows.map((r) => ({ ...r, situation: situation.get(r.id) ?? '—' }));
+  });
+
+  // Detalhe de um pedido (sem sair da tela)
+  app.get('/api/orders/:id', ops, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const user = me(req);
+    const { o, acc } = await orderWithAccount(db, id);
+    await assertAccountInScope(db, user, acc);
+    const detail = await accountDetail(db, acc.id);
+    const order = detail.orders.find((x) => x.id === id)!;
+    const userIds = [o.createdBy, o.confirmedBy, o.startedBy, o.readyBy, o.deliveredBy].filter(Boolean) as number[];
+    const names = userIds.length ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, userIds)) : [];
+    const nm = (uid: number | null) => names.find((n) => n.id === uid)?.name ?? null;
+    const timeline = [
+      { step: 'Lançado', at: o.createdAt, by: nm(o.createdBy) },
+      ...(o.origin === 'QR_CODE' ? [{ step: 'Confirmado pelo caixa', at: o.confirmedAt, by: nm(o.confirmedBy) }] : []),
+      ...(o.goesToKitchen ? [
+        { step: 'Enviado à cozinha', at: o.confirmedAt, by: nm(o.confirmedBy) },
+        { step: 'Iniciou o preparo', at: o.startedAt, by: nm(o.startedBy) },
+        { step: 'Pronto', at: o.readyAt, by: nm(o.readyBy) },
+      ] : []),
+      { step: 'Entregue', at: o.deliveredAt, by: nm(o.deliveredBy) },
+    ];
+    let auditRows: unknown[] = [];
+    let corrections: unknown[] = [];
+    if (user.role === 'ADMIN') {
+      auditRows = (await db.execute(sql`
+        SELECT l.created_at AS "createdAt", l.message, l.user_role AS "userRole" FROM audit_logs l
+        WHERE l.entity_type = 'order' AND l.entity_id = ${id} ORDER BY l.id`)).rows;
+      corrections = await db.select().from(orderTimeCorrections).where(eq(orderTimeCorrections.orderId, id)).orderBy(asc(orderTimeCorrections.id));
+    }
+    return {
+      order,
+      account: {
+        id: detail.id, number: detail.number, customerName: detail.customerName, note: detail.note, contact: detail.contact,
+        phone: detail.phone, tableLabel: detail.tableLabel, status: detail.status, totals: detail.totals,
+      },
+      payments: detail.payments, discounts: detail.discounts,
+      timeline, audit: auditRows, corrections,
+    };
+  });
+
+  // Histórico / busca de contas (caixa: somente escopo do dia)
   app.get('/api/accounts', ops, async (req) => {
+    const user = me(req);
     const q = parse(z.object({
       status: z.string().optional(), search: z.string().trim().max(60).optional(),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     }), req.query);
     const conds = [sql`TRUE`];
+    if (user.role !== 'ADMIN') {
+      const reg = await currentRegister(db);
+      conds.push(reg
+        ? sql`(a.status IN ('OPEN','PARTIALLY_PAID','PAID','PENDING') OR a.opened_at >= ${reg.openedAt} OR a.closed_at >= ${reg.openedAt})`
+        : sql`a.status IN ('OPEN','PARTIALLY_PAID','PAID','PENDING')`);
+    }
     if (q.status) {
-      const list = q.status.split(',').filter((s) => ['OPEN', 'PARTIALLY_PAID', 'PENDING', 'PAID', 'CLOSED', 'CANCELLED'].includes(s));
+      const list = q.status.split(',').filter((s) => ['OPEN', 'PARTIALLY_PAID', 'PENDING', 'PAID', 'CLOSED', 'CANCELLED', 'MERGED'].includes(s));
       if (list.length) conds.push(sql`a.status IN (${sql.join(list.map((s) => sql`${s}`), sql`, `)})`);
     }
     if (q.date) conds.push(sql`(a.opened_at AT TIME ZONE 'America/Sao_Paulo')::date = ${q.date}::date`);
     if (q.search) {
       const n = Number(q.search.replace('#', ''));
       if (Number.isInteger(n) && n > 0) conds.push(sql`a.number = ${n}`);
-      else conds.push(sql`(a.customer_name ILIKE ${'%' + q.search + '%'} OR a.note ILIKE ${'%' + q.search + '%'} OR a.contact ILIKE ${'%' + q.search + '%'})`);
+      else conds.push(sql`(unaccent_lower(coalesce(a.customer_name,'')) LIKE unaccent_lower(${'%' + q.search + '%'})
+        OR unaccent_lower(coalesce(a.note,'')) LIKE unaccent_lower(${'%' + q.search + '%'})
+        OR unaccent_lower(coalesce(a.contact,'')) LIKE unaccent_lower(${'%' + q.search + '%'}))`);
     }
     return listAccountsWithTotals(db, sql.join(conds, sql` AND `), 300);
   });
@@ -95,82 +192,153 @@ export async function accountRoutes(app: FastifyInstance) {
 
   app.get('/api/accounts/:id', ops, async (req) => {
     const { id } = parse(idParam, req.params);
+    await scoped(me(req), id);
     return accountDetail(db, id);
+  });
+
+  // Sugestão de clientes (cadastro leve) com alerta de pendência
+  app.get('/api/customers/suggest', ops, async (req) => {
+    const { q } = parse(z.object({ q: z.string().trim().min(2).max(60) }), req.query);
+    const like = '%' + q + '%';
+    const rows = await db.execute(sql`
+      SELECT c.id, c.name, c.contact, c.phone,
+        COALESCE(p.pending, 0)::int AS "pendingCents", p.since AS "pendingSince", COALESCE(p.n,0)::int AS "pendingCount"
+      FROM customers c
+      LEFT JOIN LATERAL (
+        SELECT SUM(
+          COALESCE((SELECT SUM(oi.unit_price_cents*oi.quantity) FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.account_id=a.id AND oi.status='ACTIVE'),0)
+          - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE account_id=a.id),0)
+          - COALESCE((SELECT SUM(amount_cents) FROM payments WHERE account_id=a.id AND reversed_at IS NULL),0)) AS pending,
+          MIN(a.pending_at) AS since, COUNT(*) AS n
+        FROM accounts a WHERE a.customer_id = c.id AND a.status = 'PENDING'
+      ) p ON TRUE
+      WHERE unaccent_lower(c.name) LIKE unaccent_lower(${like}) OR unaccent_lower(coalesce(c.contact,'')) LIKE unaccent_lower(${like})
+         OR coalesce(c.phone,'') LIKE ${like}
+      ORDER BY p.pending DESC NULLS LAST, c.name LIMIT 8`);
+    return rows.rows;
   });
 
   // Nova conta (opcionalmente já com o primeiro pedido)
   app.post('/api/accounts', ops, async (req) => {
     const b = parse(z.object({
-      customerName: optText(80), note: optText(200), items: itemsSchema.default([]), orderNote: optText(200),
+      customerName: optText(80), note: optText(200), contact: optText(120), phone: optText(30), tableLabel: optText(20),
+      customerId: z.number().int().positive().nullable().optional(),
+      items: itemsSchema.default([]), orderNote: optText(200), consumptionType: consumptionSchema,
+      stockDecisions: stockDecisionsSchema,
     }), req.body);
     const user = me(req);
-    const result = await db.transaction(async (tx) => {
-      const reg = await requireOpenRegister(tx);
+    const result = await idempotent(req, 'accounts.create', () => db.transaction(async (tx) => {
+      const reg = await requireTakingOrders(tx);
+      const customerId = b.customerId ?? await upsertCustomer(tx, b.customerName, b.contact, b.phone);
       const number = await nextNumber(tx, 'account');
       const [acc] = await tx.insert(accounts).values({
-        number, customerName: b.customerName, note: b.note, cashRegisterId: reg.id, openedBy: user.id,
+        number, customerName: b.customerName, note: b.note, contact: b.contact, phone: b.phone, tableLabel: b.tableLabel,
+        customerId, cashRegisterId: reg.id, openedBy: user.id,
       }).returning();
       await audit(tx, { userId: user.id, action: 'account.create', entityType: 'account', entityId: acc.id, message: `${user.name} abriu a ${label(acc)}.` });
       let order = null;
       if (b.items.length) {
-        const r = await insertOrder(tx, { accountId: acc.id, items: b.items, note: b.orderNote, userId: user.id, origin: 'CAIXA', cashRegisterId: reg.id });
+        const r = await insertOrder(tx, {
+          accountId: acc.id, items: b.items, note: b.orderNote, userId: user.id, origin: 'CAIXA', cashRegisterId: reg.id,
+          consumptionType: b.consumptionType, stockDecisions: b.stockDecisions,
+        });
         order = r.order;
         await audit(tx, {
           userId: user.id, action: 'order.create', entityType: 'order', entityId: order.id,
-          message: `${user.name} lançou o pedido #${order.number} na ${label(acc)} — ${r.itemCount} item(ns), ${brl(r.totalCents)}${order.goesToKitchen ? ', enviado para a cozinha' : ' (balcão)'}.`,
+          message: `${user.name} lançou o pedido #${order.number} na ${label(acc)} — ${r.itemCount} item(ns), ${brl(r.totalCents)}${order.consumptionType === 'VIAGEM' ? ', PARA VIAGEM' : ''}${order.goesToKitchen ? ', enviado para a cozinha' : ' (balcão)'}.`,
         });
         await recomputeStatus(tx, acc.id);
       }
-      return { acc, order };
-    });
-    if (result.order?.goesToKitchen) notify.kitchenNewOrder({ orderNumber: result.order.number, accountNumber: result.acc.number, sequence: 1 });
-    notify.ordersChanged(); notify.accountsChanged(result.acc.id);
-    return { id: result.acc.id, number: result.acc.number, orderNumber: result.order?.number ?? null };
+      return {
+        id: acc.id, number: acc.number, orderNumber: order?.number ?? null, orderId: order?.id ?? null,
+        goesToKitchen: order?.goesToKitchen ?? false, expectedReadyAt: order?.expectedReadyAt ?? null,
+      };
+    }));
+    if (result.goesToKitchen) notify.kitchenNewOrder({ orderNumber: result.orderNumber, accountNumber: result.number, sequence: 1 });
+    notify.ordersChanged(); notify.accountsChanged(result.id); notify.menuChanged();
+    return result;
   });
 
   app.patch('/api/accounts/:id', ops, async (req) => {
     const { id } = parse(idParam, req.params);
-    const b = parse(z.object({ customerName: optText(80), note: optText(200), contact: optText(120) }), req.body);
+    const b = parse(z.object({
+      customerName: optText(80), note: optText(200), contact: optText(120), phone: optText(30), tableLabel: optText(20),
+    }), req.body);
     const user = me(req);
     await db.transaction(async (tx) => {
       const acc = await getAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
       const set: Partial<typeof accounts.$inferInsert> = {};
-      if (b.customerName !== undefined) set.customerName = b.customerName;
-      if (b.note !== undefined) set.note = b.note;
-      if (b.contact !== undefined) set.contact = b.contact;
-      if (acc.status === 'PENDING' && (!(set.customerName ?? acc.customerName) || !(set.contact ?? acc.contact))) {
+      for (const k of ['customerName', 'note', 'contact', 'phone', 'tableLabel'] as const) if (b[k] !== undefined) set[k] = b[k];
+      const nextName = set.customerName !== undefined ? set.customerName : acc.customerName;
+      const nextContact = set.contact !== undefined ? set.contact : acc.contact;
+      const nextPhone = set.phone !== undefined ? set.phone : acc.phone;
+      if (acc.status === 'PENDING' && (!nextName || (!nextContact && !nextPhone))) {
         throw bad('Conta pendente precisa de nome e casa/telefone.');
       }
+      const cid = await upsertCustomer(tx, nextName, nextContact, nextPhone);
+      if (cid) set.customerId = cid;
       await tx.update(accounts).set(set).where(eq(accounts.id, id));
-      await audit(tx, { userId: user.id, action: 'account.update', entityType: 'account', entityId: id, message: `${user.name} alterou a identificação da ${label(acc)}.`, data: { before: { customerName: acc.customerName, note: acc.note, contact: acc.contact }, after: set } });
+      await audit(tx, {
+        userId: user.id, action: 'account.update', entityType: 'account', entityId: id,
+        message: `${user.name} alterou a identificação da ${label(acc)}${nextName !== acc.customerName ? ` → cliente "${nextName ?? 'sem nome'}"` : ''}.`,
+        data: { before: { customerName: acc.customerName, note: acc.note, contact: acc.contact, phone: acc.phone, tableLabel: acc.tableLabel }, after: set },
+      });
     });
-    notify.accountsChanged(id);
+    notify.accountsChanged(id); notify.ordersChanged();
     return { ok: true };
   });
 
-  // Novo pedido / complemento na mesma conta
+  // Novo pedido / complemento na mesma conta (a cozinha recebe só este lote)
   app.post('/api/accounts/:id/orders', ops, async (req) => {
     const { id } = parse(idParam, req.params);
-    const b = parse(z.object({ items: itemsSchema.min(1, 'adicione ao menos um produto'), note: optText(200) }), req.body);
+    const b = parse(z.object({
+      items: itemsSchema.min(1, 'adicione ao menos um produto'), note: optText(200),
+      consumptionType: consumptionSchema, stockDecisions: stockDecisionsSchema,
+    }), req.body);
     const user = me(req);
-    const r = await db.transaction(async (tx) => {
+    const r = await idempotent(req, 'orders.create', () => db.transaction(async (tx) => {
       const acc = await getAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
       if (acc.status === 'PENDING') throw conflict('Conta pendente não recebe novos pedidos. Abra uma nova conta.');
-      const reg = await requireOpenRegister(tx);
-      const r = await insertOrder(tx, { accountId: id, items: b.items, note: b.note, userId: user.id, origin: 'CAIXA', cashRegisterId: reg.id });
+      const reg = await requireTakingOrders(tx);
+      const r = await insertOrder(tx, {
+        accountId: id, items: b.items, note: b.note, userId: user.id, origin: 'CAIXA', cashRegisterId: reg.id,
+        consumptionType: b.consumptionType, stockDecisions: b.stockDecisions,
+      });
       const kind = r.order.sequence > 1 ? 'complemento' : 'pedido';
       await audit(tx, {
         userId: user.id, action: 'order.create', entityType: 'order', entityId: r.order.id,
-        message: `${user.name} lançou ${kind} #${r.order.number} na ${label(acc)} — ${r.itemCount} item(ns), ${brl(r.totalCents)}${r.order.goesToKitchen ? ', enviado para a cozinha' : ' (balcão)'}.`,
+        message: `${user.name} lançou ${kind} #${r.order.number} na ${label(acc)} — ${r.itemCount} item(ns), ${brl(r.totalCents)}${r.order.consumptionType === 'VIAGEM' ? ', PARA VIAGEM' : ''}${r.order.goesToKitchen ? ', enviado para a cozinha (somente estes itens)' : ' (balcão)'}.`,
       });
       await recomputeStatus(tx, id);
-      return { acc, order: r.order };
+      return {
+        orderId: r.order.id, orderNumber: r.order.number, accountNumber: acc.number, sequence: r.order.sequence,
+        goesToKitchen: r.order.goesToKitchen, expectedReadyAt: r.order.expectedReadyAt,
+      };
+    }));
+    if (r.goesToKitchen) notify.kitchenNewOrder({ orderNumber: r.orderNumber, accountNumber: r.accountNumber, sequence: r.sequence });
+    notify.ordersChanged(); notify.accountsChanged(id); notify.menuChanged();
+    return r;
+  });
+
+  // Alterar tipo de consumo (até ficar pronto)
+  app.patch('/api/orders/:id/consumption', ops, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const { consumptionType } = parse(z.object({ consumptionType: z.enum(['LOCAL', 'VIAGEM']) }), req.body);
+    const user = me(req);
+    await db.transaction(async (tx) => {
+      const { o, acc } = await orderWithAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
+      if (['READY', 'DELIVERED', 'CANCELLED'].includes(o.status)) throw conflict('O tipo de consumo só pode mudar antes de o pedido ficar pronto.');
+      if (o.consumptionType === consumptionType) return;
+      await tx.update(orders).set({ consumptionType }).where(eq(orders.id, id));
+      await audit(tx, { userId: user.id, action: 'order.consumption', entityType: 'order', entityId: id, message: `${user.name} alterou o pedido #${o.number} para ${consumptionType === 'VIAGEM' ? 'PARA VIAGEM' : 'COMER NO LOCAL'}.` });
     });
-    if (r.order.goesToKitchen) notify.kitchenNewOrder({ orderNumber: r.order.number, accountNumber: r.acc.number, sequence: r.order.sequence });
-    notify.ordersChanged(); notify.accountsChanged(id);
-    return { orderId: r.order.id, orderNumber: r.order.number };
+    notify.ordersChanged();
+    return { ok: true };
   });
 
   // Pagamentos (uma ou várias formas de uma vez)
@@ -185,8 +353,9 @@ export async function accountRoutes(app: FastifyInstance) {
       close: z.boolean().default(false),
     }), req.body);
     const user = me(req);
-    const out = await db.transaction(async (tx) => {
+    const out = await idempotent(req, 'payments.create', () => db.transaction(async (tx) => {
       const acc = await getAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
       const reg = await requireOpenRegister(tx);
       const t = await accountTotals(tx, id);
@@ -219,9 +388,9 @@ export async function accountRoutes(app: FastifyInstance) {
         await audit(tx, { userId: user.id, action: 'account.close', entityType: 'account', entityId: id, message: `${user.name} encerrou a ${label(acc)} (total ${brl(t.total)}).` });
         status = 'CLOSED';
       }
-      return { status, balance: newBalance };
-    });
-    notify.accountsChanged(id); notify.registerChanged();
+      return { status, balance: newBalance, paid: t.paid + sum, total: t.total };
+    }));
+    notify.accountsChanged(id); notify.registerChanged(); notify.ordersChanged();
     return out;
   });
 
@@ -231,15 +400,19 @@ export async function accountRoutes(app: FastifyInstance) {
     const user = me(req);
     await db.transaction(async (tx) => {
       const acc = await getAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
       const t = await accountTotals(tx, id);
       if (b.amountCents > t.balance) throw bad(`O desconto não pode ser maior que o saldo em aberto (${brl(t.balance)}).`);
       const reg = await currentRegister(tx);
       const kind = user.role === 'ADMIN' ? 'DISCOUNT' : 'ADJUSTMENT';
-      await tx.insert(discounts).values({ accountId: id, kind, amountCents: b.amountCents, reason: b.reason, userId: user.id, cashRegisterId: reg?.id ?? null });
+      await tx.insert(discounts).values({
+        accountId: id, kind, amountCents: b.amountCents, reason: b.reason, userId: user.id, cashRegisterId: reg?.id ?? null,
+        totalBeforeCents: t.total, totalAfterCents: t.total - b.amountCents,
+      });
       await audit(tx, {
         userId: user.id, action: 'discount.create', entityType: 'account', entityId: id,
-        message: `${user.name} concedeu ${kind === 'DISCOUNT' ? 'desconto' : 'ajuste'} de ${brl(b.amountCents)} na ${label(acc)}. Motivo: ${b.reason}`,
+        message: `${user.name} concedeu ${kind === 'DISCOUNT' ? 'desconto' : 'ajuste'} de ${brl(b.amountCents)} na ${label(acc)} (total ${brl(t.total)} → ${brl(t.total - b.amountCents)}). Motivo: ${b.reason}`,
       });
       await recomputeStatus(tx, id);
     });
@@ -258,11 +431,13 @@ export async function accountRoutes(app: FastifyInstance) {
     const user = me(req);
     await db.transaction(async (tx) => {
       const acc = await getAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       if (!['OPEN', 'PARTIALLY_PAID'].includes(acc.status)) throw conflict('Só contas abertas com saldo podem virar pendentes.');
       const t = await accountTotals(tx, id);
       if (t.balance <= 0) throw conflict('Esta conta não tem saldo em aberto.');
+      const customerId = await upsertCustomer(tx, b.customerName, b.contact, acc.phone);
       await tx.update(accounts).set({
-        status: 'PENDING', customerName: b.customerName, contact: b.contact, note: b.note ?? acc.note,
+        status: 'PENDING', customerName: b.customerName, contact: b.contact, note: b.note ?? acc.note, customerId,
         pendingAt: new Date(), pendingBy: user.id,
       }).where(eq(accounts.id, id));
       await audit(tx, {
@@ -279,6 +454,7 @@ export async function accountRoutes(app: FastifyInstance) {
     const user = me(req);
     await db.transaction(async (tx) => {
       const acc = await getAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
       const t = await accountTotals(tx, id);
       if (t.total <= 0) throw conflict('Conta sem valor. Se nada foi consumido, cancele a conta.');
@@ -299,7 +475,7 @@ export async function accountRoutes(app: FastifyInstance) {
       if (!['CLOSED', 'PENDING'].includes(acc.status)) throw conflict('Só contas encerradas ou pendentes podem ser reabertas.');
       await tx.update(accounts).set({ status: 'OPEN', closedAt: null, closedBy: null }).where(eq(accounts.id, id));
       await recomputeStatus(tx, id);
-      await audit(tx, { userId: user.id, action: 'account.reopen', entityType: 'account', entityId: id, message: `${user.name} reabriu a ${label(acc)} (estava ${acc.status === 'CLOSED' ? 'ENCERRADA' : 'PENDENTE'}). Motivo: ${reason}` });
+      await audit(tx, { userId: user.id, action: 'account.reopen', entityType: 'account', entityId: id, message: `${user.name} reabriu a ${label(acc)} (estava ${ACCOUNT_STATUS_PT[acc.status]}). Motivo: ${reason}` });
     });
     notify.accountsChanged(id);
     return { ok: true };
@@ -307,19 +483,25 @@ export async function accountRoutes(app: FastifyInstance) {
 
   app.post('/api/accounts/:id/cancel', ops, async (req) => {
     const { id } = parse(idParam, req.params);
-    const { reason } = parse(z.object({ reason: reasonSchema }), req.body);
+    const { reason, returnStock } = parse(z.object({ reason: reasonSchema, returnStock: z.boolean().default(true) }), req.body);
     const user = me(req);
     await db.transaction(async (tx) => {
       const acc = await getAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
       const t = await accountTotals(tx, id);
       if (t.paid > 0) throw conflict('Esta conta já tem pagamentos. Peça ao administrador para estornar antes de cancelar.');
       const ords = await tx.select().from(orders).where(eq(orders.accountId, id));
       const reg = await currentRegister(tx);
       let lost = false;
+      let stockBack = false;
       for (const o of ords) {
         if (o.status === 'CANCELLED') continue;
         if (['IN_PREPARATION', 'READY', 'DELIVERED'].includes(o.status)) lost = true;
+        const items = await tx.select().from(orderItems).where(and(eq(orderItems.orderId, o.id), eq(orderItems.status, 'ACTIVE')));
+        for (const it of items) {
+          if (returnStock) stockBack = (await returnStockForItem(tx, it.id, it.quantity, user.id, `Cancelamento da conta #${acc.number}`)) || stockBack;
+        }
         await tx.update(orderItems).set({ status: 'CANCELLED' }).where(and(eq(orderItems.orderId, o.id), eq(orderItems.status, 'ACTIVE')));
         await tx.update(orders).set({ status: 'CANCELLED' }).where(eq(orders.id, o.id));
       }
@@ -327,60 +509,78 @@ export async function accountRoutes(app: FastifyInstance) {
       await tx.insert(cancellations).values({
         target: 'ACCOUNT', accountId: id, description: `Conta #${acc.number}`, amountCents: t.subtotal,
         wasInPreparation: lost, reason, userId: user.id, cashRegisterId: reg?.id ?? null,
+        statusBefore: acc.status, statusAfter: 'CANCELLED', stockReturned: stockBack,
       });
-      await audit(tx, { userId: user.id, action: 'account.cancel', entityType: 'account', entityId: id, message: `${user.name} cancelou a ${label(acc)} (${brl(t.subtotal)}). Motivo: ${reason}` });
+      await audit(tx, { userId: user.id, action: 'account.cancel', entityType: 'account', entityId: id, message: `${user.name} cancelou a ${label(acc)} (${brl(t.subtotal)}; ${ACCOUNT_STATUS_PT[acc.status]} → Cancelada). Motivo: ${reason}` });
     });
     notify.kitchenCancelled({ message: 'Uma conta foi cancelada' });
-    notify.ordersChanged(); notify.accountsChanged(id); notify.registerChanged();
+    notify.ordersChanged(); notify.accountsChanged(id); notify.registerChanged(); notify.menuChanged();
     return { ok: true };
   });
 
-  // ----- Cancelamentos de item e de pedido -----
+  // ----- Cancelamentos de item (total ou parcial) e de pedido -----
   const LOSS_STATUSES = ['IN_PREPARATION', 'READY', 'DELIVERED'];
 
   app.post('/api/order-items/:id/cancel', ops, async (req) => {
     const { id } = parse(idParam, req.params);
-    const { reason } = parse(z.object({ reason: reasonSchema }), req.body);
+    const b = parse(z.object({
+      reason: reasonSchema, quantity: z.number().int().positive().optional(), returnStock: z.boolean().default(true),
+    }), req.body);
     const user = me(req);
     const info = await db.transaction(async (tx) => {
       const [it] = await tx.select().from(orderItems).where(eq(orderItems.id, id)).for('update');
       if (!it) throw notFound('Item não encontrado.');
       if (it.status === 'CANCELLED') throw conflict('Item já cancelado.');
       const { o, acc } = await orderWithAccount(tx, it.orderId, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
-      const value = it.unitPriceCents * it.quantity;
+      const qty = Math.min(b.quantity ?? it.quantity, it.quantity);
+      const partial = qty < it.quantity;
+      const value = it.unitPriceCents * qty;
       const t = await accountTotals(tx, acc.id);
       if (t.total - value < t.paid) throw conflict('O valor já pago ficaria maior que o total. Peça ao administrador para estornar um pagamento antes.');
       const lost = LOSS_STATUSES.includes(o.status);
+      // o item vendido é imutável: cancela a linha inteira e, se parcial, relança o restante com o mesmo preço congelado
       await tx.update(orderItems).set({ status: 'CANCELLED' }).where(eq(orderItems.id, id));
+      let stockBack = false;
+      if (b.returnStock) {
+        stockBack = await returnStockForItem(tx, id, qty, user.id, `Cancelamento de ${qty}× ${it.productName} (pedido #${o.number})`);
+      }
+      if (partial) {
+        const { id: _omit, status: _s, ...rest } = it;
+        const [keep] = await tx.insert(orderItems).values({ ...rest, quantity: it.quantity - qty, status: 'ACTIVE' }).returning({ id: orderItems.id });
+        await linkStockToItem(tx, id, keep.id, user.id);
+      }
       const reg = await currentRegister(tx);
       await tx.insert(cancellations).values({
-        target: 'ITEM', accountId: acc.id, orderId: o.id, orderItemId: id,
-        description: `${it.quantity}× ${it.productName}`, amountCents: value, wasInPreparation: lost,
-        reason, userId: user.id, cashRegisterId: reg?.id ?? null,
+        target: 'ITEM', accountId: acc.id, orderId: o.id, orderItemId: id, quantity: qty,
+        description: partial ? `${qty}× ${it.productName} (de ${it.quantity})` : `${qty}× ${it.productName}`,
+        amountCents: value, wasInPreparation: lost, reason: b.reason, userId: user.id, cashRegisterId: reg?.id ?? null,
+        statusBefore: ORDER_STATUS_PT[o.status], statusAfter: partial ? `${it.quantity - qty} mantido(s)` : 'Cancelado', stockReturned: stockBack,
       });
       const [{ n }] = (await tx.execute(sql`SELECT COUNT(*)::int AS n FROM order_items WHERE order_id = ${o.id} AND status = 'ACTIVE'`)).rows as { n: number }[];
       if (Number(n) === 0) await tx.update(orders).set({ status: 'CANCELLED' }).where(eq(orders.id, o.id));
       await audit(tx, {
         userId: user.id, action: 'item.cancel', entityType: 'order', entityId: o.id,
-        message: `${user.name} cancelou ${it.quantity}× ${it.productName} (${brl(value)}) do pedido #${o.number}, ${label(acc)}${lost ? ' — PERDA (já em preparo/entregue)' : ''}. Motivo: ${reason}`,
+        message: `${user.name} cancelou ${qty}× ${it.productName}${partial ? ` (de ${it.quantity})` : ''} (${brl(value)}) do pedido #${o.number}, ${label(acc)}${lost ? ' — PERDA (já em preparo/entregue)' : ''}${stockBack ? ' — estoque devolvido' : ''}. Motivo: ${b.reason}`,
       });
       await recomputeStatus(tx, acc.id);
-      return { o, acc, it };
+      return { o, acc, it, qty };
     });
     if (info.it.goesToKitchen && ['CONFIRMED', 'IN_PREPARATION', 'READY'].includes(info.o.status)) {
-      notify.kitchenCancelled({ message: `Pedido #${info.o.number}: ${info.it.quantity}× ${info.it.productName} CANCELADO` });
+      notify.kitchenCancelled({ message: `Pedido #${info.o.number}: ${info.qty}× ${info.it.productName} CANCELADO` });
     }
-    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged();
+    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged(); notify.menuChanged();
     return { ok: true };
   });
 
   app.post('/api/orders/:id/cancel', ops, async (req) => {
     const { id } = parse(idParam, req.params);
-    const { reason } = parse(z.object({ reason: reasonSchema }), req.body);
+    const { reason, returnStock } = parse(z.object({ reason: reasonSchema, returnStock: z.boolean().default(true) }), req.body);
     const user = me(req);
     const info = await db.transaction(async (tx) => {
       const { o, acc } = await orderWithAccount(tx, id, true);
+      await assertAccountInScope(tx, user, acc);
       assertAccountEditable(acc.status);
       if (o.status === 'CANCELLED') throw conflict('Pedido já cancelado.');
       const items = await tx.select().from(orderItems).where(and(eq(orderItems.orderId, id), eq(orderItems.status, 'ACTIVE')));
@@ -389,6 +589,10 @@ export async function accountRoutes(app: FastifyInstance) {
       const counted = o.status === 'AWAITING_CONFIRMATION' ? 0 : value;
       if (t.total - counted < t.paid) throw conflict('O valor já pago ficaria maior que o total. Peça ao administrador para estornar um pagamento antes.');
       const lost = LOSS_STATUSES.includes(o.status);
+      let stockBack = false;
+      if (returnStock && o.status !== 'AWAITING_CONFIRMATION') {
+        for (const it of items) stockBack = (await returnStockForItem(tx, it.id, it.quantity, user.id, `Cancelamento do pedido #${o.number}`)) || stockBack;
+      }
       await tx.update(orderItems).set({ status: 'CANCELLED' }).where(and(eq(orderItems.orderId, id), eq(orderItems.status, 'ACTIVE')));
       await tx.update(orders).set({ status: 'CANCELLED' }).where(eq(orders.id, id));
       const reg = await currentRegister(tx);
@@ -396,12 +600,12 @@ export async function accountRoutes(app: FastifyInstance) {
         target: 'ORDER', accountId: acc.id, orderId: id,
         description: `Pedido #${o.number}: ${items.map((i) => `${i.quantity}× ${i.productName}`).join(', ')}`,
         amountCents: counted, wasInPreparation: lost, reason, userId: user.id, cashRegisterId: reg?.id ?? null,
+        statusBefore: ORDER_STATUS_PT[o.status], statusAfter: 'Cancelado', stockReturned: stockBack,
       });
       await audit(tx, {
         userId: user.id, action: 'order.cancel', entityType: 'order', entityId: id,
-        message: `${user.name} cancelou o pedido #${o.number} (${brl(value)}) da ${label(acc)}${lost ? ' — PERDA (já em preparo/entregue)' : ''}. Motivo: ${reason}`,
+        message: `${user.name} cancelou o pedido #${o.number} (${brl(value)}; ${ORDER_STATUS_PT[o.status]} → Cancelado) da ${label(acc)}${lost ? ' — PERDA (já em preparo/entregue)' : ''}${stockBack ? ' — estoque devolvido' : ''}. Motivo: ${reason}`,
       });
-      // Pedido de QR recusado numa conta sem mais nada: a conta também é cancelada
       if (o.origin === 'QR_CODE' && o.status === 'AWAITING_CONFIRMATION') {
         const [{ n }] = (await tx.execute(sql`SELECT COUNT(*)::int AS n FROM orders WHERE account_id = ${acc.id} AND status <> 'CANCELLED'`)).rows as { n: number }[];
         if (Number(n) === 0 && t.paid === 0) {
@@ -414,8 +618,14 @@ export async function accountRoutes(app: FastifyInstance) {
     if (info.o.goesToKitchen && ['CONFIRMED', 'IN_PREPARATION', 'READY'].includes(info.o.status)) {
       notify.kitchenCancelled({ message: `Pedido #${info.o.number} CANCELADO` });
     }
-    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged();
+    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged(); notify.menuChanged();
     return { ok: true };
+  });
+
+  // Consulta se o item consumiu estoque (para mostrar "devolver ao estoque")
+  app.get('/api/order-items/:id/stock', ops, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return { hasStock: await itemHasStock(db, id) };
   });
 
   app.post('/api/orders/:id/deliver', ops, async (req) => {
@@ -445,18 +655,22 @@ export async function accountRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // Confirmação de pedido vindo do QR Code
+  // Confirmação de pedido vindo do QR Code (baixa o estoque neste momento)
   app.post('/api/orders/:id/confirm', ops, async (req) => {
     const { id } = parse(idParam, req.params);
+    const { stockDecisions } = parse(z.object({ stockDecisions: stockDecisionsSchema }), req.body ?? {});
     const user = me(req);
     const r = await db.transaction(async (tx) => {
       const { o, acc } = await orderWithAccount(tx, id, true);
       if (o.status !== 'AWAITING_CONFIRMATION') throw conflict('Este pedido não está aguardando confirmação.');
-      const reg = await requireOpenRegister(tx);
+      const reg = await requireTakingOrders(tx);
       const now = new Date();
       const status = o.goesToKitchen ? 'CONFIRMED' : 'DELIVERED';
+      const { needs, itemIds } = await stockNeedsForOrder(tx, id);
+      await applyStockForSale(tx, needs, itemIds, stockDecisions, user.id, `Pedido #${o.number} (QR Code)`);
       await tx.update(orders).set({
         status, confirmedAt: now, confirmedBy: user.id, cashRegisterId: reg.id,
+        expectedReadyAt: o.goesToKitchen && o.expectedMinutes ? await estimateReady(tx, o.expectedMinutes) : null,
         deliveredAt: status === 'DELIVERED' ? now : null, deliveredBy: status === 'DELIVERED' ? user.id : null,
       }).where(eq(orders.id, id));
       if (!acc.cashRegisterId) await tx.update(accounts).set({ cashRegisterId: reg.id, openedBy: user.id }).where(eq(accounts.id, acc.id));
@@ -465,7 +679,73 @@ export async function accountRoutes(app: FastifyInstance) {
       return { o, acc };
     });
     if (r.o.goesToKitchen) notify.kitchenNewOrder({ orderNumber: r.o.number, accountNumber: r.acc.number, sequence: r.o.sequence });
-    notify.ordersChanged(); notify.accountsChanged(r.acc.id);
+    notify.ordersChanged(); notify.accountsChanged(r.acc.id); notify.menuChanged();
+    return { ok: true };
+  });
+
+  // Juntar contas: a conta de origem passa para a de destino (sem contar como cancelamento)
+  app.post('/api/accounts/:id/merge', ops, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const { targetId } = parse(z.object({ targetId: z.number().int().positive() }), req.body);
+    if (targetId === id) throw bad('Escolha outra conta de destino.');
+    const user = me(req);
+    const r = await db.transaction(async (tx) => {
+      const [first, second] = id < targetId ? [id, targetId] : [targetId, id];
+      await getAccount(tx, first, true); await getAccount(tx, second, true); // trava na mesma ordem
+      const src = await getAccount(tx, id);
+      const dst = await getAccount(tx, targetId);
+      for (const a of [src, dst]) {
+        await assertAccountInScope(tx, user, a);
+        if (!['OPEN', 'PARTIALLY_PAID', 'PAID'].includes(a.status)) throw conflict(`A conta #${a.number} não está aberta.`);
+      }
+      const t = await accountTotals(tx, id);
+      await tx.update(orders).set({ accountId: targetId }).where(eq(orders.accountId, id));
+      await tx.update(payments).set({ accountId: targetId }).where(eq(payments.accountId, id));
+      await tx.update(discounts).set({ accountId: targetId }).where(eq(discounts.accountId, id));
+      await tx.update(cancellations).set({ accountId: targetId }).where(eq(cancellations.accountId, id));
+      await tx.execute(sql`UPDATE orders SET sequence = s.rn FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY created_at, id) AS rn FROM orders WHERE account_id = ${targetId}) s WHERE orders.id = s.id`);
+      await tx.update(accounts).set({ status: 'MERGED', mergedInto: targetId, closedAt: new Date(), closedBy: user.id }).where(eq(accounts.id, id));
+      if (!dst.customerName && src.customerName) await tx.update(accounts).set({ customerName: src.customerName }).where(eq(accounts.id, targetId));
+      await recomputeStatus(tx, targetId);
+      await audit(tx, {
+        userId: user.id, action: 'account.merge', entityType: 'account', entityId: targetId,
+        message: `${user.name} juntou a ${label(src)} (${brl(t.total)}, pago ${brl(t.paid)}) à ${label(dst)}.`,
+      });
+      return { src, dst };
+    });
+    notify.accountsChanged(id); notify.accountsChanged(targetId); notify.ordersChanged();
+    return { ok: true, targetId: r.dst.id };
+  });
+
+  // Transferir um pedido para outra conta
+  app.post('/api/orders/:id/transfer', ops, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const { targetAccountId } = parse(z.object({ targetAccountId: z.number().int().positive() }), req.body);
+    const user = me(req);
+    const r = await db.transaction(async (tx) => {
+      const [o0] = await tx.select().from(orders).where(eq(orders.id, id));
+      if (!o0) throw notFound('Pedido não encontrado.');
+      if (o0.accountId === targetAccountId) throw bad('O pedido já está nesta conta.');
+      const [first, second] = o0.accountId < targetAccountId ? [o0.accountId, targetAccountId] : [targetAccountId, o0.accountId];
+      await getAccount(tx, first, true); await getAccount(tx, second, true);
+      const { o, acc: src } = await orderWithAccount(tx, id, true);
+      const dst = await getAccount(tx, targetAccountId);
+      for (const a of [src, dst]) {
+        await assertAccountInScope(tx, user, a);
+        if (!['OPEN', 'PARTIALLY_PAID', 'PAID'].includes(a.status)) throw conflict(`A conta #${a.number} não está aberta.`);
+      }
+      if (o.status === 'CANCELLED' || o.status === 'AWAITING_CONFIRMATION') throw conflict('Este pedido não pode ser transferido.');
+      const value = Number(((await tx.execute(sql`SELECT COALESCE(SUM(unit_price_cents*quantity),0)::int AS v FROM order_items WHERE order_id = ${id} AND status='ACTIVE'`)).rows[0] as { v: number }).v);
+      const t = await accountTotals(tx, src.id);
+      if (t.total - value < t.paid) throw conflict('A conta de origem já recebeu mais do que ficaria de total. Estorne um pagamento antes (administrador).');
+      const [{ n }] = (await tx.execute(sql`SELECT COUNT(*)::int AS n FROM orders WHERE account_id = ${dst.id}`)).rows as { n: number }[];
+      await tx.update(orders).set({ accountId: dst.id, sequence: Number(n) + 1 }).where(eq(orders.id, id));
+      await recomputeStatus(tx, src.id);
+      await recomputeStatus(tx, dst.id);
+      await audit(tx, { userId: user.id, action: 'order.transfer', entityType: 'order', entityId: id, message: `${user.name} transferiu o pedido #${o.number} (${brl(value)}) da ${label(src)} para a ${label(dst)}.` });
+      return { src, dst };
+    });
+    notify.accountsChanged(r.src.id); notify.accountsChanged(r.dst.id); notify.ordersChanged();
     return { ok: true };
   });
 

@@ -35,12 +35,13 @@ export const ACCOUNT_STATUS: Record<string, { label: string; tone: string }> = {
   PAID: { label: 'Paga', tone: 'ok' },
   CLOSED: { label: 'Encerrada', tone: 'muted' },
   CANCELLED: { label: 'Cancelada', tone: 'muted' },
+  MERGED: { label: 'Juntada', tone: 'muted' },
 };
 
 export const ORDER_STATUS: Record<string, { label: string; tone: string }> = {
   NEW: { label: 'Novo', tone: 'info' },
   AWAITING_CONFIRMATION: { label: 'Aguardando confirmação', tone: 'warn' },
-  CONFIRMED: { label: 'Na cozinha', tone: 'info' },
+  CONFIRMED: { label: 'Novo (cozinha)', tone: 'info' },
   IN_PREPARATION: { label: 'Em preparo', tone: 'warn' },
   READY: { label: 'Pronto', tone: 'ok' },
   DELIVERED: { label: 'Entregue', tone: 'muted' },
@@ -48,3 +49,21 @@ export const ORDER_STATUS: Record<string, { label: string; tone: string }> = {
 };
 
 export const ROLE_LABEL: Record<string, string> = { ADMIN: 'Administrador', CAIXA: 'Caixa', COZINHA: 'Cozinha' };
+
+export const SITUATION: Record<string, { label: string; tone: string }> = {
+  PAGO: { label: 'Pago', tone: 'ok' }, PARCIAL: { label: 'Parcial', tone: 'warn' }, PENDENTE: { label: 'A pagar', tone: 'danger' }, '—': { label: '—', tone: 'muted' },
+};
+export const ORIGIN_LABEL: Record<string, string> = { CAIXA: 'Caixa', QR_CODE: 'QR Code', DELIVERY: 'Delivery', WHATSAPP: 'WhatsApp' };
+export const CONSUMPTION_LABEL: Record<string, string> = { LOCAL: 'Comer no local', VIAGEM: 'Para viagem' };
+export const MOVEMENT_LABEL: Record<string, string> = {
+  ENTRADA: 'Entrada', AJUSTE: 'Ajuste (contagem)', VENDA: 'Venda', CANCELAMENTO: 'Devolução (cancelamento)', DIVERGENCIA: 'Venda sem estoque (divergência)',
+};
+
+/** normaliza para busca sem acento: "Guaraná" → "guarana" */
+export const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+export const pct = (x: number | null | undefined, digits = 0) => x == null || !isFinite(x) ? '—' : `${(x * 100).toFixed(digits).replace('.', ',')}%`;
+export const signed = (c: number) => `${c > 0 ? '+' : c < 0 ? '−' : ''}${brl(Math.abs(c))}`;
+export const addDaysISO = (d: string, n: number) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+export const fmtDay = (d: string) => d.split('-').reverse().join('/');
+export const minutesUntil = (d: string | null | undefined, now = Date.now()) => d ? Math.round((new Date(d).getTime() - now) / 60000) : null;

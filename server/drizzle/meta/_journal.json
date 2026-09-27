@@ -15,6 +15,20 @@
       "when": 1790479121990,
       "tag": "0001_protecoes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790516238085,
+      "tag": "0002_r2",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790516253259,
+      "tag": "0003_r2_protecoes",
+      "breakpoints": true
     }
   ]
 }

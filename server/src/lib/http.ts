@@ -2,7 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z, type ZodType } from 'zod';
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code?: string, public details?: unknown) { super(message); }
 }
 export const bad = (msg: string) => new HttpError(400, msg);
 export const notFound = (msg = 'Registro não encontrado.') => new HttpError(404, msg);
@@ -31,7 +31,7 @@ export const reasonSchema = z.string().trim().min(3, 'Informe o motivo (mínimo 
 export const centsSchema = z.number().int().positive().max(100_000_00);
 
 export function errorHandler(err: unknown, _req: FastifyRequest, reply: FastifyReply) {
-  if (err instanceof HttpError) return reply.status(err.status).send({ error: err.message });
+  if (err instanceof HttpError) return reply.status(err.status).send({ error: err.message, code: err.code, details: err.details });
   const e = err as { statusCode?: number; message?: string; code?: string };
   if (e?.statusCode && e.statusCode < 500) return reply.status(e.statusCode).send({ error: e.message ?? 'Requisição inválida.' });
   // Violações das travas do banco viram mensagem legível

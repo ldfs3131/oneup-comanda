@@ -2,18 +2,18 @@ import { z } from 'zod';
 import { and, asc, eq, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { roles, users, restaurantSettings } from '../db/schema.js';
-import { COOKIE, checkLoginRate, checkPassword, clearLoginRate, createSession, destroySession, hashPassword, me, requireRole, } from '../auth.js';
+import { COOKIE, checkLoginRate, checkPassword, clearLoginRate, createSession, destroySession, hashPassword, me, requireRole, userFromToken, } from '../auth.js';
 import { bad, conflict, idParam, notFound, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { config } from '../config.js';
 export async function authRoutes(app) {
     app.get('/api/meta', async () => {
         const [s] = await db.select().from(restaurantSettings).limit(1);
-        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Happy Alpha' };
+        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Happy Alpha', tagline: s?.tagline ?? 'Gourmet R2', version: config.version };
     });
     app.post('/api/auth/login', async (req, reply) => {
         checkLoginRate(req.ip);
-        const body = parse(z.object({ username: z.string().trim().toLowerCase().min(1), password: z.string().min(1) }), req.body);
+        const body = parse(z.object({ username: z.string().trim().toLowerCase().min(1), password: z.string().min(1), remember: z.boolean().default(true) }), req.body);
         const rows = await db.select({ u: users, role: roles.code }).from(users)
             .innerJoin(roles, eq(roles.id, users.roleId)).where(eq(users.username, body.username)).limit(1);
         const row = rows[0];
@@ -21,14 +21,17 @@ export async function authRoutes(app) {
             throw bad('Usuário ou senha incorretos.');
         }
         clearLoginRate(req.ip);
-        const s = await createSession(row.u.id);
+        const s = await createSession(row.u.id, body.remember);
         reply.setCookie(COOKIE, s.token, {
-            path: '/', httpOnly: true, sameSite: 'lax', secure: false, expires: s.expiresAt,
+            path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, ...(body.remember ? { expires: s.expiresAt } : {}),
         });
         await audit(db, { userId: row.u.id, action: 'auth.login', entityType: 'user', entityId: row.u.id, message: `${row.u.name} entrou no sistema.` });
         return { user: { id: row.u.id, name: row.u.name, username: row.u.username, role: row.role } };
     });
     app.post('/api/auth/logout', async (req, reply) => {
+        const u = await userFromToken(req.cookies[COOKIE]);
+        if (u)
+            await audit(db, { userId: u.id, action: 'auth.logout', entityType: 'user', entityId: u.id, message: `${u.name} saiu do sistema.` });
         await destroySession(req.cookies[COOKIE]);
         reply.clearCookie(COOKIE, { path: '/' });
         return { ok: true };

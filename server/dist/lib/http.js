@@ -1,9 +1,13 @@
 import { z } from 'zod';
 export class HttpError extends Error {
     status;
-    constructor(status, message) {
+    code;
+    details;
+    constructor(status, message, code, details) {
         super(message);
         this.status = status;
+        this.code = code;
+        this.details = details;
     }
 }
 export const bad = (msg) => new HttpError(400, msg);
@@ -29,7 +33,7 @@ export const reasonSchema = z.string().trim().min(3, 'Informe o motivo (mínimo 
 export const centsSchema = z.number().int().positive().max(100_000_00);
 export function errorHandler(err, _req, reply) {
     if (err instanceof HttpError)
-        return reply.status(err.status).send({ error: err.message });
+        return reply.status(err.status).send({ error: err.message, code: err.code, details: err.details });
     const e = err;
     if (e?.statusCode && e.statusCode < 500)
         return reply.status(e.statusCode).send({ error: e.message ?? 'Requisição inválida.' });

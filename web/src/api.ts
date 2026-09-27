@@ -1,32 +1,49 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public code?: string, public details?: any) { super(message); }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+const TIMEOUT_MS = 15_000;
+const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+async function request<T>(method: string, path: string, body?: unknown, opts: { idem?: string | boolean } = {}): Promise<T> {
   let res: Response;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const headers: Record<string, string> = {};
+  if (body !== undefined && !(body instanceof FormData)) headers['content-type'] = 'application/json';
+  if (opts.idem) headers['idempotency-key'] = typeof opts.idem === 'string' ? opts.idem : newKey();
   try {
     res = await fetch(path, {
-      method,
-      credentials: 'same-origin',
-      headers: body !== undefined && !(body instanceof FormData) ? { 'content-type': 'application/json' } : undefined,
+      method, credentials: 'same-origin', headers, signal: ctrl.signal,
       body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
     });
-  } catch {
-    throw new ApiError(0, 'Sem conexão com o servidor. Verifique o Wi-Fi e o computador do caixa.');
+  } catch (e) {
+    clearTimeout(timer);
+    if ((e as Error).name === 'AbortError') throw new ApiError(0, 'O servidor demorou para responder. Confira se a operação entrou antes de repetir (a tela vai atualizar sozinha).', 'TIMEOUT');
+    throw new ApiError(0, 'Sem conexão com o servidor. Verifique o Wi-Fi e o computador do caixa.', 'OFFLINE');
   }
+  clearTimeout(timer);
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/login')) window.dispatchEvent(new Event('ha:unauthorized'));
-    throw new ApiError(res.status, data?.error ?? 'Erro inesperado.');
+    throw new ApiError(res.status, data?.error ?? 'Erro inesperado.', data?.code, data?.details);
   }
   return data as T;
 }
 
 export const api = {
   get: <T,>(p: string) => request<T>('GET', p),
-  post: <T,>(p: string, b: unknown = {}) => request<T>('POST', p, b),
+  post: <T,>(p: string, b: unknown = {}, idem?: string | boolean) => request<T>('POST', p, b, { idem }),
   put: <T,>(p: string, b: unknown) => request<T>('PUT', p, b),
   patch: <T,>(p: string, b: unknown) => request<T>('PATCH', p, b),
+  del: <T,>(p: string) => request<T>('DELETE', p),
   upload: <T,>(p: string, fd: FormData) => request<T>('POST', p, fd),
+  newKey,
+};
+
+export const qs = (o: Record<string, string | number | null | undefined | boolean>) => {
+  const s = Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '' && v !== false).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&');
+  return s ? `?${s}` : '';
 };

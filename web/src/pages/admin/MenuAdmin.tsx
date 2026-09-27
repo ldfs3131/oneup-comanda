@@ -5,7 +5,7 @@ import { brl, centsToInput } from '../../format';
 import type { Category, Product } from '../../types';
 import { Badge, Modal, MoneyInput, Spinner, Toggle, useAction } from '../../components/ui';
 
-type GroupDraft = { id?: number; name: string; required: boolean; multiple: boolean; options: { id?: number; name: string; priceDeltaCents: number | null; available: boolean }[] };
+type GroupDraft = { id?: number; name: string; required: boolean; multiple: boolean; options: { id?: number; name: string; priceDeltaCents: number | null; available: boolean; stockProductId: number | null }[] };
 
 export default function MenuAdmin() {
   const qc = useQueryClient();
@@ -46,6 +46,7 @@ export default function MenuAdmin() {
               <button className="btn sm ghost" disabled={ci === 0} onClick={() => act(() => api.patch(`/api/categories/${c.id}`, { move: 'up' }))}>↑</button>
               <button className="btn sm ghost" disabled={ci === arr.length - 1} onClick={() => act(() => api.patch(`/api/categories/${c.id}`, { move: 'down' }))}>↓</button>
               <button className="btn sm" onClick={() => setCatModal(c)}>Editar</button>
+              {!c.products.length && <button className="btn sm danger" onClick={() => act(() => api.del(`/api/categories/${c.id}`), 'Categoria excluída.')}>Excluir</button>}
               <button className="btn sm" onClick={() => { setNewCatFor(c.id); setEditing('new'); }}>＋ Produto</button>
             </div>
           </div>
@@ -60,10 +61,16 @@ export default function MenuAdmin() {
                   {p.needsReview && <Badge tone="warn">revisar</Badge>}
                   {!p.sendsToKitchen && <Badge tone="info">balcão</Badge>}
                   {p.groups.length > 0 && <Badge>{p.groups.map((g) => g.name).join(', ')}</Badge>}
+                  {p.trackStock && <Badge tone={p.stockQty <= 0 ? 'danger' : p.stockQty <= (p.lowStockAt ?? 3) ? 'warn' : 'ok'}>estoque {p.stockQty}</Badge>}
+                  {p.active && p.costCents == null && <Badge tone="warn">sem custo</Badge>}
+                  {p.sendsToKitchen && p.prepMinutes != null && <span className="small faint">⏱ {p.prepMinutes} min</span>}
                 </div>
                 {p.description && <div className="small muted ellipsis">{p.description}</div>}
               </div>
-              <div className="num" style={{ fontWeight: 800, minWidth: 90, textAlign: 'right' }}>{brl(p.priceCents)}</div>
+              <div className="num right" style={{ minWidth: 100 }}>
+                <div style={{ fontWeight: 800 }}>{brl(p.priceCents)}</div>
+                {p.costCents != null && <div className="small faint">custo {brl(p.costCents)} · {p.priceCents ? Math.round(((p.priceCents - p.costCents) / p.priceCents) * 100) : 0}%</div>}
+              </div>
               <div className="col center hide-mobile" style={{ gap: 2, alignItems: 'center' }}>
                 <Toggle on={p.available} label="Disponível" onChange={(v) => act(() => api.patch(`/api/products/${p.id}/availability`, { available: v }))} />
                 <span className="small faint">{p.available ? 'tem' : 'acabou'}</span>
@@ -121,21 +128,29 @@ function ProductModal({ product, categories, defaultCategoryId, onClose, onSaved
   const [available, setAvailable] = useState(product?.available ?? true);
   const [active, setActive] = useState(product?.active ?? true);
   const [needsReview, setNeedsReview] = useState(product?.needsReview ?? false);
+  const [cost, setCost] = useState<number | null>(product?.costCents ?? null);
+  const [applyPast, setApplyPast] = useState(false);
+  const [trackStock, setTrackStock] = useState(product?.trackStock ?? false);
+  const [lowStockAt, setLowStockAt] = useState(String(product?.lowStockAt ?? 3));
+  const [prep, setPrep] = useState(String(product?.prepMinutes ?? 15));
+  const stockProducts = categories.flatMap((c) => c.products).filter((x) => x.trackStock && x.id !== product?.id);
   const [groups, setGroups] = useState<GroupDraft[]>(product?.groups.map((g) => ({
     id: g.id, name: g.name, required: g.required, multiple: g.multiple,
-    options: g.options.map((o) => ({ id: o.id, name: o.name, priceDeltaCents: o.priceDeltaCents, available: o.available })),
+    options: g.options.map((o) => ({ id: o.id, name: o.name, priceDeltaCents: o.priceDeltaCents, available: o.available, stockProductId: o.stockProductId ?? null })),
   })) ?? []);
   const [file, setFile] = useState<File | null>(null);
   const { busy, run } = useAction();
 
-  const valid = name.trim().length >= 2 && price != null && groups.every((g) => g.name.trim() && g.options.length && g.options.every((o) => o.name.trim() && o.priceDeltaCents != null));
+  const prepN = Number(prep), lowN = Number(lowStockAt);
+  const valid = name.trim().length >= 2 && price != null && (!active || price > 0) && prepN >= 1 && prepN <= 240 && lowN >= 0 && groups.every((g) => g.name.trim() && g.options.length && g.options.every((o) => o.name.trim() && o.priceDeltaCents != null));
   const upd = (i: number, g: Partial<GroupDraft>) => setGroups((gs) => gs.map((x, j) => (j === i ? { ...x, ...g } : x)));
 
   const save = async () => {
     const body = {
       categoryId, name: name.trim(), description: description.trim(), priceCents: price, sendsToKitchen: kitchen,
-      available, active, needsReview, reviewNote: null,
-      groups: groups.map((g) => ({ id: g.id, name: g.name.trim(), required: g.required, multiple: g.multiple, options: g.options.map((o) => ({ id: o.id, name: o.name.trim(), priceDeltaCents: o.priceDeltaCents ?? 0, available: o.available })) })),
+      available, active, needsReview, reviewNote: product?.reviewNote ?? null,
+      costCents: cost, applyCostToPast: applyPast, trackStock, lowStockAt: lowN, prepMinutes: prepN,
+      groups: groups.map((g) => ({ id: g.id, name: g.name.trim(), required: g.required, multiple: g.multiple, options: g.options.map((o) => ({ id: o.id, name: o.name.trim(), priceDeltaCents: o.priceDeltaCents ?? 0, available: o.available, stockProductId: o.stockProductId })) })),
     };
     const ok = await run(async () => {
       const saved = product ? (await api.put(`/api/products/${product.id}`, body), { id: product.id }) : await api.post<{ id: number }>('/api/products', body);
@@ -172,6 +187,19 @@ function ProductModal({ product, categories, defaultCategoryId, onClose, onSaved
           </label>
         </div>
         <label className="field"><span>Descrição</span><input className="input" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="Opcional" /></label>
+        <div className="grid-3">
+          <label className="field"><span>Custo unitário (para o financeiro)</span><MoneyInput value={cost} onChange={setCost} placeholder="não informado" /></label>
+          <label className="field"><span>Tempo padrão de preparo (min)</span><input className="input" inputMode="numeric" value={prep} onChange={(e) => setPrep(e.target.value.replace(/\D/g, '').slice(0, 3))} /></label>
+          <div className="field"><span>Margem</span><div className="input" style={{ display: 'flex', alignItems: 'center' }}>{price && cost != null ? `${brl(price - cost)} (${Math.round(((price - cost) / price) * 100)}%)` : '—'}</div></div>
+        </div>
+        {cost != null && cost !== (product?.costCents ?? null) && (
+          <label className="check small"><input type="checkbox" checked={applyPast} onChange={(e) => setApplyPast(e.target.checked)} />Usar este custo também nas vendas antigas que estão sem custo (vendas com custo já registrado não mudam)</label>
+        )}
+        <div className="card tight row wrap" style={{ background: 'var(--surface-2)', gap: 16 }}>
+          <label className="check"><input type="checkbox" checked={trackStock} onChange={(e) => setTrackStock(e.target.checked)} />Controlar estoque (por unidade)</label>
+          {trackStock && <label className="row small">Avisar quando tiver <input className="input" style={{ width: 80 }} inputMode="numeric" value={lowStockAt} onChange={(e) => setLowStockAt(e.target.value.replace(/\D/g, '').slice(0, 5))} /> ou menos</label>}
+          {trackStock && product && <span className="small muted">Atual: {product.stockQty} — entradas e contagens em Caixa › Estoque.</span>}
+        </div>
         <div className="row wrap" style={{ gap: 20 }}>
           <label className="check"><input type="checkbox" checked={kitchen} onChange={(e) => setKitchen(e.target.checked)} />Vai para a cozinha</label>
           <label className="check"><input type="checkbox" checked={available} onChange={(e) => setAvailable(e.target.checked)} />Disponível (tem)</label>
@@ -185,7 +213,7 @@ function ProductModal({ product, categories, defaultCategoryId, onClose, onSaved
             <b>Opções do produto</b>
             <div className="small muted">Ex.: “Acompanhamento: com farofa +R$ 5,00” ou “Espeto (obrigatório): escolha o sabor”.</div>
           </div>
-          <button className="btn sm" onClick={() => setGroups([...groups, { name: '', required: false, multiple: false, options: [{ name: '', priceDeltaCents: 0, available: true }] }])}>＋ Grupo de opções</button>
+          <button className="btn sm" onClick={() => setGroups([...groups, { name: '', required: false, multiple: false, options: [{ name: '', priceDeltaCents: 0, available: true, stockProductId: null }] }])}>＋ Grupo de opções</button>
         </div>
         {groups.map((g, gi) => (
           <div key={gi} className="card tight col" style={{ background: 'var(--surface-2)' }}>
@@ -199,10 +227,14 @@ function ProductModal({ product, categories, defaultCategoryId, onClose, onSaved
               <div key={oi} className="row">
                 <input className="input grow" placeholder="Opção" value={o.name} onChange={(e) => upd(gi, { options: g.options.map((x, k) => (k === oi ? { ...x, name: e.target.value } : x)) })} />
                 <div style={{ width: 160 }}><MoneyInput value={o.priceDeltaCents} placeholder="+ 0,00" onChange={(v) => upd(gi, { options: g.options.map((x, k) => (k === oi ? { ...x, priceDeltaCents: v } : x)) })} /></div>
+                <select className="input" style={{ width: 170 }} title="Baixa 1 unidade deste produto do estoque" value={o.stockProductId ?? ''} onChange={(e) => upd(gi, { options: g.options.map((x, k) => (k === oi ? { ...x, stockProductId: Number(e.target.value) || null } : x)) })}>
+                  <option value="">sem baixa de estoque</option>
+                  {stockProducts.map((sp) => <option key={sp.id} value={sp.id}>baixa: {sp.name}</option>)}
+                </select>
                 <button className="btn sm ghost icon" title="Remover opção" disabled={g.options.length === 1} onClick={() => upd(gi, { options: g.options.filter((_, k) => k !== oi) })}>✕</button>
               </div>
             ))}
-            <button className="btn sm ghost" style={{ alignSelf: 'flex-start' }} onClick={() => upd(gi, { options: [...g.options, { name: '', priceDeltaCents: 0, available: true }] })}>＋ Opção</button>
+            <button className="btn sm ghost" style={{ alignSelf: 'flex-start' }} onClick={() => upd(gi, { options: [...g.options, { name: '', priceDeltaCents: 0, available: true, stockProductId: null }] })}>＋ Opção</button>
           </div>
         ))}
         {product && price != null && price !== product.priceCents && (

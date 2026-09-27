@@ -1,0 +1,43 @@
+import { z } from 'zod';
+export class HttpError extends Error {
+    status;
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
+}
+export const bad = (msg) => new HttpError(400, msg);
+export const notFound = (msg = 'Registro não encontrado.') => new HttpError(404, msg);
+export const forbidden = (msg = 'Sem permissão para esta ação.') => new HttpError(403, msg);
+export const conflict = (msg) => new HttpError(409, msg);
+export function parse(schema, data) {
+    const r = schema.safeParse(data);
+    if (!r.success) {
+        const first = r.error.issues[0];
+        const path = first?.path?.join('.') ?? '';
+        throw bad(`Dados inválidos${path ? ` (${path})` : ''}: ${first?.message ?? 'verifique os campos'}`);
+    }
+    return r.data;
+}
+export const idParam = z.object({ id: z.coerce.number().int().positive() });
+export function brl(cents) {
+    const neg = cents < 0;
+    const [int, dec] = (Math.abs(cents) / 100).toFixed(2).split('.');
+    return `${neg ? '-' : ''}R$ ${int.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${dec}`;
+}
+export const reasonSchema = z.string().trim().min(3, 'Informe o motivo (mínimo 3 letras)').max(300);
+export const centsSchema = z.number().int().positive().max(100_000_00);
+export function errorHandler(err, _req, reply) {
+    if (err instanceof HttpError)
+        return reply.status(err.status).send({ error: err.message });
+    const e = err;
+    if (e?.statusCode && e.statusCode < 500)
+        return reply.status(e.statusCode).send({ error: e.message ?? 'Requisição inválida.' });
+    // Violações das travas do banco viram mensagem legível
+    if (e?.code === 'P0001')
+        return reply.status(409).send({ error: e.message });
+    if (e?.code === '23505')
+        return reply.status(409).send({ error: 'Registro duplicado.' });
+    _req.log.error(err);
+    return reply.status(500).send({ error: 'Erro interno. Tente novamente.' });
+}

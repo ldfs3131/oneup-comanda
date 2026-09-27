@@ -19,6 +19,14 @@ $major = [int]((& node -v).TrimStart('v').Split('.')[0])
 if ($major -lt 20) { Falha "Node.js $(& node -v) é antigo. Instale o Node.js 22 LTS." }
 Ok "Node.js $(& node -v)"
 
+# Portas usadas pelo Happy Alpha (3010 sistema, 3011 demonstração)
+$jaInstalado = Get-ScheduledTask -TaskName 'Happy Alpha' -ErrorAction SilentlyContinue
+foreach ($porta in @(3010, 3011)) {
+  $uso = Get-NetTCPConnection -LocalPort $porta -State Listen -ErrorAction SilentlyContinue
+  if ($uso -and -not $jaInstalado) { Falha "A porta $porta já está em uso por outro programa. Libere a porta ou peça ajuste no instalador." }
+}
+Ok 'Portas 3010 e 3011 livres'
+
 # ---------- 2. PostgreSQL ----------
 Titulo 'Verificando o PostgreSQL'
 $pgDir = Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory -ErrorAction SilentlyContinue |
@@ -46,7 +54,7 @@ if (-not (Test-Path '.env')) {
   $bk = Read-Host 'Pastas de backup separadas por ";" (Enter = C:\HappyAlpha-Backups)'
   if (-not $bk) { $bk = 'C:\HappyAlpha-Backups' }
   @(
-    'PORT=3000',
+    'PORT=3010',
     "DATABASE_URL=postgres://postgres:$enc@localhost:5432/happy_alpha",
     "BACKUP_DIRS=$bk",
     "PG_DUMP_PATH=$(Join-Path $pgBin 'pg_dump.exe')"
@@ -54,7 +62,7 @@ if (-not (Test-Path '.env')) {
   Ok 'Arquivo .env criado'
 } else { Ok 'Arquivo .env já existe (mantido)' }
 if (-not (Test-Path '.env.demo')) {
-  @('DEMO_MODE=true', 'PORT=3001', "DATABASE_URL=postgres://postgres:$enc@localhost:5432/happy_alpha_demo") | Set-Content -Encoding ASCII '.env.demo'
+  @('DEMO_MODE=true', 'PORT=3011', "DATABASE_URL=postgres://postgres:$enc@localhost:5432/happy_alpha_demo") | Set-Content -Encoding ASCII '.env.demo'
   Ok 'Arquivo .env.demo criado'
 }
 
@@ -78,30 +86,36 @@ if ($LASTEXITCODE -ne 0) { Write-Host '  Aviso: demonstração não foi preparad
 # ---------- 6. Firewall ----------
 Titulo 'Liberando o acesso do tablet (firewall)'
 Get-NetFirewallRule -DisplayName 'Happy Alpha' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-New-NetFirewallRule -DisplayName 'Happy Alpha' -Direction Inbound -Protocol TCP -LocalPort 3000,3001 -Action Allow -Profile Any | Out-Null
-Ok 'Portas 3000 (sistema) e 3001 (demonstração) liberadas na rede local'
+New-NetFirewallRule -DisplayName 'Happy Alpha' -Direction Inbound -Protocol TCP -LocalPort 3010,3011 -Action Allow -Profile Any | Out-Null
+Ok 'Portas 3010 (sistema) e 3011 (demonstração) liberadas na rede local'
 
 # ---------- 7. Iniciar com o Windows ----------
-Titulo 'Configurando para iniciar junto com o Windows'
-$action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$root\windows\servidor.cmd`"" -WorkingDirectory $root
-$trigger = New-ScheduledTaskTrigger -AtStartup
-$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName 'Happy Alpha' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-Start-ScheduledTask -TaskName 'Happy Alpha'
-Ok 'Tarefa "Happy Alpha" criada e iniciada'
+Titulo 'Inicialização automática'
+$auto = Read-Host 'Iniciar o Happy Alpha sozinho sempre que o computador ligar? (S/n) — use S no computador do caixa'
+if ($auto -notmatch '^[nN]') {
+  $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$root\windows\servidor.cmd`"" -WorkingDirectory $root
+  $trigger = New-ScheduledTaskTrigger -AtStartup
+  $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+  $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+  Register-ScheduledTask -TaskName 'Happy Alpha' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+  Start-ScheduledTask -TaskName 'Happy Alpha'
+  Ok 'Tarefa "Happy Alpha" criada e iniciada'
+} else {
+  Start-Process -FilePath 'cmd.exe' -ArgumentList "/k `"$root\windows\servidor.cmd`"" -WorkingDirectory $root
+  Ok 'Sistema iniciado numa janela separada (feche a janela para parar). Para abrir de novo: windows\servidor.cmd'
+}
 
 Write-Host '  Aguardando o sistema subir...'
 $up = $false
 for ($i = 0; $i -lt 30; $i++) {
-  try { Invoke-WebRequest -UseBasicParsing 'http://localhost:3000/api/health' -TimeoutSec 2 | Out-Null; $up = $true; break } catch { Start-Sleep 2 }
+  try { Invoke-WebRequest -UseBasicParsing 'http://localhost:3010/api/health' -TimeoutSec 2 | Out-Null; $up = $true; break } catch { Start-Sleep 2 }
 }
 if (-not $up) { Falha 'O sistema não respondeu. Veja o arquivo data\servidor.log.' }
 
 $ips = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | Select-Object -ExpandProperty IPAddress
 Write-Host "`n  PRONTO! O Happy Alpha está rodando.`n" -ForegroundColor Green
-Write-Host '  Neste computador:  http://localhost:3000'
-foreach ($ip in $ips) { Write-Host "  Tablet da cozinha: http://$($ip):3000/cozinha" }
+Write-Host '  Neste computador:  http://localhost:3010'
+foreach ($ip in $ips) { Write-Host "  Tablet da cozinha: http://$($ip):3010/cozinha" }
 Write-Host "`n  Anote o IP acima e reserve-o no roteador (veja docs\INSTALACAO.md).`n"
-Start-Process 'http://localhost:3000'
+Start-Process 'http://localhost:3010'
 Read-Host 'Pressione Enter para fechar'

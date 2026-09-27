@@ -32,7 +32,7 @@ Copie a pasta `happy-alpha` para **`C:\HappyAlpha`** (fica mais fácil achar dep
    - senha do `postgres` (do passo 1);
    - pastas de backup (ex.: `C:\HappyAlpha-Backups;G:\Meu Drive\HappyAlpha-Backups`);
    - nome e **senha do administrador**, senha do **caixa** e senha da **cozinha**.
-4. No final ele abre o sistema no navegador e mostra o endereço para o tablet, algo como `http://192.168.0.10:3000/cozinha`. **Anote esse endereço.**
+4. No final ele abre o sistema no navegador e mostra o endereço para o tablet, algo como `http://192.168.0.10:3010/cozinha`. **Anote esse endereço.**
 
 O instalador já deixa tudo pronto:
 
@@ -53,7 +53,7 @@ Se o IP do computador mudar, o tablet para de encontrar o sistema. Para evitar i
 ## Passo 6 — Preparar o tablet da cozinha
 
 1. Instale o **Fully Kiosk Browser** (gratuito, Play Store).
-2. Em "Start URL", coloque o endereço anotado: `http://IP-DO-CAIXA:3000/cozinha`.
+2. Em "Start URL", coloque o endereço anotado: `http://IP-DO-CAIXA:3010/cozinha`.
 3. Nas configurações do Fully Kiosk, ative **"Keep Screen On"** (tela sempre ligada).
 4. Deixe o tablet **sempre no carregador**.
 5. Entre com o login `cozinha` e toque em **TOCAR PARA INICIAR O TURNO**. Isso libera o som dos pedidos novos.
@@ -62,7 +62,7 @@ Sem o Fully Kiosk também funciona pelo Chrome, mas a tela pode apagar sozinha.
 
 ## Passo 7 — Primeiro acesso do administrador
 
-1. No computador do caixa, abra `http://localhost:3000` e entre como administrador.
+1. No computador do caixa, abra `http://localhost:3010` e entre como administrador.
 2. Vá em **Cardápio → Bebidas** e cadastre as bebidas e o chope **com os preços corretos** (a lista não veio com preços, então não foi cadastrada).
 3. Confira os outros preços.
 4. Em **Configurações**:
@@ -72,7 +72,7 @@ Sem o Fully Kiosk também funciona pelo Chrome, mas a tela pode apagar sozinha.
 
 ## Treinamento (modo demonstração)
 
-Dê dois cliques em **`windows\DEMONSTRACAO.bat`**. Abre um sistema de teste em `http://localhost:3001` com contas de exemplo e uma faixa amarela "MODO DEMONSTRAÇÃO". No tablet, use `http://IP-DO-CAIXA:3001/cozinha`.
+Dê dois cliques em **`windows\DEMONSTRACAO.bat`**. Abre um sistema de teste em `http://localhost:3011` com contas de exemplo e uma faixa amarela "MODO DEMONSTRAÇÃO". No tablet, use `http://IP-DO-CAIXA:3011/cozinha`.
 
 - Logins: `admin`, `caixa`, `cozinha` — senha `1234`.
 - Cada vez que abrir, os dados de teste são recriados.
@@ -113,5 +113,5 @@ Dê dois cliques em **`windows\DEMONSTRACAO.bat`**. Abre um sistema de teste em 
 | Faixa vermelha "Sem conexão" | Confira o Wi-Fi do tablet e se o computador do caixa está ligado. |
 | Tablet não abre o sistema | O IP do computador mudou: veja o IP novo (`ipconfig`) e reserve no roteador (passo 5). |
 | Alerta de "pronto" sem som | Clique na faixa "Toque aqui para ativar o som" no caixa. Na cozinha, toque em "Iniciar turno". Confira o volume. |
-| Sistema não abre em `localhost:3000` | Rode `windows\REINICIAR.bat`. Se continuar, veja `data\servidor.log`. |
+| Sistema não abre em `localhost:3010` | Rode `windows\REINICIAR.bat`. Se continuar, veja `data\servidor.log`. |
 | Backup falhou | Confira se o pendrive está conectado e se a pasta existe. O resultado aparece no Histórico. |

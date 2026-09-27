@@ -4,9 +4,9 @@ cd /d "%~dp0.."
 set ENV_FILE=%CD%\.env.demo
 echo Recriando os dados de demonstracao...
 node server\dist\scripts\demo.js
-start "" cmd /c "timeout /t 4 /nobreak >nul & start http://localhost:3001"
+start "" cmd /c "timeout /t 4 /nobreak >nul & start http://localhost:3011"
 echo.
-echo Demonstracao rodando em http://localhost:3001  (tablet: http://IP-DESTE-COMPUTADOR:3001/cozinha)
+echo Demonstracao rodando em http://localhost:3011  (tablet: http://IP-DESTE-COMPUTADOR:3011/cozinha)
 echo Logins: admin / caixa / cozinha - senha 1234
 echo Feche esta janela para encerrar a demonstracao.
 echo.

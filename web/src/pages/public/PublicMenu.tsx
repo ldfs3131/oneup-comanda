@@ -14,7 +14,8 @@ const waLink = (n: string) => `https://wa.me/${n.startsWith('55') ? n : `55${n}`
 
 export default function PublicMenu() {
   useEffect(() => { document.title = 'Happy Alpha — Cardápio'; }, []);
-  const { data, isLoading } = useQuery({ queryKey: ['public-menu'], queryFn: () => api.get<PMenu>('/api/public/menu'), refetchInterval: 60_000 });
+  // Estado ABERTO/FECHADO segue o botão do caixa; confere a cada 15 s e ao voltar para a aba
+  const { data, isLoading } = useQuery({ queryKey: ['public-menu'], queryFn: () => api.get<PMenu>('/api/public/menu'), refetchInterval: 15_000, refetchOnWindowFocus: true });
   const [cart, setCart] = useState<Line[]>([]);
   const [pick, setPick] = useState<PProduct | null>(null);
   const [checkout, setCheckout] = useState(false);
@@ -51,6 +52,19 @@ export default function PublicMenu() {
     </div>
   );
 
+  if (!data.isOpen) return (
+    <div className="pub">
+      <img src="/logo.png" alt="Happy Alpha" className="pub-logo" />
+      <div className="card center col gap-lg" style={{ margin: 16 }}>
+        <div style={{ fontSize: 48 }}>🌙</div>
+        <h2>Estabelecimento fechado</h2>
+        <p className="muted">No momento não estamos recebendo pedidos. Assim que abrirmos, o cardápio aparece aqui automaticamente.</p>
+        {cart.length > 0 && <p className="small muted">Seu pedido não enviado foi guardado nesta tela.</p>}
+        {data.whatsappNumber && <a className="btn block lg" href={waLink(data.whatsappNumber)} target="_blank" rel="noreferrer">💬 Falar com a gente no WhatsApp</a>}
+      </div>
+    </div>
+  );
+
   const add = (p: PProduct, optionIds: number[], quantity: number) => {
     const opts = p.groups.flatMap((g) => g.options).filter((o) => optionIds.includes(o.id));
     setCart((c) => [...c, { key: seq++, product: p, optionIds, labels: opts.map((o) => o.name), unit: p.priceCents + opts.reduce((s, o) => s + o.priceDeltaCents, 0), quantity }]);
@@ -66,7 +80,6 @@ export default function PublicMenu() {
         </div>
         <nav className="pub-cats">{data.categories!.map((c) => <a key={c.id} href={`#cat-${c.id}`}>{c.name}</a>)}</nav>
       </header>
-      {!data.isOpen && <div className="banner offline" style={{ position: 'static' }}>Estamos fechados no momento. Você pode ver o cardápio.</div>}
       <main className="pub-main">
         {data.categories!.map((c) => (
           <section key={c.id} id={`cat-${c.id}`}>

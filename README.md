@@ -14,6 +14,7 @@ A R2 evolui a V1.1 **no mesmo banco** (histórico contínuo). A V1.1 fica preser
 |---|---|
 | [docs/INSTALACAO.md](docs/INSTALACAO.md) | Instalar no Windows, atualizar da V1.1, tablet, QR/internet |
 | [docs/GUIA-RAPIDO.md](docs/GUIA-RAPIDO.md) | Treinamento da equipe (caixa, cozinha, admin) |
+| [docs/CARDAPIO-DIGITAL.md](docs/CARDAPIO-DIGITAL.md) | Cardápio online por link, ligado ao ABERTO/FECHADO do caixa |
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | Arquitetura, banco, fluxos |
 | [docs/PROMPT-FINAL-R2.md](docs/PROMPT-FINAL-R2.md) | Escopo fechado da R2 |
 
@@ -24,7 +25,7 @@ A R2 evolui a V1.1 **no mesmo banco** (histórico contínuo). A V1.1 fica preser
 | `/caixa` | Caixa: contas, pedidos do dia, a receber, estoque, “acabou?”, dia/caixa |
 | `/cozinha` | Tablet/TV da cozinha (modo TV e resumo de produção) |
 | `/admin` | Administrador: dashboard, insights, financeiro, pedidos, tempo de preparo, cardápio, auditoria |
-| `/cardapio` | Cliente (QR Code — pronto, desligado) |
+| `/cardapio` | Cliente: cardápio online e pedido direto ao caixa (segue ABERTO/FECHADO) |
 
 Portas padrão: **3010** (sistema), **3011** (demonstração), porta pública opcional (`PUBLIC_PORT`, ex. 3012). Nunca usa 3000/3001.
 

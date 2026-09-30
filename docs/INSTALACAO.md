@@ -32,7 +32,7 @@ Copie a pasta `happy-alpha` para **`C:\HappyAlpha`** (fica mais fácil achar dep
 2. Dê dois cliques em **`INSTALAR.bat`** e aceite a permissão de administrador.
 3. Responda o que ele perguntar:
    - senha do `postgres` (do passo 1);
-   - pastas de backup (ex.: `C:\HappyAlpha-Backups;G:\Meu Drive\HappyAlpha-Backups`);
+   - pasta de backup: aperte **Enter** para usar `C:\HappyAlpha-Backups` (recomendado; veja “Backups” para levar a cópia à nuvem);
    - nome e **senha do administrador**, senha do **caixa** e senha da **cozinha**.
 4. No final ele abre o sistema no navegador e mostra o endereço para o tablet, algo como `http://192.168.0.10:3010/cozinha`. **Anote esse endereço.**
 
@@ -88,7 +88,10 @@ Dê dois cliques em **`windows\DEMONSTRACAO.bat`**. Abre um sistema de teste em 
 
 - **Automático:** a cada **Encerrar o dia**, uma cópia vai para cada pasta configurada. As 30 mais recentes ficam guardadas.
 - **Manual:** botão em Configurações, ou `windows\BACKUP-AGORA.bat`.
-- **Dica:** uma pasta no Google Drive para computador (`G:\Meu Drive\...`) sobe a cópia para a nuvem sozinha quando houver internet.
+- **Cópia na nuvem (recomendado):** instale o **Google Drive para computador**, entre com a conta do restaurante e, em *Preferências → Meu computador → Adicionar pasta*, escolha `C:\HappyAlpha-Backups`. O Drive sobe cada backup sozinho quando houver internet.
+- **Não use `G:\Meu Drive\...` no `BACKUP_DIRS`:** o sistema roda como serviço do Windows e **não enxerga** a unidade G: do Google Drive (ela só existe na sessão do usuário). O backup falharia nessa pasta.
+- **Pendrive:** pode entrar no `BACKUP_DIRS` (ex.: `C:\HappyAlpha-Backups;E:\HappyAlpha-Backups`), mas precisa ficar sempre conectado; se ele sair, o painel mostra “O último backup falhou”. Alternativa: uma vez por semana, copie à mão a pasta `C:\HappyAlpha-Backups` para o pendrive.
+- **Aviso no painel:** o dashboard avisa quando o último backup falhou em **qualquer** pasta ou tem mais de 2 dias. Clique em **Fazer backup** para ver pasta por pasta o que deu certo.
 
 **Restaurar um backup** (só em caso de perda do computador):
 
@@ -158,6 +161,6 @@ Hoje o sistema roda no computador do caixa, na rede local — é o mais seguro e
 | Tablet não abre o sistema | O IP do computador mudou: veja o IP novo (`ipconfig`) e reserve no roteador (passo 5). |
 | Alerta de "pronto" sem som | Clique na faixa "Toque aqui para ativar o som" no caixa. Na cozinha, toque em "Iniciar turno". Confira o volume. |
 | Sistema não abre em `localhost:3010` | Rode `windows\REINICIAR.bat`. Se continuar, veja `data\servidor.log`. |
-| Backup falhou | Confira se o pendrive está conectado e se a pasta existe. O dashboard avisa quando o último backup falhou ou tem mais de 2 dias. |
+| Backup falhou | Em Configurações → **Fazer backup agora** veja qual pasta falhou. Pendrive: confira se está conectado. Pasta `G:\...`: troque por `C:\HappyAlpha-Backups` no `.env` e use a sincronização do Google Drive (seção Backups). Depois rode `REINICIAR.bat`. |
 | “Estoque insuficiente” toda hora | Faça a contagem geral em Caixa → Estoque. Use “+ Entrada” sempre que chegar mercadoria. |
 | Não consigo lançar pedido | O estabelecimento está **FECHADO** (botão no topo) ou o dia não foi aberto. |

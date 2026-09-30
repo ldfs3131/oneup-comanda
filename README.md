@@ -16,7 +16,6 @@ A R2 evolui a V1.1 **no mesmo banco** (histórico contínuo). A V1.1 fica preser
 | [docs/GUIA-RAPIDO.md](docs/GUIA-RAPIDO.md) | Treinamento da equipe (caixa, cozinha, admin) |
 | [docs/CARDAPIO-DIGITAL.md](docs/CARDAPIO-DIGITAL.md) | Cardápio online por link, ligado ao ABERTO/FECHADO do caixa |
 | [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | Arquitetura, banco, fluxos |
-| [docs/PROMPT-FINAL-R2.md](docs/PROMPT-FINAL-R2.md) | Escopo fechado da R2 |
 
 ## Telas
 
@@ -68,6 +67,7 @@ DATABASE_URL=postgres://.../happy_alpha_insights npm run test:insights
 - Valores sempre calculados no servidor, em centavos. O navegador só envia produto, quantidade e opções.
 - O item vendido congela nome, preço e custo do momento da venda — **o banco recusa** alterar depois.
 - **O banco recusa** apagar contas, pedidos, itens, pagamentos, descontos, cancelamentos, caixas, estoque, despesas e histórico.
+- **O banco recusa** editar pagamentos (só estorno), descontos, cancelamentos, despesas (só cancelamento), movimentos de estoque, custos, histórico e caixa já fechado, e recusa esvaziar tabelas (TRUNCATE).
 - Estoque nunca fica negativo (trava no banco); venda sem estoque só com decisão registrada (corrigir ou liberar com divergência).
 - Duplo clique / reenvio não duplica conta, pedido nem pagamento (chave de idempotência).
 - Reabertura: a cozinha recebe **só os itens novos**; os anteriores aparecem apenas como referência.

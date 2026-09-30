@@ -53,6 +53,12 @@ Titulo 'Configuração'
 if (-not (Test-Path '.env')) {
   $bk = Read-Host 'Pastas de backup separadas por ";" (Enter = C:\HappyAlpha-Backups)'
   if (-not $bk) { $bk = 'C:\HappyAlpha-Backups' }
+  if ($bk -match 'Meu Drive|My Drive|(^|;)\s*G:') {
+    Write-Host '  Atenção: o sistema roda como serviço do Windows e NÃO enxerga a unidade G: do Google Drive.' -ForegroundColor DarkYellow
+    Write-Host '  Use C:\HappyAlpha-Backups e configure o Google Drive para sincronizar essa pasta (docs\INSTALACAO.md).' -ForegroundColor DarkYellow
+    $bk2 = Read-Host 'Pastas de backup (Enter = C:\HappyAlpha-Backups)'
+    $bk = if ($bk2) { $bk2 } else { 'C:\HappyAlpha-Backups' }
+  }
   @(
     'PORT=3010',
     "DATABASE_URL=postgres://postgres:$enc@localhost:5432/happy_alpha",

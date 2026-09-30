@@ -17,7 +17,9 @@ const LEVELS = [
 
 export default function InsightsPage() {
   const { data: settings } = useSettings();
-  if (settings && !settings.insightsEnabled) return <Navigate to="/admin" replace />;
+  // Só decide depois de saber se está ligado: nada da página aparece (nem por um instante) quando desligado
+  if (!settings) return <Spinner />;
+  if (!settings.insightsEnabled) return <Navigate to="/admin" replace />;
   return <InsightsPageInner />;
 }
 

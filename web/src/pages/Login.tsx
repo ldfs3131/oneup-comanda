@@ -45,7 +45,7 @@ export default function Login() {
         <ul className="login-brand-points hide-mobile">
           <li>Pedidos do caixa direto na cozinha</li>
           <li>Conta por cliente, pagamento dividido e pendências</li>
-          <li>Estoque, financeiro e insights do dia</li>
+          <li>Estoque e financeiro do dia</li>
         </ul>
       </section>
       <section className="login-form-side">

@@ -37,6 +37,11 @@ const inRange = (col: string, r: { from: string; to: string }) =>
 
 export async function adminRoutes(app: FastifyInstance) {
   const admin = { preHandler: requireRole('ADMIN') };
+  // Insights: primeiro confere o perfil (Caixa/Cozinha continuam recebendo 403); com o recurso desligado, responde 404.
+  const insightsOn = async (_req: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => {
+    if (!config.insightsEnabled) return reply.code(404).send({ error: 'Recurso não disponível.' });
+  };
+  const insightsAdmin = { preHandler: [requireRole('ADMIN'), insightsOn] };
   const anyUser = { preHandler: requireRole() };
 
   // ---------- Dashboard por período ----------
@@ -128,17 +133,17 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---------- Insights ----------
-  app.get('/api/insights', admin, async () => computeInsights(db));
+  app.get('/api/insights', insightsAdmin, async () => computeInsights(db));
 
-  app.get('/api/excluded-days', admin, async () =>
+  app.get('/api/excluded-days', insightsAdmin, async () =>
     (await db.execute(sql`SELECT to_char(day,'YYYY-MM-DD') AS day, reason FROM excluded_days ORDER BY day DESC`)).rows);
-  app.post('/api/excluded-days', admin, async (req) => {
+  app.post('/api/excluded-days', insightsAdmin, async (req) => {
     const b = parse(z.object({ day: dateSchema, reason: reasonSchema }), req.body);
     await db.insert(excludedDays).values({ day: b.day, reason: b.reason, userId: me(req).id }).onConflictDoUpdate({ target: excludedDays.day, set: { reason: b.reason } });
     await audit(db, { userId: me(req).id, action: 'insights.exclude', message: `${me(req).name} marcou ${b.day.split('-').reverse().join('/')} como dia atípico (fora das comparações). Motivo: ${b.reason}` });
     return { ok: true };
   });
-  app.delete('/api/excluded-days/:day', admin, async (req) => {
+  app.delete('/api/excluded-days/:day', insightsAdmin, async (req) => {
     const { day } = parse(z.object({ day: dateSchema }), req.params);
     await db.delete(excludedDays).where(eq(excludedDays.day, day));
     await audit(db, { userId: me(req).id, action: 'insights.include', message: `${me(req).name} voltou a incluir ${day.split('-').reverse().join('/')} nas comparações.` });
@@ -188,7 +193,7 @@ export async function adminRoutes(app: FastifyInstance) {
       },
       delivery: { isOpen: d.isOpen },
       backupDirs: config.backupDirs, demoMode: config.demoMode, lanUrls: lanUrls(),
-      publicPort: config.publicPort, version: config.version,
+      publicPort: config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled,
     };
   });
 

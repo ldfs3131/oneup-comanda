@@ -79,6 +79,7 @@ export type Settings = {
   lanUrls: string[];
   publicPort: number | null;
   version: string;
+  insightsEnabled: boolean;
 };
 
 export type StockShortage = { productId: number; name: string; stock: number; requested: number };

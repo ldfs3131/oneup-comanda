@@ -1,9 +1,9 @@
 # HAPPY ALPHA GOURMET R2 — Sistema de pedidos
 
-Sistema web do restaurante Happy Alpha: contas, pedidos, cozinha em tempo real, pagamentos, caixa, estoque, despesas, financeiro, tempo de preparo e insights. Desenvolvido por **ONE UP**.
+Sistema web do restaurante Happy Alpha: contas, pedidos, cozinha em tempo real, pagamentos, caixa, estoque, despesas, financeiro, tempo de preparo. Desenvolvido por **ONE UP**.
 
 ```
-ABRIR O DIA → CONTA → PEDIDOS → COZINHA → PRONTO → PAGAMENTO → ENCERRAR O DIA → FINANCEIRO / INSIGHTS
+ABRIR O DIA → CONTA → PEDIDOS → COZINHA → PRONTO → PAGAMENTO → ENCERRAR O DIA → FINANCEIRO
 ```
 
 A R2 evolui a V1.1 **no mesmo banco** (histórico contínuo). A V1.1 fica preservada na tag git `v1.1`.
@@ -24,7 +24,7 @@ A R2 evolui a V1.1 **no mesmo banco** (histórico contínuo). A V1.1 fica preser
 |---|---|
 | `/caixa` | Caixa: contas, pedidos do dia, a receber, estoque, “acabou?”, dia/caixa |
 | `/cozinha` | Tablet/TV da cozinha (modo TV e resumo de produção) |
-| `/admin` | Administrador: dashboard, insights, financeiro, pedidos, tempo de preparo, cardápio, auditoria |
+| `/admin` | Administrador: dashboard, financeiro, pedidos, tempo de preparo, cardápio, auditoria |
 | `/cardapio` | Cliente: cardápio online e pedido direto ao caixa (segue ABERTO/FECHADO) |
 
 Portas padrão: **3010** (sistema), **3011** (demonstração), porta pública opcional (`PUBLIC_PORT`, ex. 3012). Nunca usa 3000/3001.
@@ -55,8 +55,8 @@ npm start                     # http://localhost:3010
 
 ```bash
 # cenário completo V1 + R2 (124 verificações), em banco de teste recém-configurado
-DATABASE_URL=postgres://.../happy_alpha_test node server/dist/scripts/setup.js --admin-pass=admin123 --caixa-pass=caixa123 --cozinha-pass=cozinha123
-DATABASE_URL=postgres://.../happy_alpha_test PORT=3100 npm start &
+DATABASE_URL=postgres://.../happy_alpha_test node server/dist/scripts/setup.js --admin-name=Administrador --admin-pass=admin123 --caixa-pass=caixa123 --cozinha-pass=cozinha123
+DATABASE_URL=postgres://.../happy_alpha_test PORT=3100 INSIGHTS_ENABLED=true npm start &
 DATABASE_URL=postgres://.../happy_alpha_test BASE_URL=http://localhost:3100 npm run test:e2e
 
 # cenários do Insights (30 verificações) — banco com "insights" no nome, recriado a cada cenário

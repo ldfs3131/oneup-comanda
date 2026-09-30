@@ -28,6 +28,9 @@ export const config = {
     host: process.env.HOST ?? '0.0.0.0',
     databaseUrl: process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/happy_alpha',
     demoMode: process.env.DEMO_MODE === 'true',
+    // Tela de Insights (leitura/interpretação dos números). Desligada por padrão: a interpretação é serviço
+    // do Administrador (ONE UP) e não aparece para o restaurante. Os dados continuam sendo gravados.
+    insightsEnabled: process.env.INSIGHTS_ENABLED === 'true',
     // pastas de backup separadas por ";" (ex.: E:\\Backups;G:\\Meu Drive\\HappyAlpha)
     backupDirs: (process.env.BACKUP_DIRS ?? '').split(';').map((s) => s.trim()).filter(Boolean),
     pgDumpPath: process.env.PG_DUMP_PATH ?? 'pg_dump',

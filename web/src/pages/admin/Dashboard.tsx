@@ -1,3 +1,4 @@
+import { useSettings } from '../../components/layout';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -44,7 +45,8 @@ export default function Dashboard() {
   const [custom, setCustom] = useState({ from: addDaysISO(todayISO(), -6), to: todayISO() });
   const r = presetRange(preset, custom);
   const { data: d, isLoading } = useQuery({ queryKey: ['dashboard', r.from, r.to], queryFn: () => api.get<Dash>(`/api/dashboard${qs(r)}`), refetchInterval: 60_000 });
-  const { data: ins } = useQuery({ queryKey: ['insights'], queryFn: () => api.get<InsightsResult>('/api/insights'), refetchInterval: 5 * 60_000 });
+  const { data: settings } = useSettings();
+  const { data: ins } = useQuery({ queryKey: ['insights'], queryFn: () => api.get<InsightsResult>('/api/insights'), refetchInterval: 5 * 60_000, enabled: settings?.insightsEnabled === true });
   const pick = (p: Preset) => { setPreset(p); try { sessionStorage.setItem('ha:dashPreset', p); } catch { /* ok */ } };
   const single = r.from === r.to;
   const maxHour = Math.max(1, ...(d?.byHour ?? []).map((h) => h.orders));
@@ -73,7 +75,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {ins && (
+      {settings?.insightsEnabled && ins && (
         <div className="card">
           <div className="row between wrap" style={{ marginBottom: 10 }}>
             <div className="panel-title" style={{ margin: 0 }}>💡 Insights {ins.level > 1 && <span className="faint">· nível {ins.level}</span>}</div>

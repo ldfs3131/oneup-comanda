@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Navigate } from 'react-router-dom';
+import { useSettings } from '../../components/layout';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api';
 import { dateTime, fmtDay, todayISO } from '../../format';
@@ -14,6 +16,12 @@ const LEVELS = [
 ];
 
 export default function InsightsPage() {
+  const { data: settings } = useSettings();
+  if (settings && !settings.insightsEnabled) return <Navigate to="/admin" replace />;
+  return <InsightsPageInner />;
+}
+
+function InsightsPageInner() {
   const { data, isLoading } = useQuery({ queryKey: ['insights'], queryFn: () => api.get<InsightsResult>('/api/insights'), refetchInterval: 5 * 60_000 });
   const { data: excluded = [] } = useQuery({ queryKey: ['excluded'], queryFn: () => api.get<{ day: string; reason: string }[]>('/api/excluded-days') });
   const [day, setDay] = useState('');

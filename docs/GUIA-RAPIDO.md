@@ -97,8 +97,7 @@ Menu **Dia / Caixa** → **🧾 Despesa paga com a gaveta** (gelo, gás, entrega
 
 ## Administrador
 
-- **Dashboard:** hoje, ontem, 7/30 dias, mês ou período; insights principais; pedidos por hora; categorias; estoque baixo; aviso de backup.
-- **Insights:** leituras automáticas com “Por quê?”. Marque dias atípicos (evento, chuva) para não distorcer as médias.
+- **Dashboard:** hoje, ontem, 7/30 dias, mês ou período; pedidos por hora; categorias; estoque baixo; aviso de backup.
 - **Financeiro:** faturamento → CMV → lucro bruto → despesas → resultado operacional; análise por produto; despesas.
 - **Pedidos:** histórico com filtros (período, status, pagamento, usuário, produto, origem, local/viagem).
 - **Tempo de preparo:** medianas, tempos suspeitos (corrigir com motivo) e sugestão de tempo padrão por produto.

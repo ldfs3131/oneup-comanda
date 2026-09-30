@@ -1,7 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Banners, EstablishmentChip, Logo, SoundToggle, UserMenu } from '../../components/layout';
+import { Banners, EstablishmentChip, Logo, SoundToggle, UserMenu, useSettings } from '../../components/layout';
 
 export default function AdminLayout() {
+  const { data: settings } = useSettings();
   return (
     <div className="app">
       <Banners />
@@ -15,7 +16,7 @@ export default function AdminLayout() {
       <div className="admin-shell">
         <nav className="sidenav">
           <NavLink to="/admin" end>📊 Dashboard</NavLink>
-          <NavLink to="/admin/insights">💡 Insights</NavLink>
+          {settings?.insightsEnabled && <NavLink to="/admin/insights">💡 Insights</NavLink>}
           <NavLink to="/admin/financeiro">💵 Financeiro</NavLink>
           <NavLink to="/admin/pedidos">📋 Pedidos</NavLink>
           <NavLink to="/admin/tempo">⏱ Tempo de preparo</NavLink>

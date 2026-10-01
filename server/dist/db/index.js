@@ -23,10 +23,11 @@ export const pool = systemPool;
 class ContextError extends Error {
 }
 async function acquire(ctx) {
-    if (ctx.client)
-        return ctx.client;
+    // depois de devolvida, a conexão NUNCA mais é usada por este contexto (ela pode já ser de outra empresa)
     if (ctx.released)
         throw new ContextError('Conexão do banco já devolvida: tarefa rodando depois da resposta. Use runAsEmpresa().');
+    if (ctx.client)
+        return ctx.client;
     if (!ctx.pending) {
         ctx.pending = (async () => {
             const c = await (ctx.kind === 'system' ? systemPool : appPool).connect();
@@ -49,7 +50,11 @@ async function acquire(ctx) {
     }
     return ctx.pending;
 }
-export async function releaseContext(ctx) {
+/**
+ * Devolve a conexão. Regra de segurança: só volta para o pool uma conexão LIMPA (fora de transação e sem
+ * empresa). Requisição cancelada no meio (aparelho caiu) ou conexão ainda em transação = conexão DESCARTADA.
+ */
+export async function releaseContext(ctx, opts = {}) {
     if (!ctx || ctx.released)
         return;
     ctx.released = true;
@@ -58,16 +63,30 @@ export async function releaseContext(ctx) {
         c = await ctx.pending.catch(() => undefined);
     if (!c)
         return;
-    if (ctx.kind === 'app' && !ctx.broken) {
+    let descartar = !!ctx.broken || !!opts.abortada;
+    if (!descartar && ctx.kind === 'app') {
         try {
-            await c.query("SELECT set_config('app.empresa_id', '', false)");
+            // now() <> statement_timestamp() só acontece dentro de uma transação aberta
+            const r = await c.query("SELECT set_config('app.empresa_id', '', false), now() <> statement_timestamp() AS em_transacao");
+            if (r.rows[0]?.em_transacao)
+                descartar = true;
         }
         catch {
-            ctx.broken = true;
+            descartar = true;
+        }
+    }
+    else if (!descartar && ctx.kind === 'system') {
+        try {
+            const r = await c.query('SELECT now() <> statement_timestamp() AS em_transacao');
+            if (r.rows[0]?.em_transacao)
+                descartar = true;
+        }
+        catch {
+            descartar = true;
         }
     }
     ctx.offError?.();
-    c.release(ctx.broken ? true : undefined);
+    c.release(descartar ? true : undefined);
 }
 /** "Cliente" que o Drizzle usa: encaminha cada consulta para a conexão do contexto atual. */
 class ConexaoDaEmpresa {

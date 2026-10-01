@@ -153,6 +153,8 @@ async function main() {
   check('Dono envia logotipo; fica na pasta da própria empresa', r.status === 200 && r.data.logo?.startsWith(`/uploads/${empA}/`), r.data);
   check('Logotipo aparece no login', (await new C('alfa').get('/api/meta')).data.logo === r.data.logo);
   check('Arquivo do logotipo é servido', (await fetch(BASE + r.data.logo)).status === 200);
+  const empB = (await sys.query("SELECT id FROM empresas WHERE slug='beta'")).rows[0].id;
+  check('Beta não consegue usar o logotipo da pasta da Alfa', (await donoB.patch('/api/configuracoes', { valores: { logo: r.data.logo } })).status === 400 && empB !== empA);
 
   console.log('\n[6] Isolamento e imutabilidade da personalização');
   const tb = await cfg(donoB);

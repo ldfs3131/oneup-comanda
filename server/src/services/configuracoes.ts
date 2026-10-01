@@ -120,7 +120,11 @@ export function validar(d: Def, valor: unknown): unknown {
       try { const u = new URL(withProto); if (!u.hostname.includes('.')) throw 0; return u.toString(); } catch { return bad('endereço inválido.'); }
     }
     case 'escolha': return d.opcoes?.some((o) => o.valor === valor) ? valor : bad('opção inválida.');
-    case 'imagem': return typeof valor === 'string' && /^\/(uploads\/[\w/-]+\.(png|jpe?g|webp)|logo\.png)$/i.test(valor) ? valor : bad('imagem inválida.');
+    case 'imagem': {
+      // só imagens da pasta da PRÓPRIA empresa (ou o logotipo legado da instalação nº 1)
+      const proprio = new RegExp(`^/uploads/${empresaAtual()}/[\\w-]+\\.(png|jpe?g|webp)$`, 'i');
+      return typeof valor === 'string' && (proprio.test(valor) || (valor === '/logo.png' && empresaAtual() === 1)) ? valor : bad('imagem inválida.');
+    }
   }
 }
 

@@ -30,6 +30,7 @@ export async function empresaPorSlug(slug: string | undefined): Promise<EmpresaI
   if (hit && Date.now() - hit.at < TTL_MS) return hit.info;
   const [row] = await runAsSystem(() => db.select().from(empresas).where(eq(empresas.slug, slug)).limit(1));
   const info = row && row.status !== 'CANCELADA' ? { id: row.id, slug: row.slug, nome: row.nome, status: row.status } : null;
+  if (cache.size > 2000) cache.clear(); // endereços aleatórios não enchem a memória
   cache.set(slug, { at: Date.now(), info });
   return info;
 }

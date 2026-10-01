@@ -42,7 +42,8 @@ function empresaPorRequisicao(app: FastifyInstance) {
   // depois da leitura do corpo: liga o contexto ao restante da requisição (hooks de login e rota)
   app.addHook('preValidation', (req, _reply, done) => { if (req.dbCtx) bindContext(req.dbCtx, done); else done(); });
   app.addHook('onResponse', async (req) => { await releaseContext(req.dbCtx); });
-  app.addHook('onRequestAbort', async (req) => { await releaseContext(req.dbCtx); });
+  // aparelho desistiu no meio: a conexão é descartada (pode estar no meio de uma transação)
+  app.addHook('onRequestAbort', async (req) => { await releaseContext(req.dbCtx, { abortada: true }); });
 }
 
 export async function buildApp() {
@@ -127,6 +128,10 @@ function lanAddresses() {
 }
 
 async function main() {
+  if (config.allowEmpresaHeader && process.env.NODE_ENV === 'production') {
+    throw new Error('EMPRESA_HEADER=true é só para testes: recusado em produção (qualquer um escolheria a empresa pelo cabeçalho).');
+  }
+  if (config.baseDomain && config.defaultEmpresa) console.warn('  Aviso: BASE_DOMAIN e DEFAULT_EMPRESA juntos — endereços desconhecidos caem na empresa padrão.');
   await waitForDatabase();
   await runMigrations();
   await ensurePlatformData();

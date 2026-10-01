@@ -196,8 +196,9 @@ export async function adminRoutes(app: FastifyInstance) {
       delivery: { isOpen: d.isOpen },
       // valores efetivos do catálogo de personalização (o que muda o comportamento das telas)
       config: await lerConfiguracoes(),
-      backupDirs: config.backupDirs, demoMode: config.demoMode, lanUrls: lanUrls(),
-      publicPort: config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled,
+      // detalhes do servidor só em instalação própria (online, cada empresa não precisa nem deve ver)
+      backupDirs: config.baseDomain ? [] : config.backupDirs, demoMode: config.demoMode, lanUrls: config.baseDomain ? [] : lanUrls(),
+      publicPort: config.baseDomain ? null : config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled,
       product: config.productName,
     };
   });

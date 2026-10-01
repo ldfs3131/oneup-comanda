@@ -6,7 +6,7 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 |---|---|---|
 | 0. Auditoria e prompt mestre | ✅ 01/10 | `docs/ONE-FOOD-AUDITORIA.md`, `docs/PROMPT-MESTRE-ONE-FOOD.md` |
 | 1. ONE Base multi-empresa | ✅ 01/10 | 124 e2e + 30 insights + demo + **145 de vazamento** |
-| 2. Personalização pelo Dono | ✅ 01/10 | **53 de personalização** + telas no navegador (computador, tablet e celular) |
+| 2. Personalização pelo Dono | ✅ 01/10 | **54 de personalização** + telas no navegador (computador, tablet e celular) |
 | 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ⏭ próxima | escassez + às cegas |
 | 4. Ficha 5.3–5.10 (R3 Leva 1 restante) | pendente | |
 | 5. Command Center fase 1 + Financeiro ONE UP + modo suporte | pendente | |
@@ -30,6 +30,16 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 - **Regras que as configurações ligam no servidor:** campos obrigatórios do pedido; limite de desconto do caixa (acumulado por conta); cancelar comida já pronta só pelo Dono; produto sem estoque no cardápio digital; módulos do plano liberam cardápio digital e delivery.
 - **Ferramenta da ONE UP** (`server/dist/scripts/plataforma.js`): `empresas`, `catalogo`, `travar`, `destravar`, `definir`.
 - Corrigido de passagem: o painel do Dono quebrava sem backup local; o menu do painel passava da largura no celular (já existia na R2).
+
+## Revisão independente de segurança (01/10)
+
+Um revisor que não participou do desenvolvimento procurou vazamentos que os testes não pegam. Corrigido:
+- **Alta:** requisição cancelada no meio de uma transação (aparelho caiu) podia devolver ao pool uma conexão ainda em uso. Agora: conexão cancelada ou em transação é **descartada**, e o código antigo não consegue mais usá-la (`test:conexoes`, 7 verificações).
+- Backup local por pasta desligado quando há mais de uma empresa (o pg_dump copia o banco inteiro).
+- Logotipo só da pasta da própria empresa; cache de empresas e mapas de tentativas com limite de memória.
+- Detalhes do servidor (pastas, IPs) escondidos no modo online; `EMPRESA_HEADER=true` recusado em produção.
+- Trava de vínculo também ao mudar o caixa de um pagamento.
+Verificado e OK pelo revisor: ordem dos hooks e contexto em uploads, salas do tempo real, caches por empresa, cookies por subdomínio, políticas de todas as tabelas, nenhuma função com privilégio elevado, scripts gravando na empresa certa.
 
 ## Pendências conhecidas (entram nas próximas fases)
 

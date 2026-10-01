@@ -9,6 +9,9 @@ import { loadMenu } from './menu.js';
 import { configuracoesPublicas, lerConfig } from '../services/configuracoes.js';
 // Limite simples por IP para o canal público
 const hits = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, l] of hits)
+    if (!l.some((t) => now - t < 3_600_000))
+        hits.delete(k); }, 10 * 60_000).unref();
 function rateLimit(ip, max, windowMs) {
     const now = Date.now();
     ip = `${currentContext()?.empresaId ?? 0}:${ip}`; // limite por empresa + aparelho

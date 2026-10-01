@@ -13,7 +13,8 @@
     "test:e2e": "node dist/scripts/e2e.js",
     "test:insights": "node dist/scripts/insights-test.js",
     "test:isolamento": "node dist/scripts/isolamento-test.js",
-    "test:personalizacao": "node dist/scripts/personalizacao-test.js"
+    "test:personalizacao": "node dist/scripts/personalizacao-test.js",
+    "test:conexoes": "node dist/scripts/conexao-test.js"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

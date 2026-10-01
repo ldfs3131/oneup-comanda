@@ -78,3 +78,7 @@ export function checkLoginRate(ip) {
         a.n++;
 }
 export const clearLoginRate = (ip) => attempts.delete(ip);
+// limpeza periódica das tentativas vencidas (memória não cresce sem limite)
+setInterval(() => { const now = Date.now(); for (const [k, a] of attempts)
+    if (a.until < now)
+        attempts.delete(k); }, 10 * 60_000).unref();

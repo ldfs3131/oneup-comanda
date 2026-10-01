@@ -24,7 +24,7 @@ Base: Happy Alpha R2.0.2 (o Happy Alpha é a empresa nº 1).
 
 ## Testes
 
-`test:e2e` (124), `test:insights` (30), `test:isolamento` (145), `test:personalizacao` (53). Passo a passo em `docs/ONE-FOOD-PROGRESSO.md`.
+`test:e2e` (124), `test:insights` (30), `test:isolamento` (145), `test:personalizacao` (54), `test:conexoes` (7). Passo a passo em `docs/ONE-FOOD-PROGRESSO.md`.
 
 ## Garantias
 

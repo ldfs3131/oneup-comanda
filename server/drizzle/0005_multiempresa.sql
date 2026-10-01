@@ -154,7 +154,7 @@ CREATE TRIGGER ref_orders BEFORE INSERT OR UPDATE OF account_id ON orders FOR EA
 --> statement-breakpoint
 CREATE TRIGGER ref_order_items BEFORE INSERT OR UPDATE OF order_id, product_id ON order_items FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('order_id', 'orders', 'product_id', 'products');
 --> statement-breakpoint
-CREATE TRIGGER ref_payments BEFORE INSERT OR UPDATE OF account_id, method_id ON payments FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('account_id', 'accounts', 'method_id', 'payment_methods', 'cash_register_id', 'cash_registers');
+CREATE TRIGGER ref_payments BEFORE INSERT OR UPDATE OF account_id, method_id, cash_register_id ON payments FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('account_id', 'accounts', 'method_id', 'payment_methods', 'cash_register_id', 'cash_registers');
 --> statement-breakpoint
 CREATE TRIGGER ref_discounts BEFORE INSERT OR UPDATE OF account_id ON discounts FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('account_id', 'accounts');
 --> statement-breakpoint

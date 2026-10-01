@@ -41,7 +41,8 @@ function empresaPorRequisicao(app) {
     else
         done(); });
     app.addHook('onResponse', async (req) => { await releaseContext(req.dbCtx); });
-    app.addHook('onRequestAbort', async (req) => { await releaseContext(req.dbCtx); });
+    // aparelho desistiu no meio: a conexão é descartada (pode estar no meio de uma transação)
+    app.addHook('onRequestAbort', async (req) => { await releaseContext(req.dbCtx, { abortada: true }); });
 }
 export async function buildApp() {
     const app = Fastify({
@@ -120,6 +121,11 @@ function lanAddresses() {
         .filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
 }
 async function main() {
+    if (config.allowEmpresaHeader && process.env.NODE_ENV === 'production') {
+        throw new Error('EMPRESA_HEADER=true é só para testes: recusado em produção (qualquer um escolheria a empresa pelo cabeçalho).');
+    }
+    if (config.baseDomain && config.defaultEmpresa)
+        console.warn('  Aviso: BASE_DOMAIN e DEFAULT_EMPRESA juntos — endereços desconhecidos caem na empresa padrão.');
     await waitForDatabase();
     await runMigrations();
     await ensurePlatformData();

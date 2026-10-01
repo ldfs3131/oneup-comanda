@@ -45,6 +45,12 @@ async function ensureDir(dir) {
 export async function runBackup() {
     if (!config.backupDirs.length)
         return [{ dir: '(nenhuma)', ok: false, error: 'Nenhuma pasta de backup configurada (BACKUP_DIRS no .env).' }];
+    // o pg_dump copia o banco INTEIRO: com mais de uma empresa, backup local por pasta fica desligado
+    const { runAsSystem, db } = await import('../db/index.js');
+    const { sql } = await import('drizzle-orm');
+    const n = await runAsSystem(async () => Number((await db.execute(sql `SELECT count(*)::int AS n FROM empresas`)).rows[0].n));
+    if (n > 1)
+        return [{ dir: '(plataforma)', ok: false, error: 'Com várias empresas no servidor, o backup é feito pela plataforma (banco inteiro, fora da aplicação).' }];
     const name = `happy-alpha-${config.demoMode ? 'demo-' : ''}${stamp()}.dump`;
     const results = [];
     for (const dir of config.backupDirs) {

@@ -1,30 +1,27 @@
-# ONE UP — sistema de restaurante da ONE UP
+# ONE UP Comanda — sistema de gestão para restaurantes (ONE UP)
 
-Pedidos, cozinha em tempo real, caixa, estoque, despesas e financeiro para restaurantes, bares, lanchonetes e espetinhos. **Multi-empresa**: cada restaurante acessa pelo próprio endereço (`<slug>.restaurantes.oneup.com.br`), isolado no próprio banco de dados (Row Level Security), e **personaliza** o sistema em Configurações.
+Pedidos, cozinha em tempo real, caixa, cardápio digital, estoque, despesas e financeiro para restaurantes, bares, lanchonetes e espetinhos. **Multi-empresa**: cada restaurante acessa pelo próprio endereço (`<empresa>.comanda.oneupsistemas.com.br`), isolado no banco de dados (Row Level Security), e o Dono **personaliza** o sistema em Configurações (nome, logotipo, cor, cardápio digital, regras do caixa e da cozinha, formas de pagamento e taxa da maquininha).
 
-Base: Happy Alpha R2.0.2 (o Happy Alpha é a empresa nº 1).
+Base: Happy Alpha R2.0.2 (o Happy Alpha é o primeiro cliente).
 
 ## Documentos
 
 | Documento | Para quê |
 |---|---|
-| [docs/PROMPT-MESTRE-ONE-UP.md](docs/PROMPT-MESTRE-ONE-UP.md) | Prompt único de construção (vale sobre os antigos) |
+| [docs/INSTALACAO-ONLINE.md](docs/INSTALACAO-ONLINE.md) | Colocar no ar na VPS (um comando) e o dia a dia do servidor |
 | [docs/ONE-UP-PROGRESSO.md](docs/ONE-UP-PROGRESSO.md) | O que já foi feito, pendências e como testar |
-| [docs/ONE-UP-AUDITORIA.md](docs/ONE-UP-AUDITORIA.md) | Auditoria de partida e plano por fases |
 | [docs/GUIA-RAPIDO.md](docs/GUIA-RAPIDO.md) | Treinamento da equipe |
-| [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | Arquitetura da R2 (base) |
+| [docs/ARQUITETURA.md](docs/ARQUITETURA.md) | Arquitetura (base R2) |
+| [docs/PROMPT-MESTRE-ONE-UP.md](docs/PROMPT-MESTRE-ONE-UP.md), [docs/ONE-UP-AUDITORIA.md](docs/ONE-UP-AUDITORIA.md) | Histórico de construção (registro interno) |
 
-## Rodar online (Coolify)
+## Rodar online
 
-1. PostgreSQL 16 no Coolify. Copie `.env.example` para as variáveis do app (`DATABASE_URL`, `BASE_DOMAIN`, `COOKIE_SECURE=true`, `TRUST_PROXY=2`).
-2. Deploy com o `Dockerfile` (as migrações rodam sozinhas ao iniciar; saúde em `/api/health`).
-3. DNS no Cloudflare: `*.restaurantes.oneup.com.br` apontando para o servidor.
-4. Criar empresa: `node server/dist/scripts/setup.js --empresa=<slug> --nome="<Nome>" --admin-name="<Dono>" --admin-pass=... --caixa-pass=... --cozinha-pass=...`
-5. Plano e cadeados: `node server/dist/scripts/plataforma.js empresas | catalogo | travar | destravar | definir`
+Ubuntu 24.04: `bash /opt/oneup/app/deploy/instalar.sh` (passo a passo em `docs/INSTALACAO-ONLINE.md`). Convive com outros sistemas no
+mesmo servidor (usa o Nginx que já existir, Node e porta próprios). Comando do servidor: `oneup ajuda`.
 
 ## Testes
 
-`test:e2e` (124), `test:insights` (30), `test:isolamento` (145), `test:personalizacao` (54), `test:conexoes` (7). Passo a passo em `docs/ONE-UP-PROGRESSO.md`.
+`./testes.sh` roda tudo em bancos novos: e2e (124), insights (30), isolamento (145), personalização (56), conexões (7), comitê (26), ONE UP (48).
 
 ## Garantias
 

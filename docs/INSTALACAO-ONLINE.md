@@ -1,13 +1,23 @@
-# ONE UP online — instalação na VPS (Hostinger)
+# ONE UP Comanda online — instalação na VPS (Hostinger)
 
-Tudo roda num servidor só: banco (PostgreSQL), sistema (Node.js) e HTTPS automático (Caddy).
-Cada restaurante tem o próprio endereço: `https://<restaurante>.<endereço-base>`.
+Cada restaurante tem o próprio endereço: `https://<restaurante>.comanda.oneupsistemas.com.br`
+(o Happy Alpha: `https://happy-alpha.comanda.oneupsistemas.com.br`).
 
-## O que contratar
+**Convive com o que já está na VPS** (ex.: o Lava Jato com Nginx e PM2): se o servidor já tem Nginx, o
+ONE UP Comanda entra como mais um site no Nginx, com certificado do Let's Encrypt; usa um Node próprio
+(em `/opt/oneup/node`, sem mexer no Node dos outros sistemas), escolhe uma porta interna livre e não liga
+firewall por conta própria. Em servidor vazio, usa o Caddy (HTTPS automático).
 
-- **VPS Hostinger KVM 1** (ou maior), sistema **Ubuntu 24.04** puro (sem painel nem aplicativo pré-instalado).
-- Domínio é opcional. Sem domínio, o endereço-base é automático: `<IP-com-traços>.sslip.io`
-  (ex.: `https://happy-alpha.203-0-113-5.sslip.io`). Com domínio, veja "Trocar para domínio próprio".
+## Antes: DNS (uma vez)
+
+No hPanel da Hostinger → **Domínios → oneupsistemas.com.br → DNS / Nameservers**, crie:
+
+| Tipo | Nome | Aponta para | TTL |
+|---|---|---|---|
+| A | `*.comanda` | IP da VPS | 300 |
+| A | `comanda` | IP da VPS | 300 |
+
+O `*.comanda` faz qualquer restaurante novo já ter endereço. Leva de minutos a 1 hora para valer.
 
 ## Instalar (uma vez)
 
@@ -29,7 +39,8 @@ apt-get update -qq && apt-get install -y -qq git && export GIT_SSH_COMMAND="ssh 
 ```
 
 Leva de 3 a 6 minutos. No fim aparecem o endereço e as senhas (Dono, Caixa, Cozinha e o acesso ONE UP).
-Elas ficam guardadas no servidor: `oneup acessos`.
+Elas ficam guardadas no servidor: `oneup acessos`. Se o DNS ainda não estiver valendo, o instalador avisa:
+espere uns minutos e rode `oneup certificado` (o login só funciona com o cadeado/HTTPS).
 
 O instalador pode rodar de novo a qualquer momento: não apaga dados nem troca senhas.
 
@@ -43,21 +54,20 @@ O instalador pode rodar de novo a qualquer momento: não apaga dados nem troca s
 | `oneup restaurar <arquivo>` | volta o banco para uma cópia (faz cópia do estado atual antes) |
 | `oneup senha happy-alpha caixa` | senha nova para quem esqueceu (derruba os aparelhos conectados) |
 | `oneup nova-empresa bom-sabor "Bom Sabor"` | cria outro restaurante (endereço próprio, cardápio em branco) |
+| `oneup certificado` | HTTPS dos restaurantes (confere o DNS antes; renova sozinho) |
 | `oneup logs` | últimos registros, para o suporte |
 
 Cópia fora do servidor (recomendado 1×/mês): baixe o arquivo mais novo de `/opt/oneup/backups` pelo
 gerenciador de arquivos/SFTP e guarde no Google Drive.
 
-## Trocar para domínio próprio
+## Outro endereço-base
 
-1. No DNS do domínio: registro **A** de `*.restaurantes.seudominio.com.br` apontando para o IP da VPS.
-2. Na VPS: `DOMINIO=restaurantes.seudominio.com.br bash /opt/oneup/app/deploy/instalar.sh`
-3. O endereço do Happy Alpha passa a ser `https://happy-alpha.restaurantes.seudominio.com.br`
-   (refaça o QR Code em Configurações e avise o Rafael; o endereço antigo deixa de funcionar).
+`DOMINIO=outro.dominio.com.br bash /opt/oneup/app/deploy/instalar.sh` (com o `*.outro` no DNS). Para testar sem
+domínio: `DOMINIO=sslip` (vira `<IP>.sslip.io`). Trocar o endereço muda o link e o QR Code dos restaurantes.
 
 ## Segurança (já configurado)
 
-- Só as portas 22 (SSH), 80 e 443 abertas; banco só escuta dentro do servidor.
+- Banco só escuta dentro do servidor; em servidor só do ONE UP Comanda, firewall com só 22, 80 e 443.
 - Sistema roda com usuário próprio sem privilégios; só escreve na pasta de imagens.
 - Certificado HTTPS emitido só para endereço de restaurante que existe.
 - Cada restaurante isolado no banco (RLS): um nunca vê dado do outro.

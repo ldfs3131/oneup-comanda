@@ -11,7 +11,9 @@ import { rangeOf, todayLocal } from './admin.js';
 const TZ = 'America/Sao_Paulo';
 const n = (v) => Number(v ?? 0);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const inRange = (col, r) => sql `(${sql.raw(col)} AT TIME ZONE ${TZ})::date BETWEEN ${r.from}::date AND ${r.to}::date`;
+const inRange = (col, r) => 
+// intervalo de horário no fuso do restaurante (usa o índice empresa+data)
+sql `${sql.raw(col)} >= (${r.from}::date::timestamp AT TIME ZONE ${TZ}) AND ${sql.raw(col)} < ((${r.to}::date + 1)::timestamp AT TIME ZONE ${TZ})`;
 export async function managementRoutes(app) {
     const admin = { preHandler: requireRole('ADMIN') };
     const ops = { preHandler: requireRole('CAIXA') };

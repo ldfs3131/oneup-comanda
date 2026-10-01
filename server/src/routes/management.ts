@@ -14,7 +14,8 @@ const TZ = 'America/Sao_Paulo';
 const n = (v: unknown) => Number(v ?? 0);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const inRange = (col: string, r: { from: string; to: string }) =>
-  sql`(${sql.raw(col)} AT TIME ZONE ${TZ})::date BETWEEN ${r.from}::date AND ${r.to}::date`;
+  // intervalo de horário no fuso do restaurante (usa o índice empresa+data)
+  sql`${sql.raw(col)} >= (${r.from}::date::timestamp AT TIME ZONE ${TZ}) AND ${sql.raw(col)} < ((${r.to}::date + 1)::timestamp AT TIME ZONE ${TZ})`;
 
 export async function managementRoutes(app: FastifyInstance) {
   const admin = { preHandler: requireRole('ADMIN') };

@@ -50,6 +50,13 @@
       "when": 1790840000000,
       "tag": "0006_personalizacao",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790850000000,
+      "tag": "0007_desempenho",
+      "breakpoints": true
     }
   ]
 }

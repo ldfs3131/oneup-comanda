@@ -32,7 +32,9 @@ export function rangeOf(q) {
         throw bad('Período inválido.');
     return { from, to };
 }
-const inRange = (col, r) => sql `(${sql.raw(col)} AT TIME ZONE ${TZ})::date BETWEEN ${r.from}::date AND ${r.to}::date`;
+const inRange = (col, r) => 
+// intervalo de horário no fuso do restaurante (usa o índice empresa+data)
+sql `${sql.raw(col)} >= (${r.from}::date::timestamp AT TIME ZONE ${TZ}) AND ${sql.raw(col)} < ((${r.to}::date + 1)::timestamp AT TIME ZONE ${TZ})`;
 export async function adminRoutes(app) {
     const admin = { preHandler: requireRole('ADMIN') };
     // Insights: primeiro confere o perfil (Caixa/Cozinha continuam recebendo 403); com o recurso desligado, responde 404.
@@ -98,11 +100,13 @@ export async function adminRoutes(app) {
         AND EXTRACT(EPOCH FROM (ready_at-confirmed_at))/60 <= 3*COALESCE(expected_minutes,15)`);
         const lowStock = await q(sql `SELECT id, name, stock_qty AS qty, low_stock_at AS lim FROM products WHERE track_stock AND active AND stock_qty <= low_stock_at ORDER BY stock_qty, name LIMIT 10`);
         const [s] = await db.select().from(restaurantSettings).limit(1);
-        const [year] = await q(sql `
+        // faturamento do ano (só com o controle de MEI ligado; usa o índice por data)
+        const ano = { from: `${r.to.slice(0, 4)}-01-01`, to: `${r.to.slice(0, 4)}-12-31` };
+        const [year] = s.meiEnabled ? await q(sql `
       SELECT COALESCE(SUM(oi.unit_price_cents*oi.quantity),0)
-             - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE date_part('year', created_at AT TIME ZONE ${TZ}) = date_part('year', ${r.to}::date)),0) AS cents
+             - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE ${inRange('created_at', ano)}),0) AS cents
       FROM orders o JOIN order_items oi ON oi.order_id=o.id
-      WHERE oi.status='ACTIVE' AND ${liveOrders} AND date_part('year', o.created_at AT TIME ZONE ${TZ}) = date_part('year', ${r.to}::date)`);
+      WHERE oi.status='ACTIVE' AND ${liveOrders} AND ${inRange('o.created_at', ano)}`) : [{ cents: 0 }];
         const revenue = n(sales.cents) - n(disc.cents);
         const backupAgeH = s.lastBackupAt ? (Date.now() - new Date(s.lastBackupAt).getTime()) / 3_600_000 : null;
         return {

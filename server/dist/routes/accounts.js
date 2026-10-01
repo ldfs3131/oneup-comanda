@@ -61,7 +61,8 @@ export async function accountRoutes(app) {
     // Painel do caixa: contas vivas + prontos + aguardando confirmação (QR)
     app.get('/api/cashier/board', { preHandler: [requireRole('CAIXA'), respostaCompartilhada('board', 'dados', 5000)] }, async () => {
         const live = await listAccountsWithTotals(db, sql `a.status IN ('OPEN','PARTIALLY_PAID','PAID')
-      AND (a.origin = 'CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id = a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`);
+      AND (a.origin = 'CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id = a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`, 2000);
+        // (antes: só as 200 mais recentes — numa casa cheia, a conta esquecida mais antiga sumia do painel)
         const ready = await db.execute(sql `
       SELECT o.id AS "orderId", o.number AS "orderNumber", o.sequence, o.ready_at AS "readyAt", o.problem_note AS "problemNote",
              o.status, o.consumption_type AS "consumptionType", a.id AS "accountId", a.number AS "accountNumber",

@@ -224,6 +224,17 @@ async function main() {
         const csp = r.headers.get('content-security-policy') ?? '';
         check('Página só executa código do próprio sistema (Content-Security-Policy)', csp.includes("script-src 'self'") && csp.includes("object-src 'none'"), csp);
     }
+    console.log('\n[9] Casa cheia: o painel do caixa mostra TODAS as contas abertas');
+    {
+        const vivas = async () => Number((await db.query(`SELECT count(*)::int AS n FROM accounts a JOIN empresas e ON e.id=a.empresa_id WHERE e.slug='alfa' AND a.status IN ('OPEN','PARTIALLY_PAID','PAID') AND (a.origin='CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id=a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`)).rows[0].n);
+        const lote = [];
+        for (let n = await vivas(); n < 215; n++)
+            lote.push(novaConta([caixa, cx2, cx3][n % 3]));
+        await Promise.all(lote);
+        const total = await vivas();
+        const b = (await caixa.get('/api/cashier/board')).data;
+        check(`Com ${total} contas abertas, o painel mostra todas (inclusive a mais antiga)`, b.accounts.length === total, { painel: b.accounts.length, banco: total });
+    }
     await db.end();
     console.log(`\nResultado comitê: ${passed} verificações OK, ${failures.length} falhas.`);
     if (failures.length) {

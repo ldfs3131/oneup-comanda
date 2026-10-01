@@ -43,6 +43,9 @@ let parar = false;
 const fimEm = Date.now() + MINUTOS * 60_000;
 // ---------------- medições ----------------
 const lat = new Map();
+const latRegime = []; // depois do aquecimento (logins e preparação de todas as empresas)
+const T0 = Date.now();
+const AQUECIMENTO_MS = Number(A.aquecimento ?? 45) * 1000;
 const erros = new Map();
 let totalReq = 0;
 const vazamentos = [];
@@ -87,6 +90,8 @@ class Pessoa {
                     const ms = performance.now() - r0;
                     const k = rota(method, path);
                     (lat.get(k) ?? lat.set(k, []).get(k)).push(ms);
+                    if (r0 + performance.timeOrigin - T0 > AQUECIMENTO_MS && !parar)
+                        latRegime.push(ms);
                     const set = res.headers['set-cookie'];
                     if (set?.length)
                         this.cookie = set[0].split(';')[0];
@@ -148,9 +153,10 @@ class Pessoa {
     }
 }
 /** Igual ao react-query: uma busca por vez; eventos no meio marcam "buscar de novo" ao terminar. */
-function buscador(fn) {
-    let rodando = false, sujo = false;
-    const disparar = async () => {
+function buscador(fn, atrasoMs = 300) {
+    let rodando = false, sujo = false, agendado = false;
+    const executar = async () => {
+        agendado = false;
         if (parar)
             return;
         if (rodando) {
@@ -168,7 +174,11 @@ function buscador(fn) {
             rodando = false;
         }
     };
-    return disparar;
+    // como as telas: junta os avisos que chegam em sequência (0,3 s) e busca uma vez
+    return () => { if (!agendado) {
+        agendado = true;
+        setTimeout(executar, atrasoMs);
+    } };
 }
 function itensAleatorios(prods, max = 4) {
     const n = 1 + Math.floor(Math.random() * max);
@@ -232,7 +242,10 @@ async function empresa(slug, idx) {
                 })();
             }
         });
+        const atualizarMenu = buscador(async () => { await cx.get('/api/menu'); });
         await cx.conectar((ev, p) => {
+            if (ev === 'menu:changed')
+                void atualizarMenu();
             if (['orders:changed', 'accounts:changed', 'register:changed', 'qr:new'].includes(ev))
                 void atualizarBoard();
             if (ev === 'order:ready' && p?.orderId % caixas.length === ci)
@@ -305,8 +318,11 @@ async function empresa(slug, idx) {
     const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     const tarefasDono = donos.map(async (dn) => {
         const painel = buscador(async () => { await dn.get(`/api/dashboard?from=${hoje}&to=${hoje}`); });
-        await dn.conectar((ev) => { if (ev === 'orders:changed' || ev === 'accounts:changed')
-            void painel(); });
+        let ultimo = 0; // a tela atualiza o painel por aviso no máximo a cada 30 s
+        await dn.conectar((ev) => { if ((ev === 'orders:changed' || ev === 'accounts:changed') && Date.now() - ultimo > 30_000) {
+            ultimo = Date.now();
+            void painel();
+        } });
         const t1 = setInterval(() => void painel(), 60_000);
         const t2 = setInterval(() => void dn.get(`/api/finance?from=${hoje}&to=${hoje}`), 45_000);
         const t3 = setInterval(() => void dn.get('/api/register/current'), 30_000);
@@ -329,16 +345,17 @@ async function empresa(slug, idx) {
         const quando = [Date.now() + rnd(5_000, MINUTOS * 60_000 * 0.8)];
         if (Math.random() < 0.3)
             quando.push(quando[0] + rnd(20_000, 60_000));
-        let proxMenu = Date.now() + 15_000;
+        let proxMenu = Date.now() + 60_000;
+        const aparelho = `cel-${idx}-${ci}-${randomUUID().slice(0, 8)}`;
         while (Date.now() < fimEm) {
             await sleep(500);
             if (Date.now() >= proxMenu) {
-                proxMenu += 15_000;
+                proxMenu += 60_000;
                 await cl.get('/api/public/menu');
             }
             if (quando.length && Date.now() >= quando[0] && ps.length) {
                 quando.shift();
-                const r = await cl.post('/api/public/orders', { customerName: `${M} Cliente ${ci}`, mode: pick(['LOCAL', 'BALCAO']), location: `Mesa ${1 + (ci % 40)}`, items: itensAleatorios(ps, 3) });
+                const r = await cl.post('/api/public/orders', { customerName: `${M} Cliente ${ci}`, mode: pick(['LOCAL', 'BALCAO']), location: `Mesa ${1 + (ci % 40)}`, items: itensAleatorios(ps, 3) }, { 'x-aparelho': aparelho, 'idempotency-key': randomUUID() });
                 if (r.status === 200)
                     pedidosQr++;
                 else
@@ -460,6 +477,7 @@ async function main() {
         cenario: { empresas: slugs.length, pessoasPorEmpresa: N, minutos: MINUTOS, ritmo: RITMO, rede: IPS },
         duracaoS: Math.round(durS), requisicoes: totalReq, porSegundo: Math.round(totalReq / durS),
         latenciaGeral: { p50: pct(todasLat, 50), p95: pct(todasLat, 95), p99: pct(todasLat, 99), max: Math.round(Math.max(...todasLat)) },
+        latenciaEmRegime: { depoisDeS: AQUECIMENTO_MS / 1000, n: latRegime.length, p50: pct(latRegime, 50), p95: pct(latRegime, 95), p99: pct(latRegime, 99), max: Math.round(Math.max(0, ...latRegime)) },
         erros: Object.fromEntries([...erros.entries()].sort((a, b) => b[1].n - a[1].n)),
         eventosTempoReal: { total: eventos.recebidos, porTipo: Object.fromEntries(eventos.porTipo) },
         pedidosQr: ok.reduce((s, r) => s + r.pedidosQr, 0), recusadosQr: ok.reduce((s, r) => s + r.recusadosQr, 0),

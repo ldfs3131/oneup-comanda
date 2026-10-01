@@ -9,6 +9,8 @@ import type { Board } from '../../types';
 import { Banners, EstablishmentChip, Logo, SoundToggle, TopNav, UserMenu } from '../../components/layout';
 import { ReasonModal, useAction, useToast } from '../../components/ui';
 import { useStockGuard } from '../../components/stock';
+import { usePageTitle } from '../../components/brand';
+import { useMesaLabel } from '../../components/brand';
 
 export function useBoard() {
   return useQuery({ queryKey: ['board'], queryFn: () => api.get<Board>('/api/cashier/board'), refetchInterval: 20_000 });
@@ -34,15 +36,16 @@ export default function CashierLayout() {
   const [flash, setFlash] = useState<number[]>([]);
   const titleTimer = useRef<number | undefined>(undefined);
 
+  const baseTitle = usePageTitle('Caixa');
   const blinkTitle = (text: string) => {
     window.clearInterval(titleTimer.current);
     let n = 0;
     titleTimer.current = window.setInterval(() => {
-      document.title = n % 2 === 0 ? text : 'Happy Alpha — Caixa';
-      if (++n > 12) { window.clearInterval(titleTimer.current); document.title = 'Happy Alpha — Caixa'; }
+      document.title = n % 2 === 0 ? text : baseTitle;
+      if (++n > 12) { window.clearInterval(titleTimer.current); document.title = baseTitle; }
     }, 800);
   };
-  useEffect(() => { document.title = 'Happy Alpha — Caixa'; return () => window.clearInterval(titleTimer.current); }, []);
+  useEffect(() => () => window.clearInterval(titleTimer.current), []);
 
   useRealtimeEvent((ev, p) => {
     if (ev === 'order:ready') {
@@ -88,6 +91,7 @@ export default function CashierLayout() {
 }
 
 function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
+  const mesa = useMesaLabel();
   const { run } = useAction();
   const { guard, modal } = useStockGuard();
   const nav = useNavigate();
@@ -118,7 +122,7 @@ function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
             <div className="alert-title">PEDIDO #{r.orderNumber} PRONTO</div>
             <div className="alert-sub">
               {r.consumptionType === 'VIAGEM' && <b className="viagem-tag">VIAGEM</b>}
-              Conta #{r.accountNumber}{r.tableLabel ? ` · Mesa ${r.tableLabel}` : ''}{r.sequence > 1 ? ' · complemento' : ''}
+              Conta #{r.accountNumber}{r.tableLabel ? ` · ${mesa} ${r.tableLabel}` : ''}{r.sequence > 1 ? ' · complemento' : ''}
               {r.customerName ? ` · ${r.customerName}` : ''}{r.note ? ` · ${r.note}` : ''}
               {r.readyAt && <span className="alert-age"> · há {minutesSince(r.readyAt)} min</span>}
             </div>

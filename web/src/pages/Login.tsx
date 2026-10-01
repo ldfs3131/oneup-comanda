@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { homeFor, useAuth } from '../auth';
 import { OneUpCredit } from '../components/layout';
+import { BrandLogo } from '../components/brand';
 
 const REMEMBER_KEY = 'ha:lastUser';
 const readLast = () => { try { return localStorage.getItem(REMEMBER_KEY) ?? ''; } catch { return ''; } };
@@ -39,9 +40,9 @@ export default function Login() {
     <div className="login-split">
       {meta?.demoMode && <div className="banner demo login-demo">MODO DEMONSTRAÇÃO — logins admin / caixa / cozinha, senha 1234</div>}
       <section className="login-brand">
-        <img src="/logo.png" alt={meta?.restaurantName ?? 'Happy Alpha'} className="login-brand-logo" />
-        <div className="login-brand-name">{meta?.restaurantName ?? 'Happy Alpha'}</div>
-        <div className="login-brand-tag">{meta?.tagline ?? 'Gourmet R2'}</div>
+        {meta?.logo && <BrandLogo className="login-brand-logo" height={120} />}
+        <div className="login-brand-name">{meta?.restaurantName ?? ''}</div>
+        {meta?.tagline ? <div className="login-brand-tag">{meta.tagline}</div> : null}
         <ul className="login-brand-points hide-mobile">
           <li>Pedidos do caixa direto na cozinha</li>
           <li>Conta por cliente, pagamento dividido e pendências</li>

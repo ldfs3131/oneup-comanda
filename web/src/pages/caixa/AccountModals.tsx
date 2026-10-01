@@ -4,6 +4,7 @@ import { api } from '../../api';
 import { brl } from '../../format';
 import type { AccountDetail, Board, OrderItem, PaymentMethod } from '../../types';
 import { Modal, MoneyInput, useAction } from '../../components/ui';
+import { useMesaLabel } from '../../components/brand';
 
 type Part = { methodId: number; amountCents: number; tenderedCents: number | null };
 
@@ -173,6 +174,7 @@ export function PendingModal({ account, onClose, onDone }: { account: AccountDet
 }
 
 export function EditAccountModal({ account, onClose, onDone }: { account: AccountDetail; onClose: () => void; onDone: () => void }) {
+  const mesa = useMesaLabel();
   const [name, setName] = useState(account.customerName ?? '');
   const [note, setNote] = useState(account.note ?? '');
   const [contact, setContact] = useState(account.contact ?? '');
@@ -190,7 +192,7 @@ export function EditAccountModal({ account, onClose, onDone }: { account: Accoun
         <label className="field"><span>Cliente</span><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
         <label className="field"><span>Observação</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} /></label>
         <div className="grid-2">
-          <label className="field"><span>Mesa</span><input className="input" value={table} onChange={(e) => setTable(e.target.value)} maxLength={20} /></label>
+          <label className="field"><span>{mesa}</span><input className="input" value={table} onChange={(e) => setTable(e.target.value)} maxLength={20} /></label>
           <label className="field"><span>Telefone</span><input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={30} /></label>
         </div>
         <label className="field"><span>Casa / contato</span><input className="input" value={contact} onChange={(e) => setContact(e.target.value)} maxLength={120} /></label>
@@ -242,6 +244,7 @@ export function CancelItemModal({ item, delivered, onClose, onDone }: { item: Or
 export function PickAccountModal({ title, description, excludeId, confirmLabel, onClose, onPick }: {
   title: string; description: string; excludeId: number; confirmLabel: string; onClose: () => void; onPick: (id: number) => Promise<boolean>;
 }) {
+  const mesa = useMesaLabel();
   const { data } = useQuery({ queryKey: ['board'], queryFn: () => api.get<Board>('/api/cashier/board') });
   const [sel, setSel] = useState<number | null>(null);
   const [q, setQ] = useState('');
@@ -260,7 +263,7 @@ export function PickAccountModal({ title, description, excludeId, confirmLabel, 
         {list.map((a) => (
           <button key={a.id} className={`pick-row${sel === a.id ? ' on' : ''}`} onClick={() => setSel(a.id)}>
             <b className="num">#{a.number}</b>
-            <span className="grow ellipsis">{a.customerName || 'Cliente não informado'}{a.tableLabel ? ` · Mesa ${a.tableLabel}` : ''}{a.note ? ` · ${a.note}` : ''}</span>
+            <span className="grow ellipsis">{a.customerName || 'Cliente não informado'}{a.tableLabel ? ` · ${mesa} ${a.tableLabel}` : ''}{a.note ? ` · ${a.note}` : ''}</span>
             <span className="num">{brl(a.balance)}</span>
           </button>
         ))}

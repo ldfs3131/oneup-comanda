@@ -5,7 +5,7 @@ import { createWriteStream, mkdirSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { extname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { db, type Executor } from '../db/index.js';
+import { db, empresaAtual, type Executor } from '../db/index.js';
 import { categories, optionGroups, options, orderItems, productCosts, products } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
 import { bad, brl, conflict, idParam, notFound, parse } from '../lib/http.js';
@@ -276,11 +276,13 @@ export async function menuRoutes(app: FastifyInstance) {
     if (!file) throw bad('Envie uma imagem.');
     const ext = extname(file.filename).toLowerCase();
     if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) throw bad('Use JPG, PNG ou WEBP.');
-    mkdirSync(config.uploadsDir, { recursive: true });
+    // fotos na pasta da própria empresa
+    const pasta = join(config.uploadsDir, String(empresaAtual()));
+    mkdirSync(pasta, { recursive: true });
     const name = `p${id}-${randomBytes(4).toString('hex')}${ext}`;
-    await pipeline(file.file, createWriteStream(join(config.uploadsDir, name)));
+    await pipeline(file.file, createWriteStream(join(pasta, name)));
     if (file.file.truncated) throw bad('Imagem muito grande (máximo 5 MB).');
-    const url = `/uploads/${name}`;
+    const url = `/uploads/${empresaAtual()}/${name}`;
     await db.update(products).set({ imageUrl: url, updatedAt: new Date() }).where(eq(products.id, id));
     await audit(db, { userId: me(req).id, action: 'menu.product.image', entityType: 'product', entityId: id, message: `${me(req).name} trocou a foto de "${p.name}".` });
     notify.menuChanged();

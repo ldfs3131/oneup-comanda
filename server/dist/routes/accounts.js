@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, nextNumber } from '../db/index.js';
-import { accounts, cancellations, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users, } from '../db/schema.js';
+import { accounts, cancellations, customers, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users, } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
-import { bad, brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
+import { HttpError, bad, brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
+import { lerConfig, lerConfiguracoes } from '../services/configuracoes.js';
 import { audit } from '../lib/audit.js';
 import { idempotent } from '../lib/idempotency.js';
 import { notify } from '../realtime.js';
@@ -52,7 +53,10 @@ async function scoped(user, id) {
 export async function accountRoutes(app) {
     const ops = { preHandler: requireRole('CAIXA') };
     const admin = { preHandler: requireRole('ADMIN') };
-    app.get('/api/payment-methods', ops, async () => db.select().from(paymentMethods).where(eq(paymentMethods.active, true)).orderBy(asc(paymentMethods.sortOrder)));
+    app.get('/api/payment-methods', ops, async (req) => {
+        const todas = req.query.todas === '1' && me(req).role === 'ADMIN';
+        return db.select().from(paymentMethods).where(todas ? undefined : eq(paymentMethods.active, true)).orderBy(asc(paymentMethods.sortOrder), asc(paymentMethods.id));
+    });
     // Painel do caixa: contas vivas + prontos + aguardando confirmação (QR)
     app.get('/api/cashier/board', ops, async () => {
         const live = await listAccountsWithTotals(db, sql `a.status IN ('OPEN','PARTIALLY_PAID','PAID')
@@ -208,6 +212,22 @@ export async function accountRoutes(app) {
             stockDecisions: stockDecisionsSchema,
         }), req.body);
         const user = me(req);
+        // Campos obrigatórios definidos pelo Dono em Configurações
+        const cfg = await lerConfiguracoes();
+        const falta = [];
+        if (cfg.exigir_nome && !b.customerName)
+            falta.push('nome do cliente');
+        if (cfg.exigir_telefone && !b.phone)
+            falta.push('telefone');
+        if (cfg.exigir_mesa && !b.tableLabel)
+            falta.push(String(cfg.rotulo_mesa ?? 'mesa').toLowerCase());
+        if (falta.length)
+            throw bad(`Preencha: ${falta.join(', ')}.`);
+        if (b.customerId) {
+            const [c] = await db.select({ id: customers.id }).from(customers).where(eq(customers.id, b.customerId));
+            if (!c)
+                throw bad('Cliente não encontrado.');
+        }
         const result = await idempotent(req, 'accounts.create', () => db.transaction(async (tx) => {
             const reg = await requireTakingOrders(tx);
             const customerId = b.customerId ?? await upsertCustomer(tx, b.customerName, b.contact, b.phone);
@@ -401,6 +421,15 @@ export async function accountRoutes(app) {
             const t = await accountTotals(tx, id);
             if (b.amountCents > t.balance)
                 throw bad(`O desconto não pode ser maior que o saldo em aberto (${brl(t.balance)}).`);
+            if (user.role !== 'ADMIN') {
+                const limite = await lerConfig('desconto_max_caixa', tx);
+                if (limite != null && t.subtotal > 0) {
+                    const jaDados = (await tx.select({ v: discounts.amountCents }).from(discounts).where(eq(discounts.accountId, id))).reduce((s2, x) => s2 + x.v, 0);
+                    if ((jaDados + b.amountCents) * 100 > limite * t.subtotal) {
+                        throw new HttpError(403, `Desconto acima do limite do caixa (${limite}% da conta). Peça ao Dono.`, 'DESCONTO_ACIMA_LIMITE');
+                    }
+                }
+            }
             const reg = await currentRegister(tx);
             const kind = user.role === 'ADMIN' ? 'DISCOUNT' : 'ADJUSTMENT';
             await tx.insert(discounts).values({
@@ -541,6 +570,7 @@ export async function accountRoutes(app) {
             const { o, acc } = await orderWithAccount(tx, it.orderId, true);
             await assertAccountInScope(tx, user, acc);
             assertAccountEditable(acc.status);
+            await exigirDonoSeProntoNaCozinha(tx, user, it.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status));
             const qty = Math.min(b.quantity ?? it.quantity, it.quantity);
             const partial = qty < it.quantity;
             const value = it.unitPriceCents * qty;
@@ -595,6 +625,7 @@ export async function accountRoutes(app) {
             assertAccountEditable(acc.status);
             if (o.status === 'CANCELLED')
                 throw conflict('Pedido já cancelado.');
+            await exigirDonoSeProntoNaCozinha(tx, user, o.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status));
             const items = await tx.select().from(orderItems).where(and(eq(orderItems.orderId, id), eq(orderItems.status, 'ACTIVE')));
             const value = items.reduce((s, i) => s + i.unitPriceCents * i.quantity, 0);
             const t = await accountTotals(tx, acc.id);
@@ -807,4 +838,12 @@ export async function accountRoutes(app) {
         notify.registerChanged();
         return { ok: true };
     });
+}
+/** Configuração do Dono: comida que já saiu da cozinha só o Dono cancela (é perda). */
+async function exigirDonoSeProntoNaCozinha(tx, user, prontoNaCozinha) {
+    if (!prontoNaCozinha || user.role === 'ADMIN')
+        return;
+    if (await lerConfig('cancelar_pronto_so_dono', tx)) {
+        throw new HttpError(403, 'Este item já saiu da cozinha: só o Dono pode cancelar.', 'CANCELAR_SO_DONO');
+    }
 }

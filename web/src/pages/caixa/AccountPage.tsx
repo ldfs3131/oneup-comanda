@@ -11,11 +11,13 @@ import { OrderDetailModal } from '../../components/OrderDetail';
 import OrderComposer, { linesToItems, useMenu } from './OrderComposer';
 import { CancelItemModal, DiscountModal, EditAccountModal, PaymentModal, PendingModal, PickAccountModal } from './AccountModals';
 import { useBase } from './Receivables';
+import { useMesaLabel } from '../../components/brand';
 
 const LIVE = ['OPEN', 'PARTIALLY_PAID', 'PAID'];
 const LOSS = ['IN_PREPARATION', 'READY', 'DELIVERED'];
 
 export default function AccountPage() {
+  const mesa = useMesaLabel();
   const { id } = useParams();
   const nav = useNavigate();
   const base = useBase();
@@ -74,7 +76,7 @@ export default function AccountPage() {
         <button className="btn ghost" onClick={() => nav(-1)}>← Voltar</button>
         <h1 className="num">Conta #{acc.number}</h1>
         <AccountBadge status={acc.status} />
-        {acc.tableLabel && <Badge tone="info">Mesa {acc.tableLabel}</Badge>}
+        {acc.tableLabel && <Badge tone="info">{mesa} {acc.tableLabel}</Badge>}
         {acc.origin !== 'CAIXA' && <Badge tone="brand">{ORIGIN_LABEL[acc.origin] ?? acc.origin}</Badge>}
       </div>
       {acc.status === 'MERGED' && acc.mergedInto && (

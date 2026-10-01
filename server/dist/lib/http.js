@@ -38,10 +38,16 @@ export function errorHandler(err, _req, reply) {
     if (e?.statusCode && e.statusCode < 500)
         return reply.status(e.statusCode).send({ error: e.message ?? 'Requisição inválida.' });
     // Violações das travas do banco viram mensagem legível
-    if (e?.code === 'P0001')
-        return reply.status(409).send({ error: e.message });
-    if (e?.code === '23505')
+    // (o Drizzle embrulha o erro do PostgreSQL em "cause")
+    const pgErr = (e?.code ? e : err?.cause) ?? {};
+    if (pgErr.code === 'P0001')
+        return reply.status(409).send({ error: pgErr.message });
+    if (pgErr.code === '23505')
         return reply.status(409).send({ error: 'Registro duplicado.' });
+    if (pgErr.code === '23503')
+        return reply.status(400).send({ error: 'Referência inválida: registro não encontrado.' });
+    if (pgErr.code === '42501')
+        return reply.status(403).send({ error: 'Operação não permitida.' });
     _req.log.error(err);
     return reply.status(500).send({ error: 'Erro interno. Tente novamente.' });
 }

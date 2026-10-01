@@ -34,7 +34,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         case 'orders:changed': inv(['board'], ['kitchen'], ['account'], ['dashboard'], ['ordersToday'], ['order'], ['stock']); break;
         case 'accounts:changed': inv(['board'], ['account'], ['accounts'], ['receivable'], ['dashboard'], ['ordersToday'], ['order']); break;
         case 'menu:changed': inv(['menu'], ['stock'], ['stockDiv']); break;
-        case 'settings:changed': inv(['settings']); break;
+        case 'settings:changed': inv(['settings'], ['meta'], ['configuracoes'], ['payment-methods-all']); break;
         case 'register:changed': inv(['register'], ['board'], ['dashboard'], ['registers']); break;
       }
       listeners.current.forEach((l) => l(event, payload));

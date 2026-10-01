@@ -20,7 +20,7 @@ type Dash = {
   byHour: { hour: number; orders: number }[];
   kitchenMedianMin: number | null; kitchenSamples: number;
   lowStock: { id: number; name: string; qty: number; lim: number }[];
-  backup: { at: string | null; ok: boolean | null; info: string | null; stale: boolean; configured: boolean };
+  backup: { at: string | null; ok: boolean | null; info: string | null; stale: boolean; configured: boolean } | null;
   mei: { yearRevenueCents: number; limitCents: number } | null;
 };
 
@@ -68,7 +68,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {d?.backup.stale && (
+      {d?.backup?.stale && (
         <div className="problem-box">
           💾 {!d.backup.configured ? 'Backup sem pasta configurada (BACKUP_DIRS no .env).' : d.backup.ok === false ? `O último backup falhou (${dateTime(d.backup.at)}).` : d.backup.at ? `Último backup há mais de 2 dias (${dateTime(d.backup.at)}).` : 'Nenhum backup feito ainda.'}
           <Link className="btn sm" to="/admin/configuracoes">Fazer backup</Link>

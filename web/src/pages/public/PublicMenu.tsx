@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api';
 import { brl } from '../../format';
 import { Modal, Spinner } from '../../components/ui';
+import { BrandLogo, usePageTitle } from '../../components/brand';
 
 type PGroup = { id: number; name: string; required: boolean; multiple: boolean; options: { id: number; name: string; priceDeltaCents: number }[] };
-type PProduct = { id: number; name: string; description: string; priceCents: number; imageUrl: string | null; groups: PGroup[] };
-type PMenu = { enabled: boolean; name: string; whatsappNumber: string | null; isOpen?: boolean; deliveryOpen?: boolean; categories?: { id: number; name: string; products: PProduct[] }[] };
+type PProduct = { id: number; name: string; description: string; priceCents: number; imageUrl: string | null; soldOut?: boolean; groups: PGroup[] };
+type PMenu = { enabled: boolean; name: string; whatsappNumber: string | null; isOpen?: boolean; deliveryOpen?: boolean; config?: Record<string, any>; categories?: { id: number; name: string; products: PProduct[] }[] };
 type Line = { key: number; product: PProduct; optionIds: number[]; labels: string[]; unit: number; quantity: number };
 
 let seq = 1;
 const waLink = (n: string) => `https://wa.me/${n.startsWith('55') ? n : `55${n}`}`;
 
 export default function PublicMenu() {
-  useEffect(() => { document.title = 'Happy Alpha — Cardápio'; }, []);
+  usePageTitle('Cardápio');
   // Estado ABERTO/FECHADO segue o botão do caixa; confere a cada 15 s e ao voltar para a aba
   const { data, isLoading } = useQuery({ queryKey: ['public-menu'], queryFn: () => api.get<PMenu>('/api/public/menu'), refetchInterval: 15_000, refetchOnWindowFocus: true });
   const [cart, setCart] = useState<Line[]>([]);
@@ -24,6 +25,14 @@ export default function PublicMenu() {
   const count = cart.reduce((s, l) => s + l.quantity, 0);
 
   if (isLoading || !data) return <Spinner />;
+  const cfg = data.config ?? {};
+  const logo = <div className="pub-logo-wrap"><BrandLogo className="pub-logo" height={96} logo={cfg.logo ?? null} name={data.name} /></div>;
+  const links = (cfg.link_site || cfg.link_grupo) ? (
+    <div className="row wrap" style={{ justifyContent: 'center', gap: 8 }}>
+      {cfg.link_grupo && <a className="btn" href={cfg.link_grupo} target="_blank" rel="noreferrer">Entrar no grupo</a>}
+      {cfg.link_site && <a className="btn" href={cfg.link_site} target="_blank" rel="noreferrer">Nosso site</a>}
+    </div>
+  ) : null;
 
   const wa = data.whatsappNumber ? (
     <a className="btn go block lg" href={waLink(data.whatsappNumber)} target="_blank" rel="noreferrer">💬 Pedir pelo WhatsApp</a>
@@ -31,7 +40,7 @@ export default function PublicMenu() {
 
   if (!data.enabled) return (
     <div className="pub">
-      <img src="/logo.png" alt="Happy Alpha" className="pub-logo" />
+      {logo}
       <div className="card center col gap-lg" style={{ margin: 16 }}>
         <h2>Cardápio digital indisponível</h2>
         <p className="muted">Faça seu pedido no balcão.</p>
@@ -42,7 +51,7 @@ export default function PublicMenu() {
 
   if (done) return (
     <div className="pub">
-      <img src="/logo.png" alt="Happy Alpha" className="pub-logo" />
+      {logo}
       <div className="card center col gap-lg" style={{ margin: 16 }}>
         <div style={{ fontSize: 48 }}>✅</div>
         <h2>Pedido #{done.orderNumber} enviado!</h2>
@@ -54,13 +63,14 @@ export default function PublicMenu() {
 
   if (!data.isOpen) return (
     <div className="pub">
-      <img src="/logo.png" alt="Happy Alpha" className="pub-logo" />
+      {logo}
       <div className="card center col gap-lg" style={{ margin: 16 }}>
         <div style={{ fontSize: 48 }}>🌙</div>
         <h2>Estabelecimento fechado</h2>
-        <p className="muted">No momento não estamos recebendo pedidos. Assim que abrirmos, o cardápio aparece aqui automaticamente.</p>
+        <p className="muted">{cfg.texto_fechado || 'No momento não estamos recebendo pedidos.'}</p>
         {cart.length > 0 && <p className="small muted">Seu pedido não enviado foi guardado nesta tela.</p>}
         {data.whatsappNumber && <a className="btn block lg" href={waLink(data.whatsappNumber)} target="_blank" rel="noreferrer">💬 Falar com a gente no WhatsApp</a>}
+        {links}
       </div>
     </div>
   );
@@ -73,11 +83,12 @@ export default function PublicMenu() {
   return (
     <div className="pub">
       <header className="pub-head">
-        <img src="/logo.png" alt="Happy Alpha" className="pub-logo" />
+        {logo}
         <div className="row wrap center" style={{ justifyContent: 'center', gap: 8 }}>
           <span className={`badge ${data.isOpen ? 'ok' : 'danger'}`}>{data.isOpen ? 'Aberto agora' : 'Fechado'}</span>
           <span className={`badge ${data.deliveryOpen ? 'ok' : ''}`}>Delivery {data.deliveryOpen ? 'aberto' : 'fechado'}</span>
         </div>
+        {cfg.boas_vindas && <p className="pub-welcome">{cfg.boas_vindas}</p>}
         <nav className="pub-cats">{data.categories!.map((c) => <a key={c.id} href={`#cat-${c.id}`}>{c.name}</a>)}</nav>
       </header>
       <main className="pub-main">
@@ -85,19 +96,19 @@ export default function PublicMenu() {
           <section key={c.id} id={`cat-${c.id}`}>
             <h2 className="pub-cat-title">{c.name}</h2>
             {c.products.map((p) => (
-              <button key={p.id} className="pub-item" disabled={!data.isOpen} onClick={() => (p.groups.length ? setPick(p) : add(p, [], 1))}>
+              <button key={p.id} className={`pub-item${p.soldOut ? ' sold-out' : ''}`} disabled={!data.isOpen || p.soldOut} onClick={() => (p.groups.length ? setPick(p) : add(p, [], 1))}>
                 {p.imageUrl && <img src={p.imageUrl} alt="" />}
                 <div className="grow" style={{ textAlign: 'left' }}>
                   <div style={{ fontWeight: 700 }}>{p.name}</div>
                   {p.description && <div className="small muted">{p.description}</div>}
                   <div className="num" style={{ color: 'var(--brand)', fontWeight: 800, marginTop: 4 }}>{brl(p.priceCents)}</div>
                 </div>
-                {data.isOpen && <span className="pub-add">＋</span>}
+                {p.soldOut ? <span className="badge">Acabou</span> : data.isOpen && <span className="pub-add">＋</span>}
               </button>
             ))}
           </section>
         ))}
-        <div style={{ padding: '16px 0 120px' }}>{wa}</div>
+        <div className="col gap-lg" style={{ padding: '16px 0 120px' }}>{wa}{links}</div>
       </main>
 
       {count > 0 && (

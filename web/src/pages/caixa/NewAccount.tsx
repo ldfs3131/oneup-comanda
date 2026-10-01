@@ -20,6 +20,7 @@ export default function NewAccount() {
   const toast = useToast();
   const { data } = useBoard();
   const { data: settings } = useSettings();
+  const cfg = settings?.config ?? {};
   const [customerName, setName] = useState('');
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [note, setNote] = useState('');
@@ -61,10 +62,10 @@ export default function NewAccount() {
         header={
           <div className="col" style={{ gap: 8 }}>
             <div className="new-acc-fields">
-              <CustomerField value={customerName} onChange={(v) => { setName(v); setCustomerId(null); }} autoFocus
+              <CustomerField value={customerName} label={cfg.exigir_nome ? 'Cliente *' : 'Cliente (opcional)'} onChange={(v) => { setName(v); setCustomerId(null); }} autoFocus
                 onPick={(c) => { setCustomerId(c.id); if (c.phone) setPhone(c.phone); }} />
-              <label className="field" style={{ width: 110 }}>
-                <span>Mesa</span>
+              <label className="field" style={{ width: 120 }}>
+                <span>{cfg.rotulo_mesa ?? 'Mesa'}{cfg.exigir_mesa ? ' *' : ''}</span>
                 <input className="input" value={tableLabel} onChange={(e) => setTable(e.target.value)} placeholder="Ex.: 7" maxLength={20} />
               </label>
               <label className="field grow">
@@ -73,8 +74,8 @@ export default function NewAccount() {
               </label>
             </div>
             <div className="row wrap" style={{ gap: 8 }}>
-              {more
-                ? <label className="field" style={{ width: 220 }}><span>Telefone</span><input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(61) 9…" maxLength={30} /></label>
+              {more || cfg.exigir_telefone
+                ? <label className="field" style={{ width: 220 }}><span>Telefone{cfg.exigir_telefone ? ' *' : ''}</span><input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(61) 9…" maxLength={30} /></label>
                 : <button className="btn sm ghost" onClick={() => setMore(true)}>+ telefone</button>}
               <button className="btn sm ghost" style={{ marginLeft: 'auto' }} disabled={busy} onClick={() => create([])}>Abrir conta sem itens</button>
             </div>

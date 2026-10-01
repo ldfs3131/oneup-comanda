@@ -4,6 +4,7 @@ import { useAuth } from '../auth';
 import { CONSUMPTION_LABEL, SITUATION, brl, dateTime, time } from '../format';
 import type { Order } from '../types';
 import { AccountBadge, Badge, Modal, OrderBadge, Spinner } from './ui';
+import { useMesaLabel } from './brand';
 
 type Detail = {
   order: Order;
@@ -19,6 +20,7 @@ const FIELD_PT: Record<string, string> = { startedAt: 'Início do preparo', read
 
 /** Detalhe completo de um pedido sem sair da tela. */
 export function OrderDetailModal({ orderId, onClose, onOpenAccount }: { orderId: number; onClose: () => void; onOpenAccount?: (accountId: number) => void }) {
+  const mesa = useMesaLabel();
   const { user } = useAuth();
   const { data, isLoading, error } = useQuery({ queryKey: ['order', orderId], queryFn: () => api.get<Detail>(`/api/orders/${orderId}`) });
   const o = data?.order;
@@ -40,7 +42,7 @@ export function OrderDetailModal({ orderId, onClose, onOpenAccount }: { orderId:
             <div className="card tight">
               <div className="panel-title">Cliente</div>
               <div style={{ fontWeight: 800 }}>{data.account.customerName || <span className="faint">Cliente não informado</span>}</div>
-              {data.account.tableLabel && <div className="muted">Mesa {data.account.tableLabel}</div>}
+              {data.account.tableLabel && <div className="muted">{mesa} {data.account.tableLabel}</div>}
               {data.account.note && <div className="muted">{data.account.note}</div>}
               {(data.account.contact || data.account.phone) && <div className="muted">📞 {[data.account.contact, data.account.phone].filter(Boolean).join(' · ')}</div>}
             </div>

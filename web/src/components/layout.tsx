@@ -8,9 +8,10 @@ import { ROLE_LABEL } from '../format';
 import type { Settings } from '../types';
 import { Modal, useAction } from './ui';
 import { isMuted, onMuteChange, setMuted } from '../sound';
+import { BrandLogo } from './brand';
 
 export function Logo({ to = '/' }: { to?: string }) {
-  return <Link to={to} aria-label="Início"><img className="logo" src="/logo.png" alt="Happy Alpha" /></Link>;
+  return <Link to={to} aria-label="Início" className="logo-link"><BrandLogo className="logo" height={40} /></Link>;
 }
 
 export function Banners() {

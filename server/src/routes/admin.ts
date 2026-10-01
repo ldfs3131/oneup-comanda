@@ -7,6 +7,7 @@ import { deliverySettings, excludedDays, restaurantSettings } from '../db/schema
 import { me, requireRole } from '../auth.js';
 import { bad, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
+import { aplicarConfiguracoes, lerConfiguracoes } from '../services/configuracoes.js';
 import { notify } from '../realtime.js';
 import { runBackupAndRecord } from '../services/backup.js';
 import { setEstablishmentOpen } from '../services/day.js';
@@ -193,11 +194,15 @@ export async function adminRoutes(app: FastifyInstance) {
         meiEnabled: r.meiEnabled, meiLimitCents: r.meiLimitCents,
       },
       delivery: { isOpen: d.isOpen },
+      // valores efetivos do catálogo de personalização (o que muda o comportamento das telas)
+      config: await lerConfiguracoes(),
       backupDirs: config.backupDirs, demoMode: config.demoMode, lanUrls: lanUrls(),
       publicPort: config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled,
+      product: config.productName,
     };
   });
 
+  /** Compatibilidade com telas antigas: ABERTO/FECHADO aqui; o resto passa pelo catálogo (histórico e cadeados). */
   app.patch('/api/settings', admin, async (req) => {
     const b = parse(z.object({
       isOpen: z.boolean().optional(),
@@ -210,22 +215,11 @@ export async function adminRoutes(app: FastifyInstance) {
       meiLimitCents: z.number().int().min(0).max(100_000_000_00).optional(),
     }), req.body);
     const user = me(req);
-    const msgs: string[] = [];
-    await db.transaction(async (tx) => {
-      const { deliveryOpen, isOpen, ...rest } = b;
-      if (rest.whatsappNumber !== undefined) rest.whatsappNumber = rest.whatsappNumber ? rest.whatsappNumber.replace(/\D/g, '') : null;
-      if (Object.keys(rest).length) await tx.update(restaurantSettings).set({ ...rest, updatedAt: new Date() }).where(eq(restaurantSettings.id, empresaAtual()));
-      if (isOpen !== undefined) await setEstablishmentOpen(tx, user, isOpen, 'configurações');
-      if (deliveryOpen !== undefined) await tx.update(deliverySettings).set({ isOpen: deliveryOpen, updatedAt: new Date() }).where(eq(deliverySettings.id, empresaAtual()));
-      if (b.qrEnabled !== undefined) msgs.push(`QR Code ${b.qrEnabled ? 'LIGADO' : 'DESLIGADO'}`);
-      if (deliveryOpen !== undefined) msgs.push(`delivery ${deliveryOpen ? 'ABERTO' : 'FECHADO'}`);
-      if (b.whatsappNumber !== undefined) msgs.push('WhatsApp atualizado');
-      if (b.name) msgs.push(`nome → ${b.name}`);
-      if (b.tagline !== undefined) msgs.push(`subtítulo → ${b.tagline}`);
-      if (b.meiEnabled !== undefined) msgs.push(`indicador do MEI ${b.meiEnabled ? 'ligado' : 'desligado'}`);
-      if (b.meiLimitCents !== undefined) msgs.push('teto do MEI alterado');
-      if (msgs.length) await audit(tx, { userId: user.id, action: 'settings.update', message: `${user.name} alterou configurações: ${msgs.join(', ')}.` });
-    });
+    const map: Record<string, string> = { qrEnabled: 'cardapio_digital_ligado', whatsappNumber: 'whatsapp', name: 'nome', tagline: 'subtitulo', deliveryOpen: 'delivery_aberto', meiEnabled: 'mei_ligado', meiLimitCents: 'mei_limite' };
+    const valores: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(b)) if (map[k] && v !== undefined) valores[map[k]] = v;
+    if (Object.keys(valores).length) await aplicarConfiguracoes(valores, user);
+    if (b.isOpen !== undefined) await db.transaction((tx) => setEstablishmentOpen(tx, user, b.isOpen!, 'configurações'));
     notify.settingsChanged();
     return { ok: true };
   });

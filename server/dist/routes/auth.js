@@ -6,10 +6,12 @@ import { COOKIE, checkLoginRate, checkPassword, clearLoginRate, createSession, d
 import { bad, conflict, idParam, notFound, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { config } from '../config.js';
+import { configuracoesPublicas } from '../services/configuracoes.js';
 export async function authRoutes(app) {
     app.get('/api/meta', async (req) => {
         const [s] = await db.select().from(restaurantSettings).limit(1);
-        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', version: config.version, product: config.productName, empresa: req.empresa?.slug ?? null };
+        const pub = await configuracoesPublicas();
+        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', version: config.version, product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null };
     });
     app.post('/api/auth/login', async (req, reply) => {
         const rateKey = `${req.empresa?.id ?? 0}:${req.ip}`; // por empresa + aparelho

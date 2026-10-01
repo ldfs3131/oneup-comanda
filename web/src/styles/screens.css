@@ -381,3 +381,31 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
 /* aviso de som: flutuante, para não deslocar a tela quando some no 1º toque */
 .banner.sound { position: fixed; left: 12px; bottom: 12px; z-index: 70; border-radius: 999px; padding: 10px 16px; box-shadow: var(--shadow); border: 1px solid var(--border); max-width: calc(100vw - 24px); font-size: 0.9rem; }
 .page-head-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ONE Food: cardápio digital personalizado */
+.pub-logo-wrap { display: flex; justify-content: center; padding: 12px 0 4px; }
+.pub-welcome { text-align: center; color: var(--muted); margin: 4px 16px 8px; white-space: pre-line; }
+.pub-item.sold-out { opacity: 0.55; }
+
+/* ONE Food: Configurações geradas pelo catálogo */
+.cfg-search { max-width: 520px; }
+.cfg-nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.cfg-nav a { padding: 6px 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); text-decoration: none; font-size: 0.85rem; }
+.cfg-nav a:hover { border-color: var(--brand); }
+.cfg-sec { gap: 0; scroll-margin-top: 56px; }
+.cfg-sec > :first-child { padding-bottom: 12px; }
+.cfg-item { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px 20px; align-items: center; padding: 14px 0; border-top: 1px solid var(--border); }
+.cfg-item.locked { opacity: 0.8; }
+.cfg-label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cfg-ctrl { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; min-width: 0; }
+.cfg-ctrl .input, .cfg-ctrl textarea { width: 100%; }
+.cfg-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; width: 100%; }
+.cfg-swatch { width: 30px; height: 30px; border-radius: 8px; border: 2px solid var(--border); cursor: pointer; padding: 0; }
+.cfg-swatch.on { outline: 3px solid var(--text); outline-offset: 2px; }
+.cfg-swatch.custom { position: relative; overflow: hidden; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.cfg-swatch.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.btn.disabled { opacity: 0.5; pointer-events: none; }
+@media (max-width: 720px) {
+  .cfg-item { grid-template-columns: 1fr; }
+  .cfg-ctrl { align-items: stretch; }
+}

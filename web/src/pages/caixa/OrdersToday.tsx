@@ -5,6 +5,7 @@ import { api } from '../../api';
 import { ORDER_STATUS, ORIGIN_LABEL, SITUATION, brl, norm, time } from '../../format';
 import { Badge, OrderBadge, Spinner } from '../../components/ui';
 import { OrderDetailModal } from '../../components/OrderDetail';
+import { useMesaLabel } from '../../components/brand';
 
 type Row = {
   id: number; number: number; sequence: number; status: string; origin: string; consumptionType: 'LOCAL' | 'VIAGEM'; createdAt: string;
@@ -23,6 +24,7 @@ const FILTERS: { k: string; label: string; test: (r: Row) => boolean }[] = [
 ];
 
 export default function OrdersToday() {
+  const mesa = useMesaLabel();
   const nav = useNavigate();
   const { data, isLoading } = useQuery({ queryKey: ['ordersToday'], queryFn: () => api.get<Row[]>('/api/orders/today'), refetchInterval: 20_000 });
   const [f, setF] = useState(() => { try { return sessionStorage.getItem('ha:ordersFilter') ?? 'all'; } catch { return 'all'; } });
@@ -62,7 +64,7 @@ export default function OrdersToday() {
                   <b className="num">#{r.number}</b>
                   <span className="muted small">{time(r.createdAt)}</span>
                   <span className="ellipsis" style={{ fontWeight: 700 }}>{r.customerName || 'Cliente não informado'}</span>
-                  <span className="faint small">conta #{r.accountNumber}{r.tableLabel ? ` · Mesa ${r.tableLabel}` : ''}</span>
+                  <span className="faint small">conta #{r.accountNumber}{r.tableLabel ? ` · ${mesa} ${r.tableLabel}` : ''}</span>
                   {r.consumptionType === 'VIAGEM' && <span className="viagem-tag">VIAGEM</span>}
                   {r.origin !== 'CAIXA' && <Badge tone="brand">{ORIGIN_LABEL[r.origin] ?? r.origin}</Badge>}
                 </div>

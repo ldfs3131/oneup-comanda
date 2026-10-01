@@ -396,3 +396,27 @@ export const insightLog = pgTable('insight_log', {
     payload: jsonb('payload'),
     createdAt: createdAt(),
 }, (t) => [index('insight_log_key_idx').on(t.key)]);
+// ---------- Personalização (catálogo de configurações) ----------
+export const empresaConfig = pgTable('empresa_config', {
+    empresaId: empresaRef(),
+    chave: text('chave').notNull(),
+    valor: jsonb('valor'),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    updatedBy: integer('updated_by').references(() => users.id),
+});
+export const configHistorico = pgTable('config_historico', {
+    id: serial('id').primaryKey(),
+    empresaId: empresaRef(),
+    chave: text('chave').notNull(),
+    antes: jsonb('antes'),
+    depois: jsonb('depois'),
+    origem: text('origem').notNull(),
+    userId: integer('user_id').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+});
+export const configTravas = pgTable('config_travas', {
+    empresaId: empresaRef(),
+    chave: text('chave').notNull(),
+    motivo: text('motivo').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+});

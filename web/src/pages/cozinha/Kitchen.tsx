@@ -6,6 +6,8 @@ import { useRealtimeEvent } from '../../realtime';
 import { playAlert, playNew, unlockAudio } from '../../sound';
 import { Banners, SoundToggle, UserMenu } from '../../components/layout';
 import { Modal, useAction } from '../../components/ui';
+import { BrandLogo, useMesaLabel, usePageTitle } from '../../components/brand';
+import { useSettings } from '../../components/layout';
 
 type KItem = { id: number; name: string; quantity: number; options: { name: string }[]; note: string | null; cancelled: boolean; isCustom: boolean };
 type KOrder = {
@@ -28,6 +30,7 @@ const readPref = (k: string) => { try { return localStorage.getItem(k) === '1'; 
 const savePref = (k: string, v: boolean) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch { /* ok */ } };
 
 export default function Kitchen() {
+  usePageTitle('Cozinha');
   const qc = useQueryClient();
   const { data = [] } = useQuery({ queryKey: ['kitchen'], queryFn: () => api.get<KOrder[]>('/api/kitchen/orders'), refetchInterval: 15_000 });
   const [started, setStarted] = useState(false);
@@ -41,7 +44,6 @@ export default function Kitchen() {
   const [clock, setClock] = useState(time(new Date()));
 
   useEffect(() => {
-    document.title = 'Happy Alpha — Cozinha';
     const t = setInterval(() => { tick((x) => x + 1); setClock(time(new Date())); }, 20_000);
     return () => clearInterval(t);
   }, []);
@@ -92,7 +94,7 @@ export default function Kitchen() {
       <Banners />
       {!started && (
         <div className="k-start" onClick={start}>
-          <img src="/logo.png" alt="" style={{ width: 280, maxWidth: '70vw', borderRadius: 10 }} />
+          <BrandLogo height={120} />
           <div className="k-start-btn">TOCAR PARA INICIAR O TURNO</div>
           <div className="muted">Libera o som dos novos pedidos e mantém a tela acesa.</div>
         </div>
@@ -151,12 +153,17 @@ export default function Kitchen() {
 }
 
 function KCard({ o, onProblem }: { o: KOrder; onProblem: () => void }) {
+  const mesa = useMesaLabel();
   const { busy, run } = useAction();
   const qc = useQueryClient();
   const [showPrev, setShowPrev] = useState(false);
   const since = o.status === 'READY' ? minutesSince(o.readyAt) : minutesSince(o.confirmedAt ?? o.createdAt);
   const exp = o.expectedMinutes || 15;
-  const late = o.status !== 'READY' && since > exp * 1.5 ? 'late' : o.status !== 'READY' && since > exp ? 'warn' : '';
+  // limites de cor definidos pelo Dono em Configurações (% do tempo-meta)
+  const { data: settings } = useSettings();
+  const amarelo = (settings?.config?.cozinha_amarelo_pct ?? 100) / 100;
+  const vermelho = (settings?.config?.cozinha_vermelho_pct ?? 150) / 100;
+  const late = o.status !== 'READY' && since > exp * vermelho ? 'late' : o.status !== 'READY' && since > exp * amarelo ? 'warn' : '';
   const go = (action: string) => run(async () => { await api.post(`/api/kitchen/orders/${o.id}/${action}`); qc.invalidateQueries({ queryKey: ['kitchen'] }); });
   const active = o.items.filter((i) => !i.cancelled);
   const isComplement = o.sequence > 1;
@@ -169,7 +176,7 @@ function KCard({ o, onProblem }: { o: KOrder; onProblem: () => void }) {
           <div className="k-order">PEDIDO #{o.number}</div>
           <div className={`k-acc${isComplement ? ' comp' : ''}`}>
             {isComplement ? `COMPLEMENTO · CONTA #${o.account.number}` : `CONTA #${o.account.number}`}
-            {o.account.tableLabel && <span className="k-table">MESA {o.account.tableLabel}</span>}
+            {o.account.tableLabel && <span className="k-table">{mesa.toUpperCase()} {o.account.tableLabel}</span>}
           </div>
           {(o.account.customerName || o.account.note) && (
             <div className="k-who">{[o.account.customerName, o.account.note].filter(Boolean).join(' · ')}</div>

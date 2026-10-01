@@ -121,3 +121,51 @@ ALTER TABLE empresas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE empresas FORCE ROW LEVEL SECURITY;
 --> statement-breakpoint
 CREATE POLICY empresa_propria ON empresas FOR SELECT USING (id = app_empresa());
+
+--> statement-breakpoint
+-- 7) Vínculos sempre dentro da mesma empresa. A chave estrangeira do PostgreSQL NÃO olha o RLS;
+--    esta trava confere, com o RLS ligado, se o registro apontado é visível para a empresa atual.
+CREATE OR REPLACE FUNCTION ha_ref_mesma_empresa() RETURNS trigger AS $$
+DECLARE i int; col text; tab text; val bigint; ok boolean;
+BEGIN
+  FOR i IN 0 .. (TG_NARGS / 2 - 1) LOOP
+    col := TG_ARGV[i * 2]; tab := TG_ARGV[i * 2 + 1];
+    EXECUTE format('SELECT ($1).%I', col) INTO val USING NEW;
+    IF val IS NOT NULL THEN
+      EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I WHERE id = $1)', tab) INTO ok USING val;
+      IF NOT ok THEN
+        RAISE EXCEPTION 'Referência inválida (% %).', tab, val USING ERRCODE = 'foreign_key_violation';
+      END IF;
+    END IF;
+  END LOOP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+--> statement-breakpoint
+CREATE TRIGGER ref_products BEFORE INSERT OR UPDATE OF category_id ON products FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('category_id', 'categories');
+--> statement-breakpoint
+CREATE TRIGGER ref_option_groups BEFORE INSERT OR UPDATE OF product_id ON option_groups FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('product_id', 'products');
+--> statement-breakpoint
+CREATE TRIGGER ref_options BEFORE INSERT OR UPDATE OF group_id ON options FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('group_id', 'option_groups');
+--> statement-breakpoint
+CREATE TRIGGER ref_accounts BEFORE INSERT OR UPDATE OF customer_id, merged_into ON accounts FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('customer_id', 'customers', 'merged_into', 'accounts');
+--> statement-breakpoint
+CREATE TRIGGER ref_orders BEFORE INSERT OR UPDATE OF account_id ON orders FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('account_id', 'accounts');
+--> statement-breakpoint
+CREATE TRIGGER ref_order_items BEFORE INSERT OR UPDATE OF order_id, product_id ON order_items FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('order_id', 'orders', 'product_id', 'products');
+--> statement-breakpoint
+CREATE TRIGGER ref_payments BEFORE INSERT OR UPDATE OF account_id, method_id ON payments FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('account_id', 'accounts', 'method_id', 'payment_methods', 'cash_register_id', 'cash_registers');
+--> statement-breakpoint
+CREATE TRIGGER ref_discounts BEFORE INSERT OR UPDATE OF account_id ON discounts FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('account_id', 'accounts');
+--> statement-breakpoint
+CREATE TRIGGER ref_cancellations BEFORE INSERT OR UPDATE OF account_id ON cancellations FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('account_id', 'accounts', 'order_id', 'orders', 'order_item_id', 'order_items');
+--> statement-breakpoint
+CREATE TRIGGER ref_expenses BEFORE INSERT OR UPDATE OF category_id ON expenses FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('category_id', 'expense_categories');
+--> statement-breakpoint
+CREATE TRIGGER ref_stock_movements BEFORE INSERT ON stock_movements FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('product_id', 'products');
+--> statement-breakpoint
+CREATE TRIGGER ref_product_costs BEFORE INSERT ON product_costs FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('product_id', 'products');
+--> statement-breakpoint
+CREATE TRIGGER ref_time_corrections BEFORE INSERT ON order_time_corrections FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('order_id', 'orders');
+--> statement-breakpoint
+CREATE TRIGGER ref_sessions BEFORE INSERT ON sessions FOR EACH ROW EXECUTE FUNCTION ha_ref_mesma_empresa('user_id', 'users');

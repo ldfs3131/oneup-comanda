@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
 import type { User } from './types';
 
-type Meta = { demoMode: boolean; restaurantName: string; tagline: string; version: string };
+export type Meta = { demoMode: boolean; restaurantName: string; tagline: string; version: string; product?: string; empresa?: string | null; logo?: string | null; accent?: string | null };
 type AuthCtx = {
   user: User | null; loading: boolean; meta: Meta | null;
   login: (u: string, p: string, remember?: boolean) => Promise<User>; logout: () => Promise<void>;
@@ -13,11 +13,12 @@ const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [meta, setMeta] = useState<Meta | null>(null);
   const qc = useQueryClient();
+  // marca da empresa (nome, logotipo, cor): consulta pública, atualizada quando o Dono muda a personalização
+  const { data: metaData } = useQuery({ queryKey: ['meta'], queryFn: () => api.get<Meta>('/api/meta'), staleTime: 60_000 });
+  const meta = metaData ?? null;
 
   useEffect(() => {
-    api.get<Meta>('/api/meta').then(setMeta).catch(() => undefined);
     api.get<{ user: User }>('/api/auth/me').then((r) => setUser(r.user)).catch(() => setUser(null)).finally(() => setLoading(false));
     const onUnauth = () => setUser(null);
     window.addEventListener('ha:unauthorized', onUnauth);

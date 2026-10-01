@@ -19,6 +19,7 @@ import { adminRoutes } from './routes/admin.js';
 import { publicRoutes } from './routes/public.js';
 import { stockRoutes } from './routes/stock.js';
 import { managementRoutes } from './routes/management.js';
+import { configuracoesRoutes } from './routes/configuracoes.js';
 import { cleanupIdempotency } from './lib/idempotency.js';
 /**
  * Cada chamada de API pertence a UMA empresa (descoberta pelo endereço). A conexão do banco dessa
@@ -65,6 +66,7 @@ export async function buildApp() {
     await app.register(publicRoutes);
     await app.register(stockRoutes);
     await app.register(managementRoutes);
+    await app.register(configuracoesRoutes);
     app.get('/api/health', async () => ({ ok: true, time: new Date().toISOString() }));
     // Site (React compilado) + rotas do SPA
     if (existsSync(config.webDist)) {

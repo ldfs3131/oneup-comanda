@@ -161,6 +161,7 @@ async function main() {
     check('Numeração da Beta também começa em 1 (independente)', bAcc.data.number === 1, bAcc.data.number);
     const bPix = (await bCx.get('/api/payment-methods')).data.find((m) => m.code === 'PIX');
     const R = 'teste de vazamento';
+    const aCustomerId = (await sys.query('SELECT id FROM customers WHERE empresa_id = $1 ORDER BY id LIMIT 1', [ids.alfa])).rows[0]?.id ?? 999999;
     const ataques = [
         ['GET', `/api/accounts/${aAcc.data.id}`],
         ['GET', `/api/orders/${aOrder.id}`],
@@ -208,6 +209,8 @@ async function main() {
         ['POST', `/api/accounts/${bAcc.data.id}/payments`, { payments: [{ methodId: aPix.id, amountCents: 100 }] }],
         ['POST', '/api/stock/count', { items: [{ productId: aDrink.id, qty: 0 }], reason: R }],
         ['POST', '/api/expenses', { description: 'x', categoryId: aCats[0].id, amountCents: 100 }],
+        ['POST', '/api/products', { categoryId: aCat.id, name: 'Produto invasor', priceCents: 100, sendsToKitchen: false, groups: [] }],
+        ['POST', '/api/accounts', { customerId: aCustomerId, items: [{ productId: bDrink.id, quantity: 1 }] }],
     ];
     for (const [m, p, b] of ataques) {
         for (const cli of [bAdm, bCx]) {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api';
@@ -7,8 +7,11 @@ import { brl, minutesSince, minutesUntil, norm, time } from '../../format';
 import { AccountBadge, MoneyInput, Spinner, useAction } from '../../components/ui';
 import { useSettings } from '../../components/layout';
 import { useBoard } from './CashierLayout';
+import { BrandLogo } from '../../components/brand';
+import { useMesaLabel } from '../../components/brand';
 
 export default function Board() {
+  const mesa = useMesaLabel();
   const { data, isLoading } = useBoard();
   const nav = useNavigate();
   const [q, setQ] = useState('');
@@ -46,7 +49,7 @@ export default function Board() {
           return (
             <Link key={a.id} to={`/caixa/conta/${a.id}`} className={`acc-card${a.ready ? ' has-ready' : ''}`}>
               <div className="row between">
-                <span className="acc-num">#{a.number}{a.tableLabel && <span className="table-tag">Mesa {a.tableLabel}</span>}</span>
+                <span className="acc-num">#{a.number}{a.tableLabel && <span className="table-tag">{mesa} {a.tableLabel}</span>}</span>
                 <AccountBadge status={a.status} />
               </div>
               <div className="acc-name ellipsis">{a.customerName || <span className="faint">Cliente não informado</span>}</div>
@@ -75,13 +78,16 @@ export function OpenDay() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const { data: settings } = useSettings();
+  // troco sugerido pelo Dono em Configurações (o caixa pode mudar)
+  const sugerido = settings?.config?.abertura_sugerida as number | undefined;
+  useEffect(() => { if (cash == null && sugerido) setCash(sugerido); }, [sugerido]); // eslint-disable-line react-hooks/exhaustive-deps
   const hour = new Date().getHours();
   const hello = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
   return (
     <div className="page narrow" style={{ maxWidth: 520, paddingTop: 32 }}>
       <div className="card col gap-lg open-day">
         <div className="center">
-          <img src="/logo.png" alt="" style={{ height: 64, borderRadius: 10 }} />
+          <BrandLogo height={64} />
           <h1 style={{ marginTop: 12 }}>{hello}{user ? `, ${user.name.split(' ')[0]}` : ''}!</h1>
           <p className="muted">Para começar a lançar pedidos, abra o dia informando o dinheiro que está na gaveta. O estabelecimento fica <b>ABERTO</b> automaticamente.</p>
         </div>

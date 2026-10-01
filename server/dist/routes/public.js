@@ -6,6 +6,7 @@ import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
 import { currentRegister, insertOrder } from '../services/accounts.js';
 import { loadMenu } from './menu.js';
+import { configuracoesPublicas, lerConfig } from '../services/configuracoes.js';
 // Limite simples por IP para o canal público
 const hits = new Map();
 function rateLimit(ip, max, windowMs) {
@@ -25,15 +26,17 @@ async function settings() {
 export async function publicRoutes(app) {
     app.get('/api/public/menu', async () => {
         const { r, d } = await settings();
+        const cfg = await configuracoesPublicas();
         if (!r.qrEnabled)
-            return { enabled: false, name: r.name, whatsappNumber: r.whatsappNumber };
+            return { enabled: false, name: r.name, whatsappNumber: r.whatsappNumber, config: cfg };
         const menu = await loadMenu(db, { includeInactive: false, onlyAvailable: true });
+        const marcaAcabou = await lerConfig('esconder_sem_estoque');
         return {
-            enabled: true, name: r.name, isOpen: r.isOpen, deliveryOpen: d.isOpen, whatsappNumber: r.whatsappNumber,
+            enabled: true, name: r.name, isOpen: r.isOpen, deliveryOpen: d.isOpen, whatsappNumber: r.whatsappNumber, config: cfg,
             categories: menu.filter((c) => c.products.length).map((c) => ({
                 id: c.id, name: c.name,
                 products: c.products.map((p) => ({
-                    id: p.id, name: p.name, description: p.description, priceCents: p.priceCents, imageUrl: p.imageUrl, soldOut: p.trackStock && p.stockQty <= 0,
+                    id: p.id, name: p.name, description: p.description, priceCents: p.priceCents, imageUrl: p.imageUrl, soldOut: marcaAcabou && p.trackStock && p.stockQty <= 0,
                     groups: p.groups.map((g) => ({ id: g.id, name: g.name, required: g.required, multiple: g.multiple, options: g.options.map((o) => ({ id: o.id, name: o.name, priceDeltaCents: o.priceDeltaCents })) })),
                 })),
             })),

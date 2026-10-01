@@ -80,6 +80,9 @@ export type Settings = {
   publicPort: number | null;
   version: string;
   insightsEnabled: boolean;
+  product?: string;
+  /** valores efetivos do catálogo de personalização */
+  config: Record<string, any>;
 };
 
 export type StockShortage = { productId: number; name: string; stock: number; requested: number };

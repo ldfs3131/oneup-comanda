@@ -28,6 +28,7 @@ import InsightsPage from './pages/admin/InsightsPage';
 import FinancePage from './pages/admin/FinancePage';
 import TimingPage from './pages/admin/TimingPage';
 import OrdersHistory from './pages/admin/OrdersHistory';
+import { ThemeApplier } from './components/brand';
 
 function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -46,6 +47,8 @@ function Home() {
 
 export default function App() {
   return (
+    <>
+    <ThemeApplier />
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
@@ -79,5 +82,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Home />} />
     </Routes>
+    </>
   );
 }

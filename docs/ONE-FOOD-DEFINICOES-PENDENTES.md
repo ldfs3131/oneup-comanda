@@ -1,5 +1,7 @@
 # ONE Food — Definições em discussão (não implementar ainda)
 
+> Parecer do comitê analítico de 01/10: ver `ONE-FOOD-COMITE-2026-10-01.md` (matriz de votos, definições recomendadas e 5 decisões do Lucas).
+
 Registro de 01/10/2026 (manhã). Entram no prompt mestre quando o Lucas fechar a discussão.
 Referências visuais: `docs/referencias/financeiro-panorama-lucas.png` (modelo aprovado) e `docs/referencias/financeiro-atual-reprovado.png` (tela atual reprovada).
 

@@ -151,11 +151,12 @@ textarea.input { min-height: 80px; resize: vertical; }
 .sidenav a:hover { background: var(--surface-2); color: var(--text); }
 .sidenav a.active { background: var(--surface-3); color: var(--brand); }
 .sidenav .sep { height: 1px; background: var(--border); margin: 8px 4px; }
+.sidenav .nav-sec { font-size: 11px; font-weight: 800; letter-spacing: .08em; color: var(--info); padding: 10px 12px 2px; }
 @media (max-width: 900px) {
   .admin-shell { grid-template-columns: minmax(0, 1fr); }
   .sidenav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px; }
   .sidenav a { white-space: nowrap; }
-  .sidenav .sep { display: none; }
+  .sidenav .sep, .sidenav .nav-sec { display: none; }
 }
 
 /* ---------- Modal ---------- */

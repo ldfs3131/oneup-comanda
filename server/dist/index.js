@@ -6,7 +6,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { avisosConfig, config } from './config.js';
 import { appPool, bindContext, db, ensureEmpresaBase, ensurePlatformData, releaseContext, runAsEmpresa, runAsSystem, runMigrations, systemPool, waitForDatabase } from './db/index.js';
-import { empresas } from './db/schema.js';
+import { empresas, restaurantSettings } from './db/schema.js';
 import { empresaPorSlug, slugDaRequisicao } from './lib/empresa.js';
 import { errorHandler } from './lib/http.js';
 import { initRealtime } from './realtime.js';
@@ -72,6 +72,30 @@ export async function buildApp() {
     await app.register(managementRoutes);
     await app.register(configuracoesRoutes);
     app.get('/api/health', async () => ({ ok: true, time: new Date().toISOString() }));
+    // App instalável (tablet da cozinha, celular do caixa): nome do restaurante no ícone da tela inicial
+    app.get('/manifest.webmanifest', async (req, reply) => {
+        const emp = await empresaPorSlug(slugDaRequisicao(req.headers.host, req.headers['x-empresa']));
+        let nome = config.productName;
+        if (emp) {
+            const [r] = await runAsEmpresa(emp.id, () => db.select({ name: restaurantSettings.name }).from(restaurantSettings).limit(1));
+            nome = r?.name || emp.nome;
+        }
+        reply.type('application/manifest+json').header('Cache-Control', 'no-cache');
+        return {
+            name: nome, short_name: nome.length > 12 ? nome.split(/\s+/)[0].slice(0, 12) : nome, lang: 'pt-BR',
+            start_url: '/', scope: '/', display: 'standalone', orientation: 'any', background_color: '#161513', theme_color: '#161513',
+            icons: [
+                { src: '/oneup-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+                { src: '/oneup-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            ],
+        };
+    });
+    // Proxy HTTPS (Caddy, certificado sob demanda) pergunta se o endereço é de uma empresa ativa antes de emitir certificado
+    app.get('/api/health/tls', async (req, reply) => {
+        const domain = String(req.query.domain ?? '').toLowerCase();
+        const emp = await empresaPorSlug(slugDaRequisicao(domain, undefined));
+        return emp ? { ok: true } : reply.code(404).send({ ok: false });
+    });
     // Site (React compilado) + rotas do SPA
     if (existsSync(config.webDist)) {
         await app.register(fastifyStatic, {

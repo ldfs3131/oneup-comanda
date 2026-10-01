@@ -1,5 +1,5 @@
 export type Role = 'ADMIN' | 'CAIXA' | 'COZINHA';
-export type User = { id: number; name: string; username: string; role: Role };
+export type User = { id: number; name: string; username: string; role: Role; /** acesso da ONE UP (Administrador da plataforma) */ oneup?: boolean };
 
 export type Option = { id: number; name: string; priceDeltaCents: number; available: boolean; active: boolean; stockProductId?: number | null };
 export type OptionGroup = { id: number; name: string; required: boolean; multiple: boolean; active: boolean; options: Option[] };

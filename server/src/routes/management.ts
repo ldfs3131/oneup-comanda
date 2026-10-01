@@ -33,7 +33,9 @@ export async function managementRoutes(app: FastifyInstance) {
       FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE ${inRange('o.created_at', r)} AND ${live}`);
     const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents FROM discounts WHERE ${inRange('created_at', r)}`);
     const received = await q(sql`
-      SELECT pm.name, COALESCE(SUM(p.amount_cents),0) AS cents FROM payment_methods pm
+      SELECT pm.name, COALESCE(SUM(p.amount_cents),0) AS cents,
+             COALESCE(ROUND(SUM(p.amount_cents * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees, pm.taxa_bp AS "taxaBp"
+      FROM payment_methods pm
       LEFT JOIN payments p ON p.method_id = pm.id AND p.reversed_at IS NULL AND ${inRange('p.created_at', r)}
       GROUP BY pm.id ORDER BY pm.sort_order`);
     const [recv] = await q(sql`
@@ -63,16 +65,19 @@ export async function managementRoutes(app: FastifyInstance) {
     const cost = n(sales.cost), coverage = gross > 0 ? n(sales.gross_with_cost) / gross : 0;
     const expensesTotal = exp.reduce((s, e) => s + n(e.cents), 0);
     const grossProfit = revenue - cost;
+    const fees = received.reduce((s, x) => s + n(x.fees), 0);
     return {
       from: r.from, to: r.to,
       grossSalesCents: gross, discountsCents: discounts, revenueCents: revenue,
       receivedCents: received.reduce((s, x) => s + n(x.cents), 0),
-      receivedByMethod: received.map((x) => ({ name: x.name, cents: n(x.cents) })),
+      receivedByMethod: received.map((x) => ({ name: x.name, cents: n(x.cents), feesCents: n(x.fees), taxaBp: n(x.taxaBp) })),
+      // taxas da maquininha: calculadas com a taxa de cada forma no dia do recebimento
+      feesCents: fees, netReceivedCents: received.reduce((s, x) => s + n(x.cents), 0) - fees,
       pendingCents: n(recv.pending), openBalanceCents: n(recv.open),
       costCents: cost, costCoverage: coverage,
       grossProfitCents: grossProfit, grossMargin: revenue > 0 ? grossProfit / revenue : null,
       expensesCents: expensesTotal, expensesByCategory: exp.map((e) => ({ name: e.name, cents: n(e.cents), count: n(e.count) })),
-      operatingResultCents: grossProfit - expensesTotal,
+      operatingResultCents: grossProfit - expensesTotal - fees,
       products: products.map((p) => ({
         id: p.id, name: p.name, priceCents: p.price == null ? null : n(p.price), currentCostCents: p.currentCost == null ? null : n(p.currentCost),
         unitMarginCents: p.price != null && p.currentCost != null ? n(p.price) - n(p.currentCost) : null,

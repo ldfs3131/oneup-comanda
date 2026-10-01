@@ -6,7 +6,7 @@ import { Badge, Modal, MoneyInput, ReasonModal, Spinner, useAction } from '../..
 
 type Fin = {
   from: string; to: string; grossSalesCents: number; discountsCents: number; revenueCents: number; receivedCents: number;
-  receivedByMethod: { name: string; cents: number }[]; pendingCents: number; openBalanceCents: number;
+  receivedByMethod: { name: string; cents: number; feesCents: number; taxaBp: number }[]; feesCents: number; netReceivedCents: number; pendingCents: number; openBalanceCents: number;
   costCents: number; costCoverage: number; grossProfitCents: number; grossMargin: number | null;
   expensesCents: number; expensesByCategory: { name: string; cents: number; count: number }[]; operatingResultCents: number;
   products: { id: number | null; name: string; priceCents: number | null; currentCostCents: number | null; unitMarginCents: number | null; qty: number; revenueCents: number; costCents: number | null; marginCents: number | null; qtyWithoutCost: number }[];
@@ -69,14 +69,25 @@ export default function FinancePage() {
               <div className="kv"><span>− CMV (custo dos produtos vendidos)</span><span className="v">{brl(f.costCents)}</span></div>
               <div className="kv total"><span>= Lucro bruto <span className="small muted">{f.grossMargin != null ? `margem ${pct(f.grossMargin, 1)}` : ''}</span></span><span className="v">{brl(f.grossProfitCents)}</span></div>
               <div className="kv"><span>− Despesas</span><span className="v">{brl(f.expensesCents)}</span></div>
+              <div className="kv"><span>− Taxas da maquininha <span className="small muted">(estimado)</span></span><span className="v">{brl(f.feesCents)}</span></div>
               <div className="kv total"><span>= Resultado operacional</span><span className="v" style={{ color: f.operatingResultCents >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{brl(f.operatingResultCents)}</span></div>
               <div className="small faint mt">Resultado operacional não inclui impostos, pró-labore e outros itens fora do sistema — não é “lucro líquido”.</div>
             </div>
             <div className="col gap-lg">
               <div className="card">
                 <div className="panel-title">Recebido no período</div>
-                {f.receivedByMethod.map((m) => <div key={m.name} className="kv"><span>{m.name}</span><span className="v">{brl(m.cents)}</span></div>)}
+                {f.receivedByMethod.map((m) => (
+                  <div key={m.name} className="kv">
+                    <span>{m.name}{m.feesCents > 0 && <span className="small faint"> · taxa {brl(m.feesCents)}</span>}</span>
+                    <span className="v">{brl(m.cents)}</span>
+                  </div>
+                ))}
                 <div className="kv total"><span>Total recebido</span><span className="v">{brl(f.receivedCents)}</span></div>
+                {f.feesCents > 0 && <>
+                  <div className="kv"><span>− Taxas da maquininha</span><span className="v">{brl(f.feesCents)}</span></div>
+                  <div className="kv total"><span>= Cai na conta</span><span className="v" style={{ color: 'var(--ok)' }}>{brl(f.netReceivedCents)}</span></div>
+                </>}
+                {f.feesCents === 0 && f.receivedCents > 0 && <div className="small faint mt">Cadastre a taxa da maquininha em Configurações → Formas de pagamento para ver quanto cai na conta.</div>}
               </div>
               <div className="card">
                 <div className="panel-title">A receber (agora)</div>

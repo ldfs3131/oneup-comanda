@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'qrcode';
 import { api } from '../../api';
 import { OneUpCredit, useSettings } from '../../components/layout';
-import { Modal, MoneyInput, Spinner, Toggle, useAction } from '../../components/ui';
+import { Modal, MoneyInput, Spinner, Toggle, useAction, useToast } from '../../components/ui';
 import { brl, dateTime } from '../../format';
 
 /*
@@ -18,7 +18,7 @@ type Item = {
 };
 type Tela = { secoes: { id: string; titulo: string; descricao: string }[]; itens: Item[] };
 type Hist = { id: number; chave: string; rotulo: string; antes: unknown; depois: unknown; origem: string; criadoEm: string; usuario: string | null };
-type Metodo = { id: number; code: string; name: string; active: boolean; isCash: boolean; sortOrder: number };
+type Metodo = { id: number; code: string; name: string; active: boolean; isCash: boolean; sortOrder: number; taxaBp: number };
 
 const fmt = (tipo: string, v: unknown) => {
   if (v === null || v === undefined || v === '') return '—';
@@ -119,6 +119,7 @@ export default function SettingsPage() {
 /** ABERTO/FECHADO e o link do cardápio digital (estado operacional, não personalização). */
 function Operacao({ busy, run, isOpen, qrLigado }: { busy: boolean; run: ReturnType<typeof useAction>['run']; isOpen: boolean; qrLigado: boolean }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [qr, setQr] = useState<string | null>(null);
   const url = `${window.location.origin}/cardapio`;
   useEffect(() => { QRCode.toDataURL(url, { width: 320, margin: 1 }).then(setQr).catch(() => setQr(null)); }, [url]);
@@ -139,7 +140,11 @@ function Operacao({ busy, run, isOpen, qrLigado }: { busy: boolean; run: ReturnT
             <b>Link do seu cardápio digital</b>
             <div className="mono" style={{ wordBreak: 'break-all' }}>{url}</div>
             <div className="small muted">Imprima o QR Code nas mesas ou mande o link no WhatsApp. Todo pedido passa pela confirmação do caixa.</div>
-            <a className="btn sm" style={{ alignSelf: 'flex-start' }} href="/cardapio" target="_blank" rel="noreferrer">Ver como o cliente vê</a>
+            <div className="row wrap" style={{ gap: 8 }}>
+              <a className="btn sm" href="/cardapio" target="_blank" rel="noreferrer">Ver como o cliente vê</a>
+              <button className="btn sm" onClick={() => navigator.clipboard?.writeText(url).then(() => toast('Link copiado.', 'ok')).catch(() => toast('Não deu para copiar: selecione o link e copie.', 'danger'))}>Copiar link</button>
+              <button className="btn sm" onClick={() => QRCode.toDataURL(url, { width: 1200, margin: 2 }).then((d) => { const a = document.createElement('a'); a.href = d; a.download = 'qrcode-cardapio.png'; a.click(); })}>Baixar QR para imprimir</button>
+            </div>
           </div>
         </div>
       )}
@@ -248,11 +253,15 @@ function FormasPagamento() {
   const { busy, run } = useAction();
   const { data } = useQuery({ queryKey: ['payment-methods-all'], queryFn: () => api.get<Metodo[]>('/api/payment-methods?todas=1') });
   const [nomes, setNomes] = useState<Record<number, string>>({});
+  const [taxas, setTaxas] = useState<Record<number, string>>({});
   if (!data) return null;
+  const taxaTxt = (bp: number) => (bp / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const taxaNum = (t: string) => { const v = Number(t.replace(/\s|%/g, '').replace(',', '.')); return Number.isFinite(v) && v >= 0 && v <= 20 ? v : null; };
   const patch = (id: number, body: object, msg: string) => run(async () => {
     const r = await api.patch<Metodo[]>(`/api/payment-methods/${id}`, body);
     qc.setQueryData(['payment-methods-all'], r); qc.invalidateQueries({ queryKey: ['payment-methods'] });
     setNomes((n) => { const c = { ...n }; delete c[id]; return c; });
+    setTaxas((n) => { const c = { ...n }; delete c[id]; return c; });
   }, msg);
   const mover = (i: number, d: -1 | 1) => {
     const a = data[i], b = data[i + d]; if (!a || !b) return;
@@ -266,13 +275,25 @@ function FormasPagamento() {
     <section id="sec-pagamentos" className="card col cfg-sec">
       <div>
         <h2>Formas de pagamento</h2>
-        <div className="small muted">Ligue as que você aceita, mude o nome e a ordem em que aparecem para o caixa. Pelo menos uma fica ligada.</div>
+        <div className="small muted">Ligue as que você aceita, mude o nome e a ordem em que aparecem para o caixa. Pelo menos uma fica ligada. A <b>taxa da maquininha</b> mostra no Financeiro quanto realmente cai na conta (vale para os próximos recebimentos).</div>
       </div>
       {data.map((m, i) => (
         <div key={m.id} className="cfg-item">
           <div className="cfg-label">
             <input className="input" style={{ maxWidth: 260 }} value={nomes[m.id] ?? m.name} maxLength={30} onChange={(e) => setNomes({ ...nomes, [m.id]: e.target.value })} />
             <div className="small faint">{m.isCash ? 'Dinheiro (conta para a gaveta e o troco)' : 'Não entra na contagem da gaveta'}</div>
+            {!m.isCash && (
+              <label className="row small" style={{ gap: 6, marginTop: 6, alignItems: 'center' }}>
+                <span className="muted">Taxa da maquininha</span>
+                <input className="input num" inputMode="decimal" style={{ width: 84, padding: '4px 8px' }} value={taxas[m.id] ?? taxaTxt(m.taxaBp)}
+                  aria-label={`Taxa da maquininha de ${m.name} em %`} onChange={(e) => setTaxas({ ...taxas, [m.id]: e.target.value })} />
+                <span className="muted">%</span>
+                {taxas[m.id] !== undefined && taxaNum(taxas[m.id]) !== m.taxaBp / 100 && (
+                  <button className="btn sm primary" disabled={busy || taxaNum(taxas[m.id]) == null}
+                    onClick={() => patch(m.id, { taxaPct: taxaNum(taxas[m.id]) }, `Taxa de ${m.name} salva.`)}>Salvar</button>
+                )}
+              </label>
+            )}
           </div>
           <div className="cfg-ctrl row" style={{ gap: 6, justifyContent: 'flex-end' }}>
             {nomes[m.id] !== undefined && nomes[m.id] !== m.name && <button className="btn sm primary" disabled={busy || (nomes[m.id] ?? '').trim().length < 2} onClick={() => patch(m.id, { name: nomes[m.id].trim() }, 'Nome salvo.')}>Salvar</button>}

@@ -1,0 +1,129 @@
+{
+  "empresa": "happy-alpha",
+  "nome": "Happy Alpha",
+  "comentario": "Dados informados por Lucas em 01/10/2026 (custos dos produtos e relatório da maquininha de 30/03 a 30/09/2026).",
+  "logo": "happy-alpha-logo.png",
+  "configuracoes": {
+    "cor_destaque": "#f2d38a"
+  },
+  "custos": [
+    {
+      "rotulo": "Refrigerante",
+      "custo": 2.99,
+      "produtos": [
+        "Coca-Cola lata",
+        "Guaraná Antarctica lata",
+        "Fanta Laranja lata",
+        "Sprite lata"
+      ]
+    },
+    {
+      "rotulo": "Coca zero",
+      "custo": 3.35,
+      "produtos": [
+        "Coca-Cola Zero lata"
+      ]
+    },
+    {
+      "rotulo": "H2O",
+      "custo": 4.2,
+      "produtos": [
+        "Limoneto"
+      ]
+    },
+    {
+      "rotulo": "Água",
+      "custo": 1.3,
+      "produtos": [
+        "Água sem gás"
+      ]
+    },
+    {
+      "rotulo": "Água com gás",
+      "custo": 1.7,
+      "produtos": [
+        "Água com gás"
+      ]
+    },
+    {
+      "rotulo": "Suco lata",
+      "custo": 4.4,
+      "produtos": [
+        "Suco Del Valle lata Uva",
+        "Suco Del Valle lata Pêssego",
+        "Suco Del Valle lata Goiaba"
+      ]
+    },
+    {
+      "rotulo": "Água de coco caixinha",
+      "custo": 2.0,
+      "produtos": [
+        "Água de coco caixinha"
+      ]
+    },
+    {
+      "rotulo": "Heineken",
+      "custo": 5.83,
+      "produtos": [
+        "Heineken"
+      ]
+    },
+    {
+      "rotulo": "Corona",
+      "custo": 6.25,
+      "produtos": [
+        "Corona"
+      ]
+    },
+    {
+      "rotulo": "Baden Baden",
+      "custo": 5.45,
+      "produtos": [
+        "Baden Baden"
+      ]
+    }
+  ],
+  "novosProdutos": [
+    {
+      "nome": "Stella Artois",
+      "categoria": "Cervejas",
+      "custo": 5.99,
+      "estoque": true,
+      "nota": "Custo informado (R$ 5,99), mas a Stella não estava no cardápio. Defina o preço de venda e ative."
+    }
+  ],
+  "taxas": {
+    "CARTAO": 4.28,
+    "PIX": 0,
+    "DINHEIRO": 0
+  },
+  "referencias": [
+    {
+      "titulo": "Maquininha — últimos 6 meses antes do sistema",
+      "origem": "maquininha",
+      "inicio": "2026-03-30",
+      "fim": "2026-09-30",
+      "total": 50305.42,
+      "vendas": 727,
+      "taxas": 2143.85,
+      "porForma": [
+        {
+          "forma": "Crédito",
+          "vendas": 494,
+          "valor": 38074.69
+        },
+        {
+          "forma": "Débito",
+          "vendas": 226,
+          "valor": 12060.73
+        },
+        {
+          "forma": "Pix",
+          "vendas": 7,
+          "valor": 170.0
+        }
+      ],
+      "observacao": "Print do app da maquininha (atualizado em 30/09/2026 14:12). Não inclui vendas em dinheiro. Contestadas, canceladas e devolvidas: R$ 0,00. Total a receber: R$ 48.161,57."
+    }
+  ]
+}

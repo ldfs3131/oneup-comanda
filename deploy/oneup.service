@@ -1,0 +1,26 @@
+[Unit]
+Description=ONE UP (sistema dos restaurantes)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=oneup
+Group=oneup
+WorkingDirectory=/opt/oneup/app
+Environment=ENV_FILE=/opt/oneup/.env
+EnvironmentFile=/opt/oneup/.env
+ExecStart=/usr/bin/node server/dist/index.js
+Restart=always
+RestartSec=3
+# segurança: o processo só escreve na pasta de imagens enviadas
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/oneup/uploads
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -14,7 +14,7 @@ type Dash = {
   ordersNew: number; ordersPreparing: number; ordersReady: number; ordersAwaiting: number;
   discountsCents: number; discountsCount: number; discountsByUser: { name: string; cents: number; count: number }[];
   cancellationsCents: number; cancellationsCount: number; lossCents: number;
-  payments: { code: string; name: string; cents: number; count: number }[]; receivedCents: number;
+  payments: { code: string; name: string; cents: number; count: number; feesCents: number }[]; receivedCents: number; feesCents: number;
   topProducts: { name: string; qty: number; cents: number }[];
   byCategory: { name: string; cents: number; qty: number }[];
   byHour: { hour: number; orders: number }[];
@@ -141,6 +141,7 @@ export default function Dashboard() {
             <div className="panel-title">Pagamentos recebidos</div>
             {d.payments.map((p) => <div key={p.code} className="kv"><span>{p.name} <span className="faint small">({p.count})</span></span><span className="v">{brl(p.cents)}</span></div>)}
             <div className="kv total"><span>Total</span><span className="v">{brl(d.receivedCents)}</span></div>
+            {d.feesCents > 0 && <div className="kv small"><span className="muted">Taxa da maquininha (estimada) · cai na conta</span><span className="v muted">−{brl(d.feesCents)} · {brl(d.receivedCents - d.feesCents)}</span></div>}
           </div>
           <div className="card">
             <div className="panel-title">Descontos e cancelamentos</div>

@@ -26,6 +26,7 @@ roda isolamento env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node 
 roda personalizacao env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/personalizacao-test.js
 roda conexoes env DATABASE_URL=$PG/of_iso node dist/scripts/conexao-test.js
 roda comite env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/comite-test.js
+roda oneup env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/oneup-test.js
 kill $S2 2>/dev/null; wait $S2 2>/dev/null
 
 echo; [ $falhas -eq 0 ] && echo "TUDO OK" || echo "$falhas suíte(s) falharam"

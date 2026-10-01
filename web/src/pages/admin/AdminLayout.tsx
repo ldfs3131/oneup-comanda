@@ -1,8 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { Banners, EstablishmentChip, Logo, SoundToggle, UserMenu, useSettings } from '../../components/layout';
+import { useAuth } from '../../auth';
 
 export default function AdminLayout() {
   const { data: settings } = useSettings();
+  const { user } = useAuth();
   return (
     <div className="app">
       <Banners />
@@ -16,7 +18,11 @@ export default function AdminLayout() {
       <div className="admin-shell">
         <nav className="sidenav">
           <NavLink to="/admin" end>📊 Dashboard</NavLink>
+          {/* Leitura dos números: serviço da ONE UP (o Dono não vê) */}
+          {user?.oneup && <div className="nav-sec">ONE UP</div>}
           {settings?.insightsEnabled && <NavLink to="/admin/insights">💡 Insights</NavLink>}
+          {user?.oneup && <NavLink to="/admin/oneup/base">📈 Base de comparação</NavLink>}
+          {user?.oneup && <div className="sep" />}
           <NavLink to="/admin/financeiro">💵 Financeiro</NavLink>
           <NavLink to="/admin/pedidos">📋 Pedidos</NavLink>
           <NavLink to="/admin/tempo">⏱ Tempo de preparo</NavLink>

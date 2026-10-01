@@ -1,0 +1,10 @@
+[Unit]
+Description=ONE UP — cópia de segurança diária (03:30)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

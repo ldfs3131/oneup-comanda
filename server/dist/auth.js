@@ -54,7 +54,7 @@ export async function userFromToken(token) {
     if (hit && hit.ate > Date.now())
         return hit.user;
     const rows = await db
-        .select({ id: users.id, name: users.name, username: users.username, role: roles.code, active: users.active, expiresAt: sessions.expiresAt })
+        .select({ id: users.id, name: users.name, username: users.username, role: roles.code, active: users.active, oneup: users.oneup, expiresAt: sessions.expiresAt })
         .from(sessions)
         .innerJoin(users, eq(users.id, sessions.userId))
         .innerJoin(roles, eq(roles.id, users.roleId))
@@ -71,7 +71,7 @@ export async function userFromToken(token) {
     if (exp < half && exp > Date.now() + 86400_000) {
         await db.update(sessions).set({ expiresAt: new Date(Date.now() + config.sessionDays * 86400_000) }).where(eq(sessions.tokenHash, hash));
     }
-    const user = { id: u.id, name: u.name, username: u.username, role: u.role };
+    const user = { id: u.id, name: u.name, username: u.username, role: u.role, oneup: u.oneup };
     if (cacheSessao.size < 50_000)
         cacheSessao.set(ck, { user, ate: Math.min(Date.now() + 10_000, exp) });
     return user;
@@ -100,6 +100,14 @@ export function requireRole(...allowed) {
     };
 }
 export const me = (req) => req.user;
+/** Guard: só o usuário da ONE UP (Administrador da plataforma). Para os demais a rota "não existe" (404). */
+export function requireOneup() {
+    return async (req, reply) => {
+        await requireRole('ADMIN')(req, reply);
+        if (!req.user.oneup)
+            throw new HttpError(404, 'Recurso não disponível.');
+    };
+}
 /*
  * Tentativas de senha errada. Conta só os ERROS, separado por pessoa e por aparelho (IP):
  * a cozinha errando a senha não trava o login do caixa nem do dono.

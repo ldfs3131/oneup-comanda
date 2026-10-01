@@ -32,7 +32,7 @@ export async function authRoutes(app) {
             path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, ...(body.remember ? { expires: s.expiresAt } : {}),
         });
         await audit(db, { userId: row.u.id, action: 'auth.login', entityType: 'user', entityId: row.u.id, message: `${row.u.name} entrou no sistema.` });
-        return { user: { id: row.u.id, name: row.u.name, username: row.u.username, role: row.role } };
+        return { user: { id: row.u.id, name: row.u.name, username: row.u.username, role: row.role, oneup: row.u.oneup } };
     });
     app.post('/api/auth/logout', async (req, reply) => {
         const u = await userFromToken(req.cookies[COOKIE]);
@@ -55,9 +55,10 @@ export async function authRoutes(app) {
     });
     // ---------- Gestão de usuários (admin) ----------
     const admin = { preHandler: requireRole('ADMIN') };
-    app.get('/api/users', admin, async () => {
-        return db.select({ id: users.id, name: users.name, username: users.username, role: roles.code, active: users.active, createdAt: users.createdAt })
-            .from(users).innerJoin(roles, eq(roles.id, users.roleId)).orderBy(asc(users.name));
+    // O usuário da ONE UP não aparece para o Dono e não pode ser alterado por ele (só pela ferramenta da plataforma).
+    app.get('/api/users', admin, async (req) => {
+        return db.select({ id: users.id, name: users.name, username: users.username, role: roles.code, active: users.active, oneup: users.oneup, createdAt: users.createdAt })
+            .from(users).innerJoin(roles, eq(roles.id, users.roleId)).where(me(req).oneup ? undefined : eq(users.oneup, false)).orderBy(asc(users.name));
     });
     const roleSchema = z.enum(['ADMIN', 'CAIXA', 'COZINHA']);
     const roleId = async (code) => (await db.select().from(roles).where(eq(roles.code, code)))[0].id;
@@ -86,7 +87,7 @@ export async function authRoutes(app) {
             password: z.string().min(4, 'mínimo 4 caracteres').optional(),
         }), req.body);
         const [u] = await db.select().from(users).where(eq(users.id, id));
-        if (!u)
+        if (!u || (u.oneup && !me(req).oneup))
             throw notFound('Usuário não encontrado.');
         if (id === me(req).id && (b.active === false || (b.role && b.role !== 'ADMIN'))) {
             throw conflict('Você não pode desativar nem rebaixar o seu próprio usuário.');
@@ -94,7 +95,8 @@ export async function authRoutes(app) {
         if (b.active === false || (b.role && b.role !== 'ADMIN')) {
             const adminRole = await roleId('ADMIN');
             if (u.roleId === adminRole) {
-                const others = await db.select().from(users).where(and(eq(users.roleId, adminRole), eq(users.active, true), ne(users.id, id)));
+                // o administrador da ONE UP não conta: o restaurante precisa manter o próprio Dono ativo
+                const others = await db.select().from(users).where(and(eq(users.roleId, adminRole), eq(users.active, true), eq(users.oneup, false), ne(users.id, id)));
                 if (!others.length)
                     throw conflict('É preciso manter ao menos um administrador ativo.');
             }

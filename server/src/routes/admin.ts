@@ -1,11 +1,11 @@
 import { respostaCompartilhada } from '../lib/cacheRota.js';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { eq, sql } from 'drizzle-orm';
 import { networkInterfaces } from 'node:os';
 import { db, empresaAtual } from '../db/index.js';
-import { deliverySettings, excludedDays, restaurantSettings } from '../db/schema.js';
-import { me, requireRole } from '../auth.js';
+import { deliverySettings, excludedDays, referenciasExternas, restaurantSettings } from '../db/schema.js';
+import { me, requireOneup, requireRole } from '../auth.js';
 import { bad, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { aplicarConfiguracoes, lerConfiguracoes } from '../services/configuracoes.js';
@@ -41,8 +41,9 @@ const inRange = (col: string, r: { from: string; to: string }) =>
 export async function adminRoutes(app: FastifyInstance) {
   const admin = { preHandler: requireRole('ADMIN') };
   // Insights: primeiro confere o perfil (Caixa/Cozinha continuam recebendo 403); com o recurso desligado, responde 404.
-  const insightsOn = async (_req: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => {
-    if (!config.insightsEnabled) return reply.code(404).send({ error: 'Recurso não disponível.' });
+  // A leitura dos números é serviço da ONE UP: aparece para o usuário da ONE UP (ou com INSIGHTS_ENABLED na instalação própria).
+  const insightsOn = async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!config.insightsEnabled && !me(req).oneup) return reply.code(404).send({ error: 'Recurso não disponível.' });
   };
   const insightsAdmin = { preHandler: [requireRole('ADMIN'), insightsOn] };
   const anyUser = { preHandler: requireRole() };
@@ -66,7 +67,8 @@ export async function adminRoutes(app: FastifyInstance) {
       SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count, COALESCE(SUM(amount_cents) FILTER (WHERE was_in_preparation),0) AS loss
       FROM cancellations WHERE ${inRange('created_at', r)}`);
     const byMethod = await q(sql`
-      SELECT pm.code, pm.name, COALESCE(SUM(p.amount_cents),0) AS cents, COUNT(p.id) AS count
+      SELECT pm.code, pm.name, COALESCE(SUM(p.amount_cents),0) AS cents, COUNT(p.id) AS count,
+             COALESCE(ROUND(SUM(p.amount_cents * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees
       FROM payment_methods pm LEFT JOIN payments p ON p.method_id=pm.id AND p.reversed_at IS NULL AND ${inRange('p.created_at', r)}
       GROUP BY pm.id ORDER BY pm.sort_order`);
     const [accs] = await q(sql`
@@ -125,8 +127,9 @@ export async function adminRoutes(app: FastifyInstance) {
       discountsCents: n(disc.cents), discountsCount: n(disc.count),
       discountsByUser: discByUser.map((d) => ({ name: d.name, cents: n(d.cents), count: n(d.count) })),
       cancellationsCents: n(canc.cents), cancellationsCount: n(canc.count), lossCents: n(canc.loss),
-      payments: byMethod.map((m) => ({ code: m.code, name: m.name, cents: n(m.cents), count: n(m.count) })),
+      payments: byMethod.map((m) => ({ code: m.code, name: m.name, cents: n(m.cents), count: n(m.count), feesCents: n(m.fees) })),
       receivedCents: byMethod.reduce((acc, m) => acc + n(m.cents), 0),
+      feesCents: byMethod.reduce((acc, m) => acc + n(m.fees), 0),
       topProducts: topProducts.map((t) => ({ name: t.name, qty: n(t.qty), cents: n(t.cents) })),
       byCategory: byCategory.map((c) => ({ name: c.name, cents: n(c.cents), qty: n(c.qty) })),
       byHour: byHour.map((h) => ({ hour: n(h.h), orders: n(h.orders) })),
@@ -140,6 +143,51 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // ---------- Insights ----------
   app.get('/api/insights', insightsAdmin, async () => computeInsights(db));
+
+  // ---------- Base de comparação (só ONE UP): vendas de antes do sistema × período atual ----------
+  app.get('/api/oneup/referencias', { preHandler: requireOneup() }, async (req) => {
+    const q0 = parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional() }), req.query);
+    const hoje = todayLocal();
+    const to = q0.to ?? hoje;
+    const from = q0.from ?? new Date(Date.parse(`${to}T12:00:00Z`) - 29 * 86400_000).toISOString().slice(0, 10);
+    const r = rangeOf({ from, to });
+    const dias = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86400_000) + 1;
+    const refs = await db.select().from(referenciasExternas).orderBy(referenciasExternas.inicio);
+    const [s] = (await db.execute(sql`
+      SELECT COALESCE(SUM(p.amount_cents),0) AS total,
+             COALESCE(SUM(p.amount_cents) FILTER (WHERE NOT pm.is_cash),0) AS sem_dinheiro,
+             COUNT(p.id) FILTER (WHERE NOT pm.is_cash) AS vendas_sem_dinheiro,
+             COUNT(DISTINCT p.account_id) AS contas,
+             COALESCE(ROUND(SUM(p.amount_cents * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS taxas,
+             MIN((p.created_at AT TIME ZONE ${TZ})::date)::text AS primeiro
+      FROM payments p JOIN payment_methods pm ON pm.id = p.method_id
+      WHERE p.reversed_at IS NULL AND ${inRange('p.created_at', r)}`)).rows as any[];
+    // dias com o sistema em uso: do primeiro recebimento do período até o fim (sem diluir antes da implantação)
+    const inicioUso = s.primeiro && s.primeiro > r.from ? s.primeiro : r.from;
+    const fimUso = r.to < hoje ? r.to : hoje;
+    const diasUso = s.primeiro ? Math.max(1, dias(inicioUso, fimUso)) : 0;
+    const total = n(s.total), semDinheiro = n(s.sem_dinheiro), contas = n(s.contas);
+    return {
+      referencias: refs.map((x) => {
+        const d = dias(x.inicio, x.fim);
+        return {
+          id: x.id, titulo: x.titulo, origem: x.origem, inicio: x.inicio, fim: x.fim, dias: d, observacao: x.observacao,
+          totalCents: x.totalCents, vendas: x.vendas, taxasCents: x.taxasCents, porForma: x.porForma,
+          diariaCents: Math.round(x.totalCents / d), mensalCents: Math.round((x.totalCents / d) * 30),
+          ticketCents: x.vendas ? Math.round(x.totalCents / x.vendas) : 0,
+          vendasPorDia: Math.round((x.vendas / d) * 10) / 10,
+          taxaEfetiva: x.totalCents ? x.taxasCents / x.totalCents : 0,
+        };
+      }),
+      atual: {
+        from: r.from, to: r.to, diasUso, inicioUso: s.primeiro ? inicioUso : null,
+        recebidoCents: total, semDinheiroCents: semDinheiro, vendasSemDinheiro: n(s.vendas_sem_dinheiro), contas, taxasCents: n(s.taxas),
+        diariaCents: diasUso ? Math.round(total / diasUso) : 0,
+        diariaSemDinheiroCents: diasUso ? Math.round(semDinheiro / diasUso) : 0,
+        ticketCents: contas ? Math.round(total / contas) : 0,
+      },
+    };
+  });
 
   app.get('/api/excluded-days', insightsAdmin, async () =>
     (await db.execute(sql`SELECT to_char(day,'YYYY-MM-DD') AS day, reason FROM excluded_days ORDER BY day DESC`)).rows);
@@ -189,7 +237,7 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---------- Configurações ----------
-  app.get('/api/settings', anyUser, async () => {
+  app.get('/api/settings', anyUser, async (req) => {
     const [r] = await db.select().from(restaurantSettings).limit(1);
     const [d] = await db.select().from(deliverySettings).limit(1);
     return {
@@ -202,7 +250,7 @@ export async function adminRoutes(app: FastifyInstance) {
       config: await lerConfiguracoes(),
       // detalhes do servidor só em instalação própria (online, cada empresa não precisa nem deve ver)
       backupDirs: config.baseDomain ? [] : config.backupDirs, demoMode: config.demoMode, lanUrls: config.baseDomain ? [] : lanUrls(),
-      publicPort: config.baseDomain ? null : config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled,
+      publicPort: config.baseDomain ? null : config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled || me(req).oneup,
       product: config.productName,
     };
   });

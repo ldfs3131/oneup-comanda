@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# ONE UP — comandos do servidor. Digite: oneup ajuda
+set -uo pipefail
+APP=/opt/oneup/app
+BASE=/opt/oneup
+ENVF=$BASE/.env
+BKP=$BASE/backups
+GUARDAR_DIAS=${GUARDAR_DIAS:-14}
+
+verde() { printf '\033[1;32m%s\033[0m\n' "$*"; }
+vermelho() { printf '\033[1;31m%s\033[0m\n' "$*"; }
+[ "$(id -u)" = 0 ] || { vermelho "Use como root."; exit 1; }
+senha() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'); echo "${s:0:${1:-10}}"; }
+pin() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc '0-9'); echo "${s:0:${1:-6}}"; }
+carregar_env() { set -a; . "$ENVF"; set +a; }
+saude() { for i in $(seq 1 "${1:-60}"); do curl -fsS http://127.0.0.1:3010/api/health >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
+plataforma() { carregar_env; cd "$APP/server" && node dist/scripts/plataforma.js "$@"; local r=$?; chown -R oneup:oneup "$BASE/uploads" 2>/dev/null; return $r; }
+
+backup() {
+  mkdir -p "$BKP"; chmod 750 "$BKP"
+  local quando arq
+  quando=$(date +%Y-%m-%d_%H%M)
+  arq="$BKP/oneup-$quando.dump"
+  if sudo -u postgres pg_dump -Fc -d oneup -f "/tmp/oneup-$quando.dump"; then
+    mv "/tmp/oneup-$quando.dump" "$arq"
+    tar -czf "$BKP/imagens-$quando.tar.gz" -C "$BASE" uploads 2>/dev/null || true
+    find "$BKP" -name 'oneup-*.dump' -mtime +"$GUARDAR_DIAS" -delete
+    find "$BKP" -name 'imagens-*.tar.gz' -mtime +"$GUARDAR_DIAS" -delete
+    verde "Cópia salva: $arq ($(du -h "$arq" | cut -f1)). Guardando os últimos $GUARDAR_DIAS dias."
+  else
+    vermelho "Falhou a cópia do banco."; return 1
+  fi
+}
+
+case "${1:-ajuda}" in
+  status)
+    systemctl --no-pager --lines=0 status oneup caddy postgresql | grep -E '●|Active' ; echo
+    saude 3 && verde "Sistema respondendo." || vermelho "Sistema NÃO está respondendo."
+    carregar_env; echo "Endereço base: $BASE_DOMAIN · versão: $(node -p "require('$APP/server/package.json').version")"
+    echo "Última cópia: $(ls -1t $BKP/oneup-*.dump 2>/dev/null | head -1 || echo nenhuma)"
+    df -h / | tail -1 | awk '{print "Disco: "$3" usados de "$2" ("$5")"}'
+    ;;
+  logs) journalctl -u oneup -n "${2:-100}" --no-pager ;;
+  reiniciar) systemctl restart oneup && saude && verde "Reiniciado." || vermelho "Não voltou. Veja: oneup logs" ;;
+  backup) backup ;;
+  acessos) cat /root/oneup-acessos.txt 2>/dev/null || echo "Nenhum acesso registrado." ;;
+  atualizar)
+    cd "$APP" || exit 1
+    antes=$(git rev-parse HEAD)
+    echo "Versão atual: $(git log -1 --format='%h %s')"
+    git fetch --quiet origin || { vermelho "Não consegui baixar do GitHub (chave de acesso?)."; exit 1; }
+    ramo=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$(git rev-parse "origin/$ramo")" = "$antes" ]; then verde "Já está na versão mais nova."; exit 0; fi
+    backup || { vermelho "Sem cópia de segurança, não atualizo."; exit 1; }
+    git reset --quiet --hard "origin/$ramo"
+    npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error
+    install -m 755 deploy/oneup /usr/local/bin/oneup
+    systemctl restart oneup
+    if saude 90; then
+      verde "Atualizado: $(git log -1 --format='%h %s')"
+    else
+      vermelho "A versão nova não ligou. Voltando para a anterior…"
+      git reset --quiet --hard "$antes"; npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error
+      systemctl restart oneup; saude 60 && verde "Voltou para a versão anterior (dados preservados)." || vermelho "Atenção: rode 'oneup logs' e chame o suporte."
+      exit 1
+    fi
+    ;;
+  nova-empresa)
+    slug=${2:-}; nome=${3:-}
+    [ -n "$slug" ] && [ -n "$nome" ] || { echo 'Uso: oneup nova-empresa <endereco> "Nome do restaurante" [login-do-dono]'; exit 1; }
+    dono=${4:-dono}
+    [[ "$slug" =~ ^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$ ]] || { echo "Endereço inválido: use letras minúsculas, números e hífen."; exit 1; }
+    pd=$(senha 10); pc=$(pin 6); pk=$(pin 6)
+    carregar_env; cd "$APP/server"
+    node dist/scripts/setup.js --empresa="$slug" --nome="$nome" --admin-name="$nome" --admin-user="$dono" --admin-pass="$pd" --caixa-pass="$pc" --cozinha-pass="$pk" --cardapio=vazio || exit 1
+    umask 077
+    printf '==================== %s — criado em %s ====================\nEndereço:   https://%s.%s\nDono:       login %s   senha %s\nCaixa:      login caixa   senha %s\nCozinha:    login cozinha senha %s\n\n' \
+      "$nome" "$(date '+%d/%m/%Y %H:%M')" "$slug" "$BASE_DOMAIN" "$dono" "$pd" "$pc" "$pk" | tee -a /root/oneup-acessos.txt
+    echo "Para entrar com o seu acesso de suporte: oneup plataforma oneup-usuario --empresa=$slug --login=lucas --nome=\"Lucas (ONE UP)\" --senha=<senha>"
+    ;;
+  senha)
+    slug=${2:-}; login=${3:-}
+    [ -n "$slug" ] && [ -n "$login" ] || { echo 'Uso: oneup senha <empresa> <login>   (gera uma senha nova e derruba os aparelhos conectados)'; exit 1; }
+    nova=$(senha 10)
+    plataforma senha --empresa="$slug" --login="$login" --senha="$nova" && verde "Nova senha de $login em $slug: $nova"
+    ;;
+  plataforma) shift; plataforma "$@" ;;
+  ajuda|*)
+    cat <<'TXT'
+ONE UP — comandos do servidor
+  oneup status                 situação do sistema, endereço, última cópia e disco
+  oneup logs [linhas]          últimos registros do sistema
+  oneup reiniciar              reinicia o sistema
+  oneup atualizar              baixa a versão nova do GitHub (faz cópia antes e volta sozinho se falhar)
+  oneup backup                 cópia de segurança agora (automática todo dia às 03:30, guarda 14 dias)
+  oneup acessos                mostra endereços e senhas criados na instalação
+  oneup nova-empresa <endereco> "Nome" [login]   cria outro restaurante (ex.: oneup nova-empresa bom-sabor "Bom Sabor")
+  oneup senha <empresa> <login>                  gera senha nova para alguém que esqueceu
+  oneup plataforma <comando>   ferramenta da ONE UP (empresas, catalogo, travar, definir, provisionar, oneup-usuario)
+TXT
+    ;;
+esac

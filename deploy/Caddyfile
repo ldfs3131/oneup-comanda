@@ -1,0 +1,30 @@
+# ONE UP — HTTPS automático. Cada restaurante é um endereço <empresa>.<BASE_DOMAIN>.
+# O certificado de cada endereço é emitido na primeira visita, só se o sistema confirmar que a empresa existe.
+{
+	email __EMAIL__
+	on_demand_tls {
+		ask http://127.0.0.1:3010/api/health/tls
+	}
+}
+
+https:// {
+	tls {
+		on_demand
+	}
+	encode zstd gzip
+	# pergunta interna do certificado não fica exposta na internet
+	@interno path /api/health/tls
+	respond @interno 404
+	request_body {
+		max_size 10MB
+	}
+	reverse_proxy 127.0.0.1:3010 {
+		header_up X-Forwarded-Proto https
+	}
+	log {
+		output file /var/log/caddy/oneup.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+}

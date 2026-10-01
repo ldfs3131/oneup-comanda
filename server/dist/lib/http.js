@@ -14,12 +14,22 @@ export const bad = (msg) => new HttpError(400, msg);
 export const notFound = (msg = 'Registro não encontrado.') => new HttpError(404, msg);
 export const forbidden = (msg = 'Sem permissão para esta ação.') => new HttpError(403, msg);
 export const conflict = (msg) => new HttpError(409, msg);
+// mensagens de validação em português (antes saíam em inglês para o Dono e o caixa)
+z.config(z.locales.ptBR());
+const CAMPOS = {
+    name: 'nome', username: 'login', password: 'senha', next: 'nova senha', current: 'senha atual', role: 'perfil',
+    priceCents: 'preço', costCents: 'custo', amountCents: 'valor', tenderedCents: 'valor recebido', customerName: 'nome do cliente',
+    customerPhone: 'telefone', reason: 'motivo', description: 'descrição', quantity: 'quantidade', note: 'observação',
+    table: 'mesa', categoryId: 'categoria', items: 'itens', payments: 'pagamentos', date: 'data', from: 'data inicial', to: 'data final',
+    taxaPct: 'taxa', openingCashCents: 'troco inicial', countedCashCents: 'valor contado',
+};
+const campo = (path) => path.filter((p) => typeof p === 'string').map((p) => CAMPOS[p] ?? String(p)).join(' › ');
 export function parse(schema, data) {
     const r = schema.safeParse(data);
     if (!r.success) {
         const first = r.error.issues[0];
-        const path = first?.path?.join('.') ?? '';
-        throw bad(`Dados inválidos${path ? ` (${path})` : ''}: ${first?.message ?? 'verifique os campos'}`);
+        const path = first ? campo(first.path) : '';
+        throw bad(`Confira ${path ? `o campo "${path}"` : 'os campos'}: ${first?.message ?? 'valor inválido'}`);
     }
     return r.data;
 }

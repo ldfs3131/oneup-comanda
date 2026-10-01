@@ -16,6 +16,17 @@ function tipoReal(b) {
         return 'webp';
     return null;
 }
+/** Grava uma imagem já em memória (ferramenta da plataforma) na pasta da empresa do contexto. */
+export async function gravarImagem(buf, prefixo) {
+    const tipo = tipoReal(buf);
+    if (!tipo)
+        throw bad('O arquivo não é uma imagem PNG, JPG ou WEBP válida.');
+    const pasta = join(config.uploadsDir, String(empresaAtual()));
+    mkdirSync(pasta, { recursive: true });
+    const nome = `${prefixo}-${randomBytes(6).toString('hex')}.${tipo}`;
+    await writeFile(join(pasta, nome), buf);
+    return `/uploads/${empresaAtual()}/${nome}`;
+}
 /**
  * Recebe uma imagem enviada pelo Dono e grava na pasta da própria empresa.
  * Aceita só PNG, JPG e WEBP de verdade (confere o conteúdo); o nome do arquivo é gerado aqui.

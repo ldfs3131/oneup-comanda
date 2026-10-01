@@ -8,7 +8,7 @@ import { HttpError } from './lib/http.js';
 import { config } from './config.js';
 
 export type Role = 'ADMIN' | 'CAIXA' | 'COZINHA';
-export type AuthUser = { id: number; name: string; username: string; role: Role };
+export type AuthUser = { id: number; name: string; username: string; role: Role; /** ONE UP (Administrador da plataforma) */ oneup: boolean };
 
 declare module 'fastify' {
   interface FastifyRequest { user?: AuthUser }
@@ -61,7 +61,7 @@ export async function userFromToken(token: string | undefined): Promise<AuthUser
   const hit = cacheSessao.get(ck);
   if (hit && hit.ate > Date.now()) return hit.user;
   const rows = await db
-    .select({ id: users.id, name: users.name, username: users.username, role: roles.code, active: users.active, expiresAt: sessions.expiresAt })
+    .select({ id: users.id, name: users.name, username: users.username, role: roles.code, active: users.active, oneup: users.oneup, expiresAt: sessions.expiresAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .innerJoin(roles, eq(roles.id, users.roleId))
@@ -75,7 +75,7 @@ export async function userFromToken(token: string | undefined): Promise<AuthUser
   if (exp < half && exp > Date.now() + 86400_000) {
     await db.update(sessions).set({ expiresAt: new Date(Date.now() + config.sessionDays * 86400_000) }).where(eq(sessions.tokenHash, hash));
   }
-  const user: AuthUser = { id: u.id, name: u.name, username: u.username, role: u.role };
+  const user: AuthUser = { id: u.id, name: u.name, username: u.username, role: u.role, oneup: u.oneup };
   if (cacheSessao.size < 50_000) cacheSessao.set(ck, { user, ate: Math.min(Date.now() + 10_000, exp) });
   return user;
 }
@@ -103,6 +103,14 @@ export function requireRole(...allowed: Role[]) {
 }
 
 export const me = (req: FastifyRequest) => req.user as AuthUser;
+
+/** Guard: só o usuário da ONE UP (Administrador da plataforma). Para os demais a rota "não existe" (404). */
+export function requireOneup() {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    await requireRole('ADMIN')(req, reply);
+    if (!(req.user as AuthUser).oneup) throw new HttpError(404, 'Recurso não disponível.');
+  };
+}
 
 /*
  * Tentativas de senha errada. Conta só os ERROS, separado por pessoa e por aparelho (IP):

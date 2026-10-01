@@ -390,7 +390,7 @@ export async function accountRoutes(app) {
                 }
                 await tx.insert(payments).values({
                     accountId: id, methodId: m.id, amountCents: p.amountCents, tenderedCents: p.tenderedCents ?? null,
-                    cashRegisterId: reg.id, userId: user.id,
+                    cashRegisterId: reg.id, userId: user.id, taxaBp: m.taxaBp,
                 });
                 parts.push(`${brl(p.amountCents)} ${m.name}${p.tenderedCents ? ` (recebido ${brl(p.tenderedCents)}, troco ${brl(p.tenderedCents - p.amountCents)})` : ''}`);
             }

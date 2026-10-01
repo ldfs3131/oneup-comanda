@@ -15,6 +15,8 @@ import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
 import { aplicarConfiguracoes, historico, schemaPadrao, schemaPatch, telaConfiguracoes, voltarAoPadrao } from '../services/configuracoes.js';
 
+const pct = (bp: number) => `${(bp / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+
 /** Personalização do restaurante pelo Dono (perfil ADMIN da empresa até a fase de perfis por pessoa). */
 export async function configuracoesRoutes(app: FastifyInstance) {
   const dono = { preHandler: requireRole('ADMIN') };
@@ -55,6 +57,8 @@ export async function configuracoesRoutes(app: FastifyInstance) {
       name: z.string().trim().min(2).max(30).optional(),
       active: z.boolean().optional(),
       sortOrder: z.number().int().min(0).max(99).optional(),
+      // taxa da maquininha em % (ex.: 4.28). Vale para os próximos recebimentos; o passado fica como foi.
+      taxaPct: z.number().min(0).max(20).optional(),
     }), req.body);
     const user = me(req);
     await db.transaction(async (tx) => {
@@ -64,11 +68,13 @@ export async function configuracoesRoutes(app: FastifyInstance) {
         const ativas = (await tx.select().from(paymentMethods)).filter((x) => x.active && x.id !== id);
         if (!ativas.length) throw bad('Deixe pelo menos uma forma de pagamento ligada.');
       }
-      await tx.update(paymentMethods).set(b).where(eq(paymentMethods.id, id));
-      const antes = { name: m.name, active: m.active, sortOrder: m.sortOrder };
-      const depois = { ...antes, ...b };
+      const { taxaPct, ...resto } = b;
+      const set = { ...resto, ...(taxaPct === undefined ? {} : { taxaBp: Math.round(taxaPct * 100) }) };
+      await tx.update(paymentMethods).set(set).where(eq(paymentMethods.id, id));
+      const antes = { name: m.name, active: m.active, sortOrder: m.sortOrder, taxaPct: m.taxaBp / 100 };
+      const depois = { ...antes, ...resto, ...(taxaPct === undefined ? {} : { taxaPct: Math.round(taxaPct * 100) / 100 }) };
       await tx.insert(configHistorico).values({ chave: `forma_pagamento:${m.code}`, antes, depois, origem: 'EMPRESA', userId: user.id });
-      await audit(tx, { userId: user.id, action: 'config.update', entityType: 'payment_method', entityId: id, message: `${user.name} alterou a forma de pagamento "${m.name}"${b.name && b.name !== m.name ? ` → "${b.name}"` : ''}${b.active === undefined ? '' : b.active ? ' (ligada)' : ' (desligada)'}.` });
+      await audit(tx, { userId: user.id, action: 'config.update', entityType: 'payment_method', entityId: id, message: `${user.name} alterou a forma de pagamento "${m.name}"${b.name && b.name !== m.name ? ` → "${b.name}"` : ''}${b.active === undefined ? '' : b.active ? ' (ligada)' : ' (desligada)'}${taxaPct !== undefined && Math.round(taxaPct * 100) !== m.taxaBp ? ` (taxa ${pct(m.taxaBp)} → ${pct(Math.round(taxaPct * 100))})` : ''}.` });
     });
     notify.settingsChanged();
     return db.select().from(paymentMethods).orderBy(asc(paymentMethods.sortOrder), asc(paymentMethods.id));

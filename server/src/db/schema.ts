@@ -51,6 +51,8 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   roleId: integer('role_id').notNull().references(() => roles.id),
   active: boolean('active').notNull().default(true),
+  /** usuário da ONE UP (Administrador da plataforma) dentro da empresa: o Dono não vê nem altera */
+  oneup: boolean('oneup').notNull().default(false),
   createdAt: createdAt(),
 });
 
@@ -224,6 +226,8 @@ export const paymentMethods = pgTable('payment_methods', {
   active: boolean('active').notNull().default(true),
   isCash: boolean('is_cash').notNull().default(false),
   sortOrder: integer('sort_order').notNull().default(0),
+  /** taxa da maquininha em centésimos de ponto percentual (428 = 4,28%) */
+  taxaBp: integer('taxa_bp').notNull().default(0),
 });
 
 export const payments = pgTable('payments', {
@@ -239,6 +243,8 @@ export const payments = pgTable('payments', {
   reversedAt: ts('reversed_at'),
   reversedBy: integer('reversed_by').references(() => users.id),
   reversalReason: text('reversal_reason'),
+  /** taxa da forma de pagamento congelada no recebimento (null = antes do recurso) */
+  taxaBp: integer('taxa_bp'),
 }, (t) => [index('payments_account_idx').on(t.accountId), index('payments_register_idx').on(t.cashRegisterId)]);
 
 export const discounts = pgTable('discounts', {
@@ -332,6 +338,22 @@ export const customers = pgTable('customers', {
   createdAt: createdAt(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => [index('customers_name_idx').on(t.name)]);
+
+/** Vendas de fora do sistema (ex.: relatório da maquininha antes da implantação). Só a ONE UP grava. */
+export const referenciasExternas = pgTable('referencias_externas', {
+  id: serial('id').primaryKey(),
+  empresaId: empresaRef(),
+  titulo: text('titulo').notNull(),
+  origem: text('origem').notNull(),
+  inicio: date('inicio').notNull(),
+  fim: date('fim').notNull(),
+  totalCents: integer('total_cents').notNull(),
+  vendas: integer('vendas').notNull(),
+  taxasCents: integer('taxas_cents').notNull().default(0),
+  porForma: jsonb('por_forma').$type<{ forma: string; vendas: number; cents: number }[]>().notNull().default([]),
+  observacao: text('observacao'),
+  createdAt: createdAt(),
+});
 
 export const productCosts = pgTable('product_costs', {
   empresaId: empresaRef(),

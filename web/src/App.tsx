@@ -28,6 +28,7 @@ import InsightsPage from './pages/admin/InsightsPage';
 import FinancePage from './pages/admin/FinancePage';
 import TimingPage from './pages/admin/TimingPage';
 import OrdersHistory from './pages/admin/OrdersHistory';
+import BaseComparacao from './pages/admin/BaseComparacao';
 import { ThemeApplier } from './components/brand';
 
 /** Carregando; sem internet, avisa que está tentando reconectar (não pede a senha de novo). */
@@ -92,6 +93,7 @@ export default function App() {
         <Route path="financeiro" element={<FinancePage />} />
         <Route path="tempo" element={<TimingPage />} />
         <Route path="pedidos" element={<OrdersHistory />} />
+        <Route path="oneup/base" element={<BaseComparacao />} />
       </Route>
       <Route path="*" element={<Home />} />
     </Routes>

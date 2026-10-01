@@ -119,7 +119,8 @@ export async function r2Tests(ctx: {
   const cocaNow = async () => (await q('SELECT stock_qty FROM products WHERE id = $1', [coca.id]))[0].stock_qty;
   check('T10. Estoque 1 → vende → 0', st1.status === 200 && (await cocaNow()) === 0);
   const st2 = await newAcc({ items: [{ productId: coca.id, quantity: 1 }] });
-  check('T10. Estoque 0 → alerta "estoque insuficiente" (não vende sem decisão)', st2.status === 409 && st2.data.code === 'STOCK_INSUFFICIENT' && st2.data.details[0].stock === 0, st2.data);
+  const div0 = await q(`SELECT * FROM stock_movements WHERE product_id = $1 AND type = 'DIVERGENCIA' ORDER BY id DESC LIMIT 1`, [coca.id]);
+  check('T10 (3.0). Estoque 0 → a venda NÃO trava no caixa; registra divergência automática para o Dono ajustar', st2.status === 200 && div0[0]?.missing === 1 && /Ajustar a contagem/.test(div0[0].reason) && (await cocaNow()) === 0, { st: st2.status, div0: div0[0] });
   const st3 = await newAcc({ items: [{ productId: coca.id, quantity: 1 }], stockDecisions: [{ productId: coca.id, action: 'RELEASE', reason: 'Tinha no freezer' }] });
   const div = await q(`SELECT * FROM stock_movements WHERE product_id = $1 AND type = 'DIVERGENCIA' ORDER BY id DESC LIMIT 1`, [coca.id]);
   check('T10. "Liberar venda" vende, registra divergência (motivo, usuário) e estoque não fica negativo', st3.status === 200 && div[0]?.missing === 1 && /freezer/.test(div[0].reason) && (await cocaNow()) === 0);

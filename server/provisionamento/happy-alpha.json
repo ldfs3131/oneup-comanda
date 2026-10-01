@@ -1,10 +1,11 @@
 {
   "empresa": "happy-alpha",
   "nome": "Happy Alpha",
-  "comentario": "Dados informados por Lucas em 01/10/2026 (custos dos produtos e relatório da maquininha de 30/03 a 30/09/2026).",
+  "comentario": "Dados informados por Lucas em 01/10/2026 (custos dos produtos e relatório da maquininha de 30/03 a 30/09/2026). Estoque começa zerado: 'Acabou' no cardápio digital fica desligado até o Rafael fazer a contagem inicial.",
   "logo": "happy-alpha-logo.png",
   "configuracoes": {
-    "cor_destaque": "#f2d38a"
+    "cor_destaque": "#f2d38a",
+    "esconder_sem_estoque": false
   },
   "custos": [
     {

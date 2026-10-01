@@ -20,6 +20,7 @@ type Dash = {
   byHour: { hour: number; orders: number }[];
   kitchenMedianMin: number | null; kitchenSamples: number;
   lowStock: { id: number; name: string; qty: number; lim: number }[];
+  semEstoque?: { id: number; name: string; faltou: number; vezes: number }[];
   backup: { at: string | null; ok: boolean | null; info: string | null; stale: boolean; configured: boolean } | null;
   mei: { yearRevenueCents: number; limitCents: number } | null;
 };
@@ -157,6 +158,16 @@ export default function Dashboard() {
             {d.topProducts.map((p) => <div key={p.name} className="kv"><span className="ellipsis">{p.name}</span><span className="v">{p.qty}× <span className="faint small">{brl(p.cents)}</span></span></div>)}
           </div>
         </div>
+
+        {!!d.semEstoque?.length && (
+          <div className="card" style={{ borderColor: 'var(--warn)' }}>
+            <div className="row between"><div className="panel-title">⚠ Vendido sem estoque registrado — ajuste a contagem</div><Link to="/caixa/estoque" className="small">Ajustar estoque →</Link></div>
+            <div className="small muted" style={{ marginBottom: 8 }}>O caixa não trava a venda quando o sistema mostra zero. Conte o que tem e corrija em Estoque para os números ficarem certos.</div>
+            <div className="row wrap" style={{ gap: 8 }}>
+              {d.semEstoque.map((x) => <span key={x.id} className="badge warn">{x.name}: {x.faltou} un. ({x.vezes}×)</span>)}
+            </div>
+          </div>
+        )}
 
         {d.lowStock.length > 0 && (
           <div className="card">

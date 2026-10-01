@@ -17,7 +17,8 @@ export type StockShortage = { productId: number; name: string; stock: number; re
 /**
  * Baixa o estoque de uma venda confirmada. Nunca deixa negativo.
  * - estoque suficiente: baixa normal (VENDA);
- * - insuficiente sem decisão: erro 409 STOCK_INSUFFICIENT com a lista (o caixa escolhe corrigir/liberar/cancelar);
+ * - insuficiente sem decisão: VENDE assim mesmo e registra DIVERGÊNCIA automática (regra do produto: no caixa a falta
+ *   de estoque nunca trava a venda; o Dono vê "ajustar estoque" no painel e corrige a contagem);
  * - CORRECT: registra AJUSTE para a contagem informada e vende;
  * - RELEASE: vende o que houver e registra DIVERGÊNCIA com o que faltou.
  */
@@ -43,7 +44,7 @@ export async function applyStockForSale(
     if (!p.trackStock) continue;
     if (p.stockQty >= qty) continue;
     const d = decisions?.find((x) => x.productId === pid);
-    if (!d) { shortages.push({ productId: pid, name: p.name, stock: p.stockQty, requested: qty }); continue; }
+    if (!d) continue; // sem decisão do operador: vende e registra a divergência (abaixo)
     if (d.action === 'CORRECT') {
       if (!Number.isInteger(d.newQty) || d.newQty < 0 || d.newQty > 100000) throw bad('Contagem de estoque inválida.');
       if (d.newQty < qty) {
@@ -76,7 +77,11 @@ export async function applyStockForSale(
       productId: n.productId,
       type: missing > 0 ? 'DIVERGENCIA' : 'VENDA',
       quantity: -take, before, after: p.stockQty, missing,
-      reason: missing > 0 ? `Venda liberada sem estoque registrado (${label}). Motivo: ${d && d.action === 'RELEASE' ? d.reason.trim() : ''}` : label,
+      reason: missing > 0
+        ? (d && d.action === 'RELEASE'
+          ? `Venda liberada sem estoque registrado (${label}). Motivo: ${d.reason.trim()}`
+          : `Vendido sem estoque registrado no sistema (${label}). Ajustar a contagem.`)
+        : label,
       orderItemId: itemIds[n.itemIndex] ?? null, userId,
     });
     await tx.update(products).set({ stockQty: p.stockQty }).where(eq(products.id, n.productId)); marcarEstoqueMudou();

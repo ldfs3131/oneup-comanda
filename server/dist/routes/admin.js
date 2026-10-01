@@ -101,6 +101,11 @@ export async function adminRoutes(app) {
       FROM orders WHERE goes_to_kitchen AND ready_at IS NOT NULL AND confirmed_at IS NOT NULL AND ${inRange('created_at', r)}
         AND EXTRACT(EPOCH FROM (ready_at-confirmed_at))/60 <= 3*COALESCE(expected_minutes,15)`);
         const lowStock = await q(sql `SELECT id, name, stock_qty AS qty, low_stock_at AS lim FROM products WHERE track_stock AND active AND stock_qty <= low_stock_at ORDER BY stock_qty, name LIMIT 10`);
+        // vendido sem estoque registrado (o caixa não trava): o Dono corrige a contagem
+        const semEstoque = await q(sql `
+      SELECT p.id, p.name, SUM(m.missing) AS faltou, COUNT(*) AS vezes FROM stock_movements m JOIN products p ON p.id = m.product_id
+      WHERE m.type = 'DIVERGENCIA' AND m.missing > 0 AND ${inRange('m.created_at', r)}
+      GROUP BY p.id, p.name ORDER BY faltou DESC LIMIT 10`);
         const [s] = await db.select().from(restaurantSettings).limit(1);
         // faturamento do ano (só com o controle de MEI ligado; usa o índice por data)
         const ano = { from: `${r.to.slice(0, 4)}-01-01`, to: `${r.to.slice(0, 4)}-12-31` };
@@ -130,6 +135,7 @@ export async function adminRoutes(app) {
             byHour: byHour.map((h) => ({ hour: n(h.h), orders: n(h.orders) })),
             kitchenMedianMin: times?.kitchen == null ? null : Math.round(Number(times.kitchen)), kitchenSamples: n(times?.n),
             lowStock: lowStock.map((l) => ({ id: l.id, name: l.name, qty: n(l.qty), lim: n(l.lim) })),
+            semEstoque: semEstoque.map((x) => ({ id: x.id, name: x.name, faltou: n(x.faltou), vezes: n(x.vezes) })),
             // instalação própria mostra o aviso de backup; online o backup é da plataforma (sem aviso para o restaurante)
             backup: config.backupDirs.length ? { at: s.lastBackupAt, ok: s.lastBackupOk, info: s.lastBackupInfo, stale: backupAgeH == null || backupAgeH > 48 || s.lastBackupOk === false, configured: true } : null,
             mei: s.meiEnabled ? { yearRevenueCents: n(year.cents), limitCents: s.meiLimitCents } : null,

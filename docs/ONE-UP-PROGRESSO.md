@@ -13,6 +13,25 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 | 6. Migração do Happy Alpha (paralelo e virada) | pendente | |
 | 7. Inteligência, Raio-X, Recuperador | pendente | |
 
+## Versão 3.0.0 online (01/10) — entrega para o teste do Happy Alpha
+
+- **Online:** `deploy/instalar.sh` (Ubuntu 24.04: Node 22, PostgreSQL, Caddy com HTTPS sob demanda, firewall,
+  backup diário) e o comando `oneup` (status, atualizar com volta automática, backup, restaurar, senha, nova-empresa).
+  Guia: `docs/INSTALACAO-ONLINE.md`. Ensaiado de ponta a ponta neste ambiente (instalar, reinstalar, atualizar,
+  volta automática, backup, restaurar, HTTPS, certificado recusado para endereço inexistente).
+- **Acesso ONE UP** (`users.oneup`): Administrador da plataforma dentro da empresa; fora da lista de usuários do Dono,
+  intocável por ele; Insights e Base de comparação só nele (as ações dele ficam na Auditoria).
+- **Taxa da maquininha** por forma de pagamento (Dono configura), congelada em cada pagamento; Financeiro mostra
+  "cai na conta" e o resultado operacional desconta as taxas.
+- **Base de comparação** (`referencias_externas`, só a plataforma grava): relatório da maquininha dos 6 meses antes do sistema.
+- **Provisionamento por arquivo** (`plataforma.js provisionar`, `server/provisionamento/happy-alpha.json`): custos, produto
+  novo desligado aguardando preço, taxas, logotipo, configurações iniciais e base. Idempotente.
+- **Caixa nunca trava por estoque zerado** (regra da R3): vende, registra divergência, painel do Dono mostra
+  "vendido sem estoque — ajuste a contagem"; cancelar não devolve unidade que nunca existiu.
+- App instalável com o nome do restaurante; QR para imprimir/copiar link; validações em português; perfil ADMIN do
+  restaurante aparece como **Dono**.
+- Testes: suíte completa **436** verificações (nova `oneup-test`, 48).
+
 ## Fase 1 — o que foi feito
 
 - **Migração 0005:** tabela `empresas`; `empresa_id` em 29 tabelas, preenchido pelo próprio banco; RLS ligado e forçado com "nega tudo" sem empresa; unicidades, numeração e "um caixa aberto" passam a ser por empresa; papel `oneup_app` sem BYPASSRLS; trava `ha_ref_mesma_empresa` impede vínculo com registro de outra empresa (a chave estrangeira do PostgreSQL não olha o RLS). Um banco existente vira a **empresa nº 1** sem mover dados.

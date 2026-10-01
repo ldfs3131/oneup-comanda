@@ -21,15 +21,14 @@ backup() {
   local quando arq
   quando=$(date +%Y-%m-%d_%H%M%S)
   arq="$BKP/oneup-$quando.dump"
-  if sudo -u postgres pg_dump -Fc -d oneup -f "/tmp/oneup-$quando.dump"; then
-    mv "/tmp/oneup-$quando.dump" "$arq"
-    tar -czf "$BKP/imagens-$quando.tar.gz" -C "$BASE" uploads 2>/dev/null || true
-    chown root:root "$arq" "$BKP/imagens-$quando.tar.gz" 2>/dev/null; chmod 600 "$arq" "$BKP/imagens-$quando.tar.gz" 2>/dev/null
+  # o arquivo é criado pelo root já fechado (600): ninguém mais no servidor lê nem a cópia parcial
+  if ( umask 077; sudo -u postgres pg_dump -Fc -d oneup > "$arq.parcial" ) && mv "$arq.parcial" "$arq"; then
+    ( umask 077; tar -czf "$BKP/imagens-$quando.tar.gz" -C "$BASE" uploads 2>/dev/null ) || true
     find "$BKP" -name 'oneup-*.dump' -mtime +"$GUARDAR_DIAS" -delete
     find "$BKP" -name 'imagens-*.tar.gz' -mtime +"$GUARDAR_DIAS" -delete
     verde "Cópia salva: $arq ($(du -h "$arq" | cut -f1)). Guardando os últimos $GUARDAR_DIAS dias."
   else
-    vermelho "Falhou a cópia do banco."; return 1
+    rm -f "$arq.parcial"; vermelho "Falhou a cópia do banco."; return 1
   fi
 }
 
@@ -53,19 +52,27 @@ case "${1:-ajuda}" in
     ramo=$(git rev-parse --abbrev-ref HEAD)
     if [ "$(git rev-parse "origin/$ramo")" = "$antes" ]; then verde "Já está na versão mais nova."; exit 0; fi
     backup || { vermelho "Sem cópia de segurança, não atualizo."; exit 1; }
-    git reset --quiet --hard "origin/$ramo"
-    npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error
+    copia=$(ls -1t "$BKP"/oneup-*.dump | head -1)
+    voltar() {
+      vermelho "$1 Voltando para a versão anterior…"
+      git reset --quiet --hard "$antes"
+      for t in 1 2 3; do npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error && break; sleep 5; done
+      systemctl restart oneup
+      if saude 60; then verde "Voltou para a versão anterior (dados preservados)."
+      else vermelho "A versão anterior também não ligou. Restaure a cópia feita agora: oneup restaurar $copia  — e chame o suporte."; fi
+      exit 1
+    }
+    git reset --quiet --hard "origin/$ramo" || voltar "Não consegui trocar o código."
+    ok=0; for t in 1 2 3; do npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error && { ok=1; break; }; sleep 5; done
+    [ "$ok" = 1 ] || voltar "Não consegui instalar as dependências (internet?)."
     # troca o próprio comando por renomeação (o bash que está rodando continua lendo a versão antiga)
     install -m 755 deploy/oneup /usr/local/bin/oneup.novo && mv -f /usr/local/bin/oneup.novo /usr/local/bin/oneup
+    for u in oneup.service oneup-backup.service oneup-backup.timer; do install -m 644 "deploy/$u" "/etc/systemd/system/$u"; done
+    systemctl daemon-reload
     systemctl restart oneup
-    if saude 90; then
-      verde "Atualizado: $(git log -1 --format='%h %s')"
-    else
-      vermelho "A versão nova não ligou. Voltando para a anterior…"
-      git reset --quiet --hard "$antes"; npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error
-      systemctl restart oneup; saude 60 && verde "Voltou para a versão anterior (dados preservados)." || vermelho "Atenção: rode 'oneup logs' e chame o suporte."
-      exit 1
-    fi
+    saude 90 || voltar "A versão nova não ligou."
+    verde "Atualizado: $(git log -1 --format='%h %s')"
+    echo "Cópia de antes da atualização: $copia"
     ;;
   nova-empresa)
     slug=${2:-}; nome=${3:-}
@@ -93,11 +100,16 @@ case "${1:-ajuda}" in
     read -r -p "Para continuar digite RESTAURAR: " ok; [ "$ok" = RESTAURAR ] || { echo "Cancelado."; exit 1; }
     backup || { vermelho "Não consegui fazer a cópia do estado atual antes; cancelado."; exit 1; }
     systemctl stop oneup
-    cp "$arq" /tmp/oneup-restaurar.dump && chown postgres /tmp/oneup-restaurar.dump
+    ( umask 077; cp "$arq" /tmp/oneup-restaurar.dump ) && chown postgres /tmp/oneup-restaurar.dump
     if sudo -u postgres pg_restore --clean --if-exists --no-owner --role=oneup_dono --single-transaction --exit-on-error -d oneup /tmp/oneup-restaurar.dump; then r=0; else r=$?; fi
     rm -f /tmp/oneup-restaurar.dump
     systemctl start oneup
-    saude 90 && verde "Restaurado e no ar (código de saída do restore: $r)." || vermelho "O sistema não voltou: oneup logs"
+    if [ "$r" != 0 ]; then
+      vermelho "A restauração FALHOU (nada foi mudado no banco: tudo ou nada). O sistema voltou com os dados de antes."
+      saude 90 || vermelho "E o sistema não respondeu: oneup logs"
+      exit 1
+    fi
+    saude 90 && verde "Restaurado e no ar." || { vermelho "Restaurado, mas o sistema não voltou: oneup logs"; exit 1; }
     ;;
   plataforma) shift; plataforma "$@" ;;
   ajuda|*)

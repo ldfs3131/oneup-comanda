@@ -190,6 +190,23 @@ async function main() {
     await dono.patch(`/api/payment-methods/${cartao.id}`, { taxaPct: 4.28 });
     const refDepois = (await lucas.get(`/api/oneup/referencias?from=${hoje}&to=${hoje}`)).data.atual;
     check('Comparação "com o sistema" enxerga o cartão de hoje', refDepois.semDinheiroCents >= 2 * P.priceCents && refDepois.diasUso === 1, refDepois);
+    console.log('\n[4b] Estoque zerado não trava o caixa — e cancelar não inventa estoque');
+    {
+        const cerveja = menu.flatMap((c) => c.products).find((p) => p.name === 'Corona');
+        const estoque = async () => (await db.query(`SELECT stock_qty FROM products WHERE id=$1`, [cerveja.id])).rows[0].stock_qty;
+        await caixa.post(`/api/stock/${cerveja.id}`, { type: 'AJUSTE', newQty: 1, reason: 'Teste oneup' });
+        const v = await caixa.post('/api/accounts', { customerName: 'Sem estoque', items: [{ productId: cerveja.id, quantity: 3 }] });
+        check('Vende 3 com só 1 no estoque, sem travar', v.status === 200, v.data);
+        check('Estoque fica 0 (nunca negativo)', (await estoque()) === 0);
+        const conta = (await caixa.get(`/api/accounts/${v.data.id}`)).data;
+        const item = conta.orders[0].items[0];
+        await caixa.post(`/api/order-items/${item.id}/cancel`, { reason: 'Cliente desistiu', quantity: 1, returnStock: true });
+        check('Cancela 1 dos 3: era unidade sem estoque → estoque continua 0', (await estoque()) === 0);
+        const conta2 = (await caixa.get(`/api/accounts/${v.data.id}`)).data;
+        const resto = conta2.orders[0].items.find((i) => i.status === 'ACTIVE');
+        await caixa.post(`/api/order-items/${resto.id}/cancel`, { reason: 'Cliente desistiu', returnStock: true });
+        check('Cancela os 2 restantes: volta só a 1 unidade que existia → estoque 1', (await estoque()) === 1, await estoque());
+    }
     console.log('\n[5] Online: app instalável com o nome do restaurante e certificado só para empresa que existe');
     const man = await new C('alfa').get('/manifest.webmanifest');
     const [{ name: nomeAlfa }] = (await db.query(`SELECT name FROM restaurant_settings WHERE empresa_id=$1`, [ALFA])).rows;

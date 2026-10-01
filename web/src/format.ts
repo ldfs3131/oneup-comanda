@@ -48,7 +48,7 @@ export const ORDER_STATUS: Record<string, { label: string; tone: string }> = {
   CANCELLED: { label: 'Cancelado', tone: 'danger' },
 };
 
-export const ROLE_LABEL: Record<string, string> = { ADMIN: 'Administrador', CAIXA: 'Caixa', COZINHA: 'Cozinha' };
+export const ROLE_LABEL: Record<string, string> = { ADMIN: 'Dono', CAIXA: 'Caixa', COZINHA: 'Cozinha' };
 
 export const SITUATION: Record<string, { label: string; tone: string }> = {
   PAGO: { label: 'Pago', tone: 'ok' }, PARCIAL: { label: 'Parcial', tone: 'warn' }, PENDENTE: { label: 'A pagar', tone: 'danger' }, '—': { label: '—', tone: 'muted' },

@@ -68,7 +68,7 @@ export async function adminRoutes(app: FastifyInstance) {
       FROM cancellations WHERE ${inRange('created_at', r)}`);
     const byMethod = await q(sql`
       SELECT pm.code, pm.name, COALESCE(SUM(p.amount_cents),0) AS cents, COUNT(p.id) AS count,
-             COALESCE(ROUND(SUM(p.amount_cents * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees
+             COALESCE(ROUND(SUM(p.amount_cents::bigint * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees
       FROM payment_methods pm LEFT JOIN payments p ON p.method_id=pm.id AND p.reversed_at IS NULL AND ${inRange('p.created_at', r)}
       GROUP BY pm.id ORDER BY pm.sort_order`);
     const [accs] = await q(sql`
@@ -164,7 +164,7 @@ export async function adminRoutes(app: FastifyInstance) {
              COALESCE(SUM(p.amount_cents) FILTER (WHERE NOT pm.is_cash),0) AS sem_dinheiro,
              COUNT(p.id) FILTER (WHERE NOT pm.is_cash) AS vendas_sem_dinheiro,
              COUNT(DISTINCT p.account_id) AS contas,
-             COALESCE(ROUND(SUM(p.amount_cents * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS taxas,
+             COALESCE(ROUND(SUM(p.amount_cents::bigint * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS taxas,
              MIN((p.created_at AT TIME ZONE ${TZ})::date)::text AS primeiro
       FROM payments p JOIN payment_methods pm ON pm.id = p.method_id
       WHERE p.reversed_at IS NULL AND ${inRange('p.created_at', r)}`)).rows as any[];

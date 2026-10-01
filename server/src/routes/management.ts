@@ -34,7 +34,7 @@ export async function managementRoutes(app: FastifyInstance) {
     const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents FROM discounts WHERE ${inRange('created_at', r)}`);
     const received = await q(sql`
       SELECT pm.name, COALESCE(SUM(p.amount_cents),0) AS cents,
-             COALESCE(ROUND(SUM(p.amount_cents * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees, pm.taxa_bp AS "taxaBp"
+             COALESCE(ROUND(SUM(p.amount_cents::bigint * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees, pm.taxa_bp AS "taxaBp"
       FROM payment_methods pm
       LEFT JOIN payments p ON p.method_id = pm.id AND p.reversed_at IS NULL AND ${inRange('p.created_at', r)}
       GROUP BY pm.id ORDER BY pm.sort_order`);

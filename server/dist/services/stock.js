@@ -82,20 +82,39 @@ async function stockProductsOfItem(tx, orderItemId) {
     const r = await tx.execute(sql `SELECT DISTINCT product_id FROM stock_movements WHERE order_item_id = ${orderItemId} AND type IN ('VENDA','DIVERGENCIA')`);
     return r.rows.map((x) => Number(x.product_id)).sort((a, b) => a - b);
 }
-/** Devolve ao estoque as unidades de um item cancelado (1 unidade de cada produto vinculado por unidade cancelada). */
+/**
+ * Unidades deste item que foram vendidas SEM estoque registrado e ainda não foram "perdoadas" por um cancelamento.
+ * (DIVERGÊNCIA da venda e o vínculo do restante após cancelamento parcial guardam essas unidades em `missing`;
+ * cada cancelamento grava em `missing` quantas delas deixou de devolver.)
+ */
+async function semEstoqueRestante(tx, orderItemId, productId) {
+    const r = await tx.execute(sql `
+    SELECT COALESCE(SUM(missing) FILTER (WHERE type IN ('VENDA','DIVERGENCIA')),0)
+         - COALESCE(SUM(missing) FILTER (WHERE type = 'CANCELAMENTO'),0) AS n
+    FROM stock_movements WHERE order_item_id = ${orderItemId} AND product_id = ${productId}`);
+    return Math.max(0, Number(r.rows[0].n ?? 0));
+}
+/**
+ * Devolve ao estoque as unidades de um item cancelado — só as que realmente saíram do estoque.
+ * Unidades vendidas sem estoque registrado (o caixa não trava a venda) NÃO voltam: nunca existiram no sistema.
+ */
 export async function returnStockForItem(tx, orderItemId, qty, userId, label) {
     let returned = false;
     for (const pid of await stockProductsOfItem(tx, orderItemId)) {
         const [p] = await tx.select().from(products).where(eq(products.id, pid)).for('update');
         if (!p || !p.trackStock || qty <= 0)
             continue;
+        const perdoar = Math.min(qty, await semEstoqueRestante(tx, orderItemId, pid));
+        const volta = qty - perdoar;
         await tx.insert(stockMovements).values({
-            productId: p.id, type: 'CANCELAMENTO', quantity: qty, before: p.stockQty, after: p.stockQty + qty,
-            reason: label, orderItemId, userId,
+            productId: p.id, type: 'CANCELAMENTO', quantity: volta, before: p.stockQty, after: p.stockQty + volta, missing: perdoar,
+            reason: perdoar ? `${label} (${perdoar} un. tinham sido vendidas sem estoque registrado: não voltam)` : label, orderItemId, userId,
         });
-        await tx.update(products).set({ stockQty: p.stockQty + qty }).where(eq(products.id, p.id));
-        marcarEstoqueMudou();
-        returned = true;
+        if (volta > 0) {
+            await tx.update(products).set({ stockQty: p.stockQty + volta }).where(eq(products.id, p.id));
+            marcarEstoqueMudou();
+            returned = true;
+        }
     }
     return returned;
 }
@@ -105,8 +124,10 @@ export async function linkStockToItem(tx, fromItemId, toItemId, userId) {
         const [p] = await tx.select().from(products).where(eq(products.id, pid));
         if (!p)
             continue;
+        // as unidades "sem estoque" que sobraram seguem com o restante (para um cancelamento futuro não inventar estoque)
+        const resto = await semEstoqueRestante(tx, fromItemId, pid);
         await tx.insert(stockMovements).values({
-            productId: pid, type: 'VENDA', quantity: 0, before: p.stockQty, after: p.stockQty,
+            productId: pid, type: 'VENDA', quantity: 0, before: p.stockQty, after: p.stockQty, missing: resto,
             reason: 'Vínculo do restante após cancelamento parcial', orderItemId: toItemId, userId,
         });
     }

@@ -522,7 +522,7 @@ export async function accountRoutes(app) {
             assertAccountEditable(acc.status);
             const t = await accountTotals(tx, id);
             if (t.paid > 0)
-                throw conflict('Esta conta já tem pagamentos. Peça ao administrador para estornar antes de cancelar.');
+                throw conflict('Esta conta já tem pagamentos. Peça ao Dono para estornar antes de cancelar.');
             const ords = await tx.select().from(orders).where(eq(orders.accountId, id));
             const reg = await currentRegister(tx);
             let lost = false;
@@ -578,7 +578,7 @@ export async function accountRoutes(app) {
             const value = it.unitPriceCents * qty;
             const t = await accountTotals(tx, acc.id);
             if (t.total - value < t.paid)
-                throw conflict('O valor já pago ficaria maior que o total. Peça ao administrador para estornar um pagamento antes.');
+                throw conflict('O valor já pago ficaria maior que o total. Peça ao Dono para estornar um pagamento antes.');
             const lost = LOSS_STATUSES.includes(o.status);
             // o item vendido é imutável: cancela a linha inteira e, se parcial, relança o restante com o mesmo preço congelado
             await tx.update(orderItems).set({ status: 'CANCELLED' }).where(eq(orderItems.id, id));
@@ -633,7 +633,7 @@ export async function accountRoutes(app) {
             const t = await accountTotals(tx, acc.id);
             const counted = o.status === 'AWAITING_CONFIRMATION' ? 0 : value;
             if (t.total - counted < t.paid)
-                throw conflict('O valor já pago ficaria maior que o total. Peça ao administrador para estornar um pagamento antes.');
+                throw conflict('O valor já pago ficaria maior que o total. Peça ao Dono para estornar um pagamento antes.');
             const lost = LOSS_STATUSES.includes(o.status);
             let stockBack = false;
             if (returnStock && o.status !== 'AWAITING_CONFIRMATION') {
@@ -805,7 +805,7 @@ export async function accountRoutes(app) {
             const value = Number((await tx.execute(sql `SELECT COALESCE(SUM(unit_price_cents*quantity),0)::int AS v FROM order_items WHERE order_id = ${id} AND status='ACTIVE'`)).rows[0].v);
             const t = await accountTotals(tx, src.id);
             if (t.total - value < t.paid)
-                throw conflict('A conta de origem já recebeu mais do que ficaria de total. Estorne um pagamento antes (administrador).');
+                throw conflict('A conta de origem já recebeu mais do que ficaria de total. Peça ao Dono para estornar um pagamento antes.');
             const [{ n }] = (await tx.execute(sql `SELECT COUNT(*)::int AS n FROM orders WHERE account_id = ${dst.id}`)).rows;
             await tx.update(orders).set({ accountId: dst.id, sequence: Number(n) + 1 }).where(eq(orders.id, id));
             await recomputeStatus(tx, src.id);

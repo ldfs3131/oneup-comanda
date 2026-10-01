@@ -91,7 +91,7 @@ export function UserMenu() {
     <div className="user-chip">
       <div className="hide-mobile right" style={{ lineHeight: 1.15 }}>
         <div style={{ fontWeight: 700 }}>{user.name}</div>
-        <div className="small muted">{ROLE_LABEL[user.role]}</div>
+        <div className="small muted">{user.oneup ? 'ONE UP · suporte' : ROLE_LABEL[user.role]}</div>
       </div>
       <div style={{ position: 'relative' }}>
         <button className="btn icon" onClick={() => setOpen((o) => !o)} aria-label="Menu do usuário">☰</button>

@@ -142,7 +142,10 @@ export default function Dashboard() {
             <div className="panel-title">Pagamentos recebidos</div>
             {d.payments.map((p) => <div key={p.code} className="kv"><span>{p.name} <span className="faint small">({p.count})</span></span><span className="v">{brl(p.cents)}</span></div>)}
             <div className="kv total"><span>Total</span><span className="v">{brl(d.receivedCents)}</span></div>
-            {d.feesCents > 0 && <div className="kv small"><span className="muted">Taxa da maquininha (estimada) · cai na conta</span><span className="v muted">−{brl(d.feesCents)} · {brl(d.receivedCents - d.feesCents)}</span></div>}
+            {d.feesCents > 0 && <>
+              <div className="kv small"><span className="muted">− Taxa da maquininha (estimada)</span><span className="v muted">{brl(d.feesCents)}</span></div>
+              <div className="kv small"><span className="muted">= Cai na conta</span><span className="v" style={{ color: 'var(--ok)' }}>{brl(d.receivedCents - d.feesCents)}</span></div>
+            </>}
           </div>
           <div className="card">
             <div className="panel-title">Descontos e cancelamentos</div>

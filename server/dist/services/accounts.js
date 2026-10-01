@@ -54,7 +54,7 @@ export async function assertAccountInScope(tx, user, acc) {
         if (acc.openedAt >= reg.openedAt)
             return;
     }
-    throw new HttpError(403, 'Esta conta é de um dia anterior. Consulte o administrador.');
+    throw new HttpError(403, 'Esta conta é de um dia anterior. Consulte o Dono.');
 }
 export async function accountTotals(tx, accountId) {
     const r = await tx.execute(sql `
@@ -91,7 +91,7 @@ export async function recomputeStatus(tx, accountId) {
 }
 export function assertAccountEditable(status) {
     if (status === 'CLOSED')
-        throw conflict('Conta encerrada. Peça ao administrador para reabrir.');
+        throw conflict('Conta encerrada. Peça ao Dono para reabrir.');
     if (status === 'CANCELLED')
         throw conflict('Conta cancelada.');
     if (status === 'MERGED')

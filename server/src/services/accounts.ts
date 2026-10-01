@@ -56,7 +56,7 @@ export async function assertAccountInScope(tx: Executor, user: AuthUser, acc: ty
     if (acc.closedAt && acc.closedAt >= reg.openedAt) return;
     if (acc.openedAt >= reg.openedAt) return;
   }
-  throw new HttpError(403, 'Esta conta é de um dia anterior. Consulte o administrador.');
+  throw new HttpError(403, 'Esta conta é de um dia anterior. Consulte o Dono.');
 }
 
 export async function accountTotals(tx: Executor, accountId: number) {
@@ -89,7 +89,7 @@ export async function recomputeStatus(tx: Executor, accountId: number) {
 }
 
 export function assertAccountEditable(status: AccountStatus) {
-  if (status === 'CLOSED') throw conflict('Conta encerrada. Peça ao administrador para reabrir.');
+  if (status === 'CLOSED') throw conflict('Conta encerrada. Peça ao Dono para reabrir.');
   if (status === 'CANCELLED') throw conflict('Conta cancelada.');
   if (status === 'MERGED') throw conflict('Esta conta foi juntada a outra. Use a conta de destino.');
 }

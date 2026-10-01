@@ -98,7 +98,7 @@ export async function authRoutes(app) {
                 // o administrador da ONE UP não conta: o restaurante precisa manter o próprio Dono ativo
                 const others = await db.select().from(users).where(and(eq(users.roleId, adminRole), eq(users.active, true), eq(users.oneup, false), ne(users.id, id)));
                 if (!others.length)
-                    throw conflict('É preciso manter ao menos um administrador ativo.');
+                    throw conflict('É preciso manter ao menos um usuário Dono ativo.');
             }
         }
         const set = {};

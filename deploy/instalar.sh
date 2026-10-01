@@ -27,6 +27,9 @@ vermelho() { printf '\033[1;31m%s\033[0m\n' "$*"; }
 passo() { echo; verde "▶ $*"; }
 falha() { vermelho "✖ $*"; echo "Detalhes em $LOG"; exit 1; }
 trap 'falha "A instalação parou na linha $LINENO. Rode o mesmo comando de novo; se repetir, mande a tela para o suporte."' ERR
+# registro da instalação só para o root (o resumo final com as senhas NÃO vai para ele)
+touch "$LOG" && chmod 600 "$LOG"
+exec 3>&1
 exec > >(tee -a "$LOG") 2>&1
 
 [ "$(id -u)" = 0 ] || falha "Rode como root (no terminal da Hostinger você já entra como root)."
@@ -162,21 +165,29 @@ if [ "$EXISTE" != 1 ]; then
   P_DONO=$(senha 10); P_CAIXA=$(pin 6); P_COZ=$(pin 6); P_ONEUP=$(senha 16)
   node dist/scripts/setup.js --empresa="$EMPRESA" --nome="$NOME" --admin-name="Rafael" --admin-user=rafael --admin-pass="$P_DONO" \
     --caixa-pass="$P_CAIXA" --cozinha-pass="$P_COZ" --cardapio=exemplo
-  node dist/scripts/plataforma.js oneup-usuario --empresa="$EMPRESA" --login=lucas --nome="Lucas (ONE UP)" --senha="$P_ONEUP"
-  [ -f "provisionamento/$EMPRESA.json" ] && node dist/scripts/plataforma.js provisionar --arquivo="provisionamento/$EMPRESA.json"
-  umask 077
-  cat >> "$ACESSOS" <<TXT
+  # senhas guardadas JÁ (se algo abaixo falhar, elas não se perdem)
+  ( umask 077; cat >> "$ACESSOS" <<TXT
 ==================== $NOME — criado em $(date '+%d/%m/%Y %H:%M') ====================
 Endereço:   https://$EMPRESA.$DOMINIO
 Cardápio:   https://$EMPRESA.$DOMINIO/cardapio
 Dono:       login rafael     senha $P_DONO
 Caixa:      login caixa      senha $P_CAIXA
 Cozinha:    login cozinha    senha $P_COZ
-ONE UP:     login lucas      senha $P_ONEUP   (só você; o Dono não vê este acesso)
+ONE UP:     login lucas      senha $P_ONEUP   (seu acesso de suporte: não aparece na lista de usuários do Dono; o que você fizer fica na Auditoria)
 
 TXT
+  )
+  node dist/scripts/plataforma.js oneup-usuario --empresa="$EMPRESA" --login=lucas --nome="Lucas (ONE UP)" --senha="$P_ONEUP"
+  [ -f "provisionamento/$EMPRESA.json" ] && node dist/scripts/plataforma.js provisionar --arquivo="provisionamento/$EMPRESA.json"
 else
   amarelo "  $NOME já existe: dados e senhas mantidos."
+  # instalação anterior parou antes de criar o acesso ONE UP: cria agora com senha nova
+  TEM_ONEUP=$(sudo -u postgres psql -d oneup -tAc "SELECT 1 FROM users u JOIN empresas e ON e.id=u.empresa_id WHERE e.slug='$EMPRESA' AND u.oneup LIMIT 1" || true)
+  if [ "$TEM_ONEUP" != 1 ]; then
+    P_ONEUP=$(senha 16)
+    node dist/scripts/plataforma.js oneup-usuario --empresa="$EMPRESA" --login=lucas --nome="Lucas (ONE UP)" --senha="$P_ONEUP"
+    ( umask 077; printf 'ONE UP (%s): login lucas   senha %s\n\n' "$NOME" "$P_ONEUP" >> "$ACESSOS" )
+  fi
   [ -f "provisionamento/$EMPRESA.json" ] && node dist/scripts/plataforma.js provisionar --arquivo="provisionamento/$EMPRESA.json" >/dev/null
 fi
 
@@ -189,6 +200,6 @@ echo
 verde "==================================================================="
 verde "  ONE UP instalado e no ar."
 verde "==================================================================="
-cat "$ACESSOS"
+cat "$ACESSOS" >&3   # só na tela, não no registro
 echo "Estes acessos ficam guardados em $ACESSOS (para ver de novo: oneup acessos)."
 echo "Comandos úteis: oneup status | oneup logs | oneup atualizar | oneup backup | oneup ajuda"

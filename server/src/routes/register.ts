@@ -1,7 +1,8 @@
+import { config } from '../config.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, empresaAtual, runAsEmpresa } from '../db/index.js';
 import { cashMovements, cashRegisters, restaurantSettings, users } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
 import { brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
@@ -99,7 +100,11 @@ export async function registerRoutes(app: FastifyInstance) {
       };
     });
     notify.registerChanged(); notify.settingsChanged();
-    runBackupAndRecord(null, 'backup.auto').catch(() => undefined);
+    // Backup local só em instalação própria (BACKUP_DIRS). Online, o backup do banco é diário e feito pela plataforma.
+    if (config.backupDirs.length) {
+      const eid = empresaAtual();
+      setImmediate(() => { runAsEmpresa(eid, () => runBackupAndRecord(null, 'backup.auto')).catch(() => undefined); });
+    }
     return out;
   };
   app.post('/api/day/close', ops, closeDay);

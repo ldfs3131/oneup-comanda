@@ -25,8 +25,21 @@ export const config = {
     // Porta pública opcional, só com o cardápio do cliente (para Tailscale Funnel / internet). 0 = desligada.
     publicPort: Number(process.env.PUBLIC_PORT ?? 0) || 0,
     cookieSecure: process.env.COOKIE_SECURE === 'true',
+    // TRUST_PROXY: número de proxies na frente (ex.: 2 = Cloudflare + Coolify). 0 = acesso direto.
+    trustProxy: Number(process.env.TRUST_PROXY ?? 0) || 0,
     host: process.env.HOST ?? '0.0.0.0',
-    databaseUrl: process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/happy_alpha',
+    // Banco: DATABASE_URL = dono do banco (migrações e plataforma; precisa ser superusuário ou ter BYPASSRLS).
+    // A aplicação usa o papel APP_DB_ROLE (sem BYPASSRLS) — por padrão na mesma conexão, ou em APP_DATABASE_URL.
+    databaseUrl: process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/onefood',
+    appDatabaseUrl: process.env.APP_DATABASE_URL || undefined,
+    appDbRole: (process.env.APP_DB_ROLE ?? 'onefood_app').replace(/[^a-z0-9_]/g, ''),
+    dbPoolSize: num(process.env.DB_POOL_SIZE, 20),
+    // Empresa da requisição: <slug>.BASE_DOMAIN (online). DEFAULT_EMPRESA = instalação de uma empresa só.
+    // EMPRESA_HEADER=true aceita o cabeçalho x-empresa (somente desenvolvimento e testes).
+    baseDomain: (process.env.BASE_DOMAIN ?? '').toLowerCase().replace(/^\./, ''),
+    defaultEmpresa: (process.env.DEFAULT_EMPRESA ?? '').toLowerCase() || undefined,
+    allowEmpresaHeader: process.env.EMPRESA_HEADER === 'true',
+    productName: 'ONE Food',
     demoMode: process.env.DEMO_MODE === 'true',
     // Tela de Insights (leitura/interpretação dos números). Desligada por padrão: a interpretação é serviço
     // do Administrador (ONE UP) e não aparece para o restaurante. Os dados continuam sendo gravados.

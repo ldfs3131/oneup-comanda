@@ -641,6 +641,9 @@ export async function accountRoutes(app) {
     // Consulta se o item consumiu estoque (para mostrar "devolver ao estoque")
     app.get('/api/order-items/:id/stock', ops, async (req) => {
         const { id } = parse(idParam, req.params);
+        const [it] = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.id, id));
+        if (!it)
+            throw notFound('Item não encontrado.');
         return { hasStock: await itemHasStock(db, id) };
     });
     app.post('/api/orders/:id/deliver', ops, async (req) => {

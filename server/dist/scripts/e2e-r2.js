@@ -200,11 +200,14 @@ export async function r2Tests(ctx) {
     const roleRow = await q(`SELECT user_role FROM audit_logs WHERE entity_type='order' AND entity_id=$1 AND action='kitchen.ready'`, [tk.id]);
     check('T26. Admin opera a cozinha e a auditoria registra perfil ADMIN', roleRow[0]?.user_role === 'ADMIN');
     await q(`UPDATE orders SET created_at = now() - interval '131 minutes', confirmed_at = now() - interval '130 minutes', started_at = now() - interval '129 minutes', ready_at = now() - interval '10 minutes' WHERE id = $1`, [tk.id]);
-    const tim = (await admin.get('/api/timing')).data;
+    // ontem + hoje: o teste joga o pedido 131 min para trás (de madrugada isso cai no dia anterior)
+    const dia = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() + d * 86400_000));
+    const timingUrl = `/api/timing?from=${dia(-1)}&to=${dia(0)}`;
+    const tim = (await admin.get(timingUrl)).data;
     check('T24. Tempo suspeito (esquecido) fica fora das médias', tim.suspects.some((s) => s.id === tk.id));
     const confirmed = (await q(`SELECT confirmed_at FROM orders WHERE id = $1`, [tk.id]))[0].confirmed_at;
     const fix = await admin.post(`/api/orders/${tk.id}/times`, { field: 'readyAt', value: new Date(confirmed.getTime() + 14 * 60_000).toISOString(), reason: 'Cozinha esqueceu de marcar pronto' });
-    const tim2 = (await admin.get('/api/timing')).data;
+    const tim2 = (await admin.get(timingUrl)).data;
     const corr = await q(`SELECT * FROM order_time_corrections WHERE order_id = $1`, [tk.id]);
     check('T24. Correção do admin guarda o horário original e sai dos suspeitos', fix.status === 200 && corr.length === 1 && corr[0].before && !tim2.suspects.some((s) => s.id === tk.id), { fix: fix.data, corr, sus: tim2.suspects });
     const badFix = await admin.post(`/api/orders/${tk.id}/times`, { field: 'startedAt', value: new Date(confirmed.getTime() + 60 * 60_000).toISOString(), reason: 'teste inválido' });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { eq, sql } from 'drizzle-orm';
 import { networkInterfaces } from 'node:os';
-import { db } from '../db/index.js';
+import { db, empresaAtual } from '../db/index.js';
 import { deliverySettings, excludedDays, restaurantSettings } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
 import { bad, parse, reasonSchema } from '../lib/http.js';
@@ -121,7 +121,8 @@ export async function adminRoutes(app) {
             byHour: byHour.map((h) => ({ hour: n(h.h), orders: n(h.orders) })),
             kitchenMedianMin: times?.kitchen == null ? null : Math.round(Number(times.kitchen)), kitchenSamples: n(times?.n),
             lowStock: lowStock.map((l) => ({ id: l.id, name: l.name, qty: n(l.qty), lim: n(l.lim) })),
-            backup: { at: s.lastBackupAt, ok: s.lastBackupOk, info: s.lastBackupInfo, stale: backupAgeH == null || backupAgeH > 48 || s.lastBackupOk === false, configured: config.backupDirs.length > 0 },
+            // instalação própria mostra o aviso de backup; online o backup é da plataforma (sem aviso para o restaurante)
+            backup: config.backupDirs.length ? { at: s.lastBackupAt, ok: s.lastBackupOk, info: s.lastBackupInfo, stale: backupAgeH == null || backupAgeH > 48 || s.lastBackupOk === false, configured: true } : null,
             mei: s.meiEnabled ? { yearRevenueCents: n(year.cents), limitCents: s.meiLimitCents } : null,
         };
     });
@@ -130,7 +131,7 @@ export async function adminRoutes(app) {
     app.get('/api/excluded-days', insightsAdmin, async () => (await db.execute(sql `SELECT to_char(day,'YYYY-MM-DD') AS day, reason FROM excluded_days ORDER BY day DESC`)).rows);
     app.post('/api/excluded-days', insightsAdmin, async (req) => {
         const b = parse(z.object({ day: dateSchema, reason: reasonSchema }), req.body);
-        await db.insert(excludedDays).values({ day: b.day, reason: b.reason, userId: me(req).id }).onConflictDoUpdate({ target: excludedDays.day, set: { reason: b.reason } });
+        await db.insert(excludedDays).values({ day: b.day, reason: b.reason, userId: me(req).id }).onConflictDoUpdate({ target: [excludedDays.empresaId, excludedDays.day], set: { reason: b.reason } });
         await audit(db, { userId: me(req).id, action: 'insights.exclude', message: `${me(req).name} marcou ${b.day.split('-').reverse().join('/')} como dia atípico (fora das comparações). Motivo: ${b.reason}` });
         return { ok: true };
     });
@@ -205,11 +206,11 @@ export async function adminRoutes(app) {
             if (rest.whatsappNumber !== undefined)
                 rest.whatsappNumber = rest.whatsappNumber ? rest.whatsappNumber.replace(/\D/g, '') : null;
             if (Object.keys(rest).length)
-                await tx.update(restaurantSettings).set({ ...rest, updatedAt: new Date() }).where(eq(restaurantSettings.id, 1));
+                await tx.update(restaurantSettings).set({ ...rest, updatedAt: new Date() }).where(eq(restaurantSettings.id, empresaAtual()));
             if (isOpen !== undefined)
                 await setEstablishmentOpen(tx, user, isOpen, 'configurações');
             if (deliveryOpen !== undefined)
-                await tx.update(deliverySettings).set({ isOpen: deliveryOpen, updatedAt: new Date() }).where(eq(deliverySettings.id, 1));
+                await tx.update(deliverySettings).set({ isOpen: deliveryOpen, updatedAt: new Date() }).where(eq(deliverySettings.id, empresaAtual()));
             if (b.qrEnabled !== undefined)
                 msgs.push(`QR Code ${b.qrEnabled ? 'LIGADO' : 'DESLIGADO'}`);
             if (deliveryOpen !== undefined)
@@ -230,5 +231,9 @@ export async function adminRoutes(app) {
         notify.settingsChanged();
         return { ok: true };
     });
-    app.post('/api/backup', admin, async (req) => ({ results: await runBackupAndRecord(me(req).id, 'backup.manual') }));
+    app.post('/api/backup', admin, async (req) => {
+        if (!config.backupDirs.length)
+            throw bad('No ONE Food online o backup do banco é automático e diário, feito pela ONE UP.');
+        return { results: await runBackupAndRecord(me(req).id, 'backup.manual') };
+    });
 }

@@ -1,4 +1,16 @@
 import { pgTable, serial, integer, text, boolean, timestamp, jsonb, pgEnum, index, date, } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+/** Empresa dona do registro: preenchida pelo banco a partir da conexão (RLS). Ninguém digita. */
+const empresaRef = () => integer('empresa_id').notNull().default(sql `app_empresa()`);
+// ---------- Plataforma (ONE Base) ----------
+export const empresas = pgTable('empresas', {
+    id: serial('id').primaryKey(),
+    slug: text('slug').notNull().unique(),
+    nome: text('nome').notNull(),
+    produto: text('produto').notNull().default('food'),
+    status: text('status').notNull().default('ATIVA'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
 // ---------- Enums ----------
 export const roleCode = pgEnum('role_code', ['ADMIN', 'CAIXA', 'COZINHA']);
 export const accountStatus = pgEnum('account_status', [
@@ -24,6 +36,7 @@ export const roles = pgTable('roles', {
     name: text('name').notNull(),
 });
 export const users = pgTable('users', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     name: text('name').notNull(),
     username: text('username').notNull().unique(),
@@ -33,6 +46,7 @@ export const users = pgTable('users', {
     createdAt: createdAt(),
 });
 export const sessions = pgTable('sessions', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     tokenHash: text('token_hash').notNull().unique(),
     userId: integer('user_id').notNull().references(() => users.id),
@@ -41,6 +55,7 @@ export const sessions = pgTable('sessions', {
 });
 // ---------- Cardápio ----------
 export const categories = pgTable('categories', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     name: text('name').notNull(),
     sortOrder: integer('sort_order').notNull().default(0),
@@ -49,6 +64,7 @@ export const categories = pgTable('categories', {
     createdAt: createdAt(),
 });
 export const products = pgTable('products', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     categoryId: integer('category_id').notNull().references(() => categories.id),
     name: text('name').notNull(),
@@ -70,6 +86,7 @@ export const products = pgTable('products', {
     updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 export const optionGroups = pgTable('option_groups', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     productId: integer('product_id').notNull().references(() => products.id),
     name: text('name').notNull(),
@@ -79,6 +96,7 @@ export const optionGroups = pgTable('option_groups', {
     active: boolean('active').notNull().default(true),
 });
 export const options = pgTable('options', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     groupId: integer('group_id').notNull().references(() => optionGroups.id),
     name: text('name').notNull(),
@@ -90,6 +108,7 @@ export const options = pgTable('options', {
 });
 // ---------- Caixa ----------
 export const cashRegisters = pgTable('cash_registers', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     status: registerStatus('status').notNull().default('OPEN'),
     openedBy: integer('opened_by').notNull().references(() => users.id),
@@ -104,6 +123,7 @@ export const cashRegisters = pgTable('cash_registers', {
     summary: jsonb('summary'),
 });
 export const cashMovements = pgTable('cash_movements', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     cashRegisterId: integer('cash_register_id').notNull().references(() => cashRegisters.id),
     type: movementType('type').notNull(),
@@ -114,6 +134,7 @@ export const cashMovements = pgTable('cash_movements', {
 });
 // ---------- Contas e pedidos ----------
 export const accounts = pgTable('accounts', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     number: integer('number').notNull().unique(),
     customerName: text('customer_name'),
@@ -134,6 +155,7 @@ export const accounts = pgTable('accounts', {
     closedBy: integer('closed_by').references(() => users.id),
 }, (t) => [index('accounts_status_idx').on(t.status)]);
 export const orders = pgTable('orders', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     number: integer('number').notNull().unique(),
     accountId: integer('account_id').notNull().references(() => accounts.id),
@@ -160,6 +182,7 @@ export const orders = pgTable('orders', {
     problemAt: ts('problem_at'),
 }, (t) => [index('orders_status_idx').on(t.status), index('orders_account_idx').on(t.accountId)]);
 export const orderItems = pgTable('order_items', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     orderId: integer('order_id').notNull().references(() => orders.id),
     productId: integer('product_id').references(() => products.id),
@@ -175,6 +198,7 @@ export const orderItems = pgTable('order_items', {
 }, (t) => [index('order_items_order_idx').on(t.orderId)]);
 // ---------- Financeiro ----------
 export const paymentMethods = pgTable('payment_methods', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     code: text('code').notNull().unique(),
     name: text('name').notNull(),
@@ -183,6 +207,7 @@ export const paymentMethods = pgTable('payment_methods', {
     sortOrder: integer('sort_order').notNull().default(0),
 });
 export const payments = pgTable('payments', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     accountId: integer('account_id').notNull().references(() => accounts.id),
     methodId: integer('method_id').notNull().references(() => paymentMethods.id),
@@ -196,6 +221,7 @@ export const payments = pgTable('payments', {
     reversalReason: text('reversal_reason'),
 }, (t) => [index('payments_account_idx').on(t.accountId), index('payments_register_idx').on(t.cashRegisterId)]);
 export const discounts = pgTable('discounts', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     accountId: integer('account_id').notNull().references(() => accounts.id),
     kind: discountKind('kind').notNull(),
@@ -208,6 +234,7 @@ export const discounts = pgTable('discounts', {
     createdAt: createdAt(),
 });
 export const cancellations = pgTable('cancellations', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     target: cancellationTarget('target').notNull(),
     accountId: integer('account_id').notNull().references(() => accounts.id),
@@ -227,6 +254,7 @@ export const cancellations = pgTable('cancellations', {
 });
 // ---------- Auditoria e configurações ----------
 export const auditLogs = pgTable('audit_logs', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     createdAt: createdAt(),
     userId: integer('user_id').references(() => users.id),
@@ -238,6 +266,7 @@ export const auditLogs = pgTable('audit_logs', {
     data: jsonb('data'),
 }, (t) => [index('audit_created_idx').on(t.createdAt)]);
 export const restaurantSettings = pgTable('restaurant_settings', {
+    empresaId: empresaRef(),
     id: integer('id').primaryKey().default(1),
     name: text('name').notNull().default('Happy Alpha'),
     isOpen: boolean('is_open').notNull().default(false),
@@ -253,6 +282,7 @@ export const restaurantSettings = pgTable('restaurant_settings', {
     updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 export const deliverySettings = pgTable('delivery_settings', {
+    empresaId: empresaRef(),
     id: integer('id').primaryKey().default(1),
     isOpen: boolean('is_open').notNull().default(false),
     note: text('note'),
@@ -260,11 +290,13 @@ export const deliverySettings = pgTable('delivery_settings', {
 });
 // Contadores de numeração (conta/pedido) — sequenciais e legíveis
 export const counters = pgTable('counters', {
+    empresaId: empresaRef(),
     name: text('name').primaryKey(),
     value: integer('value').notNull().default(0),
 });
 // ================= R2 =================
 export const customers = pgTable('customers', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     name: text('name').notNull(),
     contact: text('contact'),
@@ -274,6 +306,7 @@ export const customers = pgTable('customers', {
     updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => [index('customers_name_idx').on(t.name)]);
 export const productCosts = pgTable('product_costs', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     productId: integer('product_id').notNull().references(() => products.id),
     costCents: integer('cost_cents').notNull(),
@@ -281,6 +314,7 @@ export const productCosts = pgTable('product_costs', {
     createdAt: createdAt(),
 });
 export const stockMovements = pgTable('stock_movements', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     productId: integer('product_id').notNull().references(() => products.id),
     type: stockMovementType('type').notNull(),
@@ -294,12 +328,14 @@ export const stockMovements = pgTable('stock_movements', {
     createdAt: createdAt(),
 }, (t) => [index('stock_mov_product_idx').on(t.productId)]);
 export const expenseCategories = pgTable('expense_categories', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     name: text('name').notNull().unique(),
     active: boolean('active').notNull().default(true),
     sortOrder: integer('sort_order').notNull().default(0),
 });
 export const expenses = pgTable('expenses', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     description: text('description').notNull(),
     categoryId: integer('category_id').notNull().references(() => expenseCategories.id),
@@ -316,6 +352,7 @@ export const expenses = pgTable('expenses', {
 });
 /** Linha do tempo aberto/fechado do estabelecimento (base dos insights). */
 export const statusEvents = pgTable('status_events', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     isOpen: boolean('is_open').notNull(),
     userId: integer('user_id').references(() => users.id),
@@ -323,12 +360,14 @@ export const statusEvents = pgTable('status_events', {
 });
 /** Dias fora das comparações (implantação, evento, dia atípico). */
 export const excludedDays = pgTable('excluded_days', {
+    empresaId: empresaRef(),
     day: date('day').primaryKey(),
     reason: text('reason').notNull(),
     userId: integer('user_id').references(() => users.id),
     createdAt: createdAt(),
 });
 export const orderTimeCorrections = pgTable('order_time_corrections', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     orderId: integer('order_id').notNull().references(() => orders.id),
     field: text('field').notNull(),
@@ -340,6 +379,7 @@ export const orderTimeCorrections = pgTable('order_time_corrections', {
 });
 /** Respostas guardadas para evitar duplicidade (duplo clique / reenvio). */
 export const idempotencyKeys = pgTable('idempotency_keys', {
+    empresaId: empresaRef(),
     key: text('key').primaryKey(),
     userId: integer('user_id'),
     route: text('route').notNull(),
@@ -349,6 +389,7 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
 });
 /** Insights exibidos (evita repetir o mesmo insight sem mudança relevante). */
 export const insightLog = pgTable('insight_log', {
+    empresaId: empresaRef(),
     id: serial('id').primaryKey(),
     key: text('key').notNull(),
     bucket: text('bucket').notNull(),

@@ -6,6 +6,7 @@
 import { sql } from 'drizzle-orm';
 import { insightLog } from '../db/schema.js';
 import { dataVersion } from '../lib/cache.js';
+import { empresaAtual } from '../db/index.js';
 const TZ = 'America/Sao_Paulo';
 // ---------- utilidades ----------
 const brl = (c) => {
@@ -89,10 +90,13 @@ function nowLocal() {
     const g = (t) => parts.find((p) => p.type === t).value;
     return { day: `${g('year')}-${g('month')}-${g('day')}`, minute: (Number(g('hour')) % 24) * 60 + Number(g('minute')) };
 }
-let cache = null;
+// cache POR EMPRESA (nunca devolver a análise de uma empresa para outra)
+const caches = new Map();
 export async function computeInsights(tx, opts = {}) {
     const now = opts.now ?? nowLocal();
+    const empresa = empresaAtual();
     const cacheKey = `${now.day}:${Math.floor(now.minute / 5)}:${dataVersion()}`;
+    const cache = caches.get(empresa);
     if (!opts.now && cache && cache.key === cacheKey && Date.now() - cache.at < 60_000)
         return cache.value;
     const D = await load(tx, now.day);
@@ -639,6 +643,6 @@ export async function computeInsights(tx, opts = {}) {
                     : `Histórico robusto: ${dataDays} dias.`;
     const result = { level, dataDays, firstDay, message, top, all, generatedAt: new Date().toISOString() };
     if (!opts.now)
-        cache = { key: cacheKey, at: Date.now(), value: result };
+        caches.set(empresa, { key: cacheKey, at: Date.now(), value: result });
     return result;
 }

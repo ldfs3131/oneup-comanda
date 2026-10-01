@@ -1,33 +1,56 @@
 import { Server } from 'socket.io';
 import { tokenFromCookieHeader, userFromToken } from './auth.js';
 import { bumpDataVersion } from './lib/cache.js';
+import { currentContext, runAsEmpresa } from './db/index.js';
+import { empresaPorSlug, slugDaRequisicao } from './lib/empresa.js';
 let io = null;
+/*
+ * Tempo real ISOLADO POR EMPRESA: cada aparelho entra só nas salas da própria empresa
+ * ("<empresa>:kitchen", "<empresa>:cashier", "<empresa>:admin"). Um evento nunca sai da empresa
+ * que o gerou: a empresa vem do contexto da requisição, nunca de parâmetro.
+ */
 export function initRealtime(server) {
     io = new Server(server, { path: '/socket.io', serveClient: false });
     io.use(async (socket, next) => {
-        const user = await userFromToken(tokenFromCookieHeader(socket.handshake.headers.cookie));
-        if (!user)
-            return next(new Error('unauthorized'));
-        socket.data.user = user;
-        next();
+        try {
+            const h = socket.handshake.headers;
+            const emp = await empresaPorSlug(slugDaRequisicao(h.host, h['x-empresa']));
+            if (!emp)
+                return next(new Error('empresa'));
+            const user = await runAsEmpresa(emp.id, () => userFromToken(tokenFromCookieHeader(h.cookie)));
+            if (!user)
+                return next(new Error('unauthorized'));
+            socket.data.user = user;
+            socket.data.empresaId = emp.id;
+            next();
+        }
+        catch {
+            next(new Error('unauthorized'));
+        }
     });
     io.on('connection', (socket) => {
         const role = socket.data.user.role;
+        const e = socket.data.empresaId;
         if (role === 'COZINHA' || role === 'ADMIN')
-            socket.join('kitchen');
+            socket.join(`${e}:kitchen`);
         if (role === 'CAIXA' || role === 'ADMIN')
-            socket.join('cashier');
+            socket.join(`${e}:cashier`);
         if (role === 'ADMIN')
-            socket.join('admin');
+            socket.join(`${e}:admin`);
     });
     return io;
 }
 export function emit(rooms, event, payload = {}) {
     if (!io)
         return;
-    let target = io.to(rooms[0]);
+    const empresaId = currentContext()?.empresaId;
+    if (!empresaId) {
+        console.error(`[tempo real] evento "${event}" sem empresa no contexto: não enviado`);
+        return;
+    }
+    let target = io.to(`${empresaId}:${rooms[0]}`);
     for (const r of rooms.slice(1))
-        target = target.to(r);
+        target = target.to(`${empresaId}:${r}`);
     target.emit(event, payload);
 }
 /** Atalhos semânticos */

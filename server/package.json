@@ -1,7 +1,7 @@
 {
-  "name": "happy-alpha-server",
+  "name": "onefood-server",
   "private": true,
-  "version": "2.0.2",
+  "version": "3.0.0-alpha.1",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -11,7 +11,8 @@
     "setup": "node dist/scripts/setup.js",
     "demo": "node dist/scripts/demo.js",
     "test:e2e": "node dist/scripts/e2e.js",
-    "test:insights": "node dist/scripts/insights-test.js"
+    "test:insights": "node dist/scripts/insights-test.js",
+    "test:isolamento": "node dist/scripts/isolamento-test.js"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

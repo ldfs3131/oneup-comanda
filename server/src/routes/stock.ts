@@ -25,6 +25,8 @@ export async function stockRoutes(app: FastifyInstance) {
 
   app.get('/api/stock/:id/movements', ops, async (req) => {
     const { id } = parse(idParam, req.params);
+    const [p] = await db.select({ id: products.id }).from(products).where(eq(products.id, id));
+    if (!p) throw notFound('Produto não encontrado.');
     const rows = await db.execute(sql`
       SELECT m.id, m.type, m.quantity, m.before, m.after, m.missing, m.reason, m.created_at AS "createdAt", u.name AS "userName"
       FROM stock_movements m LEFT JOIN users u ON u.id = m.user_id

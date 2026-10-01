@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { db, nextNumber } from '../db/index.js';
+import { currentContext, db, nextNumber } from '../db/index.js';
 import { accounts, deliverySettings, restaurantSettings } from '../db/schema.js';
 import { HttpError, bad, brl, conflict, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
@@ -10,6 +10,7 @@ import { loadMenu } from './menu.js';
 const hits = new Map();
 function rateLimit(ip, max, windowMs) {
     const now = Date.now();
+    ip = `${currentContext()?.empresaId ?? 0}:${ip}`; // limite por empresa + aparelho
     const list = (hits.get(ip) ?? []).filter((t) => now - t < windowMs);
     if (list.length >= max)
         throw new HttpError(429, 'Muitos pedidos em pouco tempo. Aguarde um instante ou peça no balcão.');

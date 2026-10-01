@@ -5,7 +5,7 @@
  *   DATABASE_URL=postgres://.../happy_alpha_insights node dist/scripts/insights-test.js
  */
 import { eq, sql } from 'drizzle-orm';
-import { db, ensureBaseData, nextNumber, pool, runMigrations } from '../db/index.js';
+import { closePools, db, ensureBaseData, nextNumber, runAsEmpresa, runAsSystem, runMigrations } from '../db/index.js';
 import { accounts, cashRegisters, excludedDays, orderItems, orders, paymentMethods, payments, products, roles, users } from '../db/schema.js';
 import { config } from '../config.js';
 import { seedMenu } from '../seed/menu.js';
@@ -26,9 +26,11 @@ const NOW = { day: today, minute: 23 * 60 + 50 };
 type DayPlan = { accounts: number; extra?: { name: string; qty: number }[] };
 
 async function reset() {
-  await db.execute(sql`DROP SCHEMA IF EXISTS public CASCADE`);
-  await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE`);
-  await db.execute(sql`CREATE SCHEMA public`);
+  await runAsSystem(async () => {
+    await db.execute(sql`DROP SCHEMA IF EXISTS public CASCADE`);
+    await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE`);
+    await db.execute(sql`CREATE SCHEMA public`);
+  });
   await runMigrations();
   await ensureBaseData();
   await seedMenu();
@@ -155,8 +157,8 @@ async function main() {
 
   console.log(`\nResultado insights: ${ok} verificações OK, ${fails.length} falhas.`);
   if (fails.length) { console.log('Falhas:\n - ' + fails.join('\n - ')); }
-  await pool.end();
-  process.exit(fails.length ? 1 : 0);
+  process.exitCode = fails.length ? 1 : 0;
 }
 
-main().catch(async (e) => { console.error(e); await pool.end(); process.exit(1); });
+// os dados são gerados dentro da empresa nº 1 (RLS ligado, como na aplicação)
+runAsEmpresa(1, main).then(closePools).catch(async (e) => { console.error(e); await closePools(); process.exit(1); });

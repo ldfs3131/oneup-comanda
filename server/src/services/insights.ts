@@ -7,6 +7,7 @@ import { sql } from 'drizzle-orm';
 import type { Executor } from '../db/index.js';
 import { insightLog } from '../db/schema.js';
 import { dataVersion } from '../lib/cache.js';
+import { empresaAtual } from '../db/index.js';
 
 const TZ = 'America/Sao_Paulo';
 
@@ -112,7 +113,8 @@ function nowLocal() {
   return { day: `${g('year')}-${g('month')}-${g('day')}`, minute: (Number(g('hour')) % 24) * 60 + Number(g('minute')) };
 }
 
-let cache: { key: string; at: number; value: InsightsResult } | null = null;
+// cache POR EMPRESA (nunca devolver a análise de uma empresa para outra)
+const caches = new Map<number, { key: string; at: number; value: InsightsResult }>();
 export type InsightsResult = {
   level: 1 | 2 | 3 | 4; dataDays: number; firstDay: string | null; message: string;
   top: Insight[]; all: Insight[]; generatedAt: string;
@@ -120,7 +122,9 @@ export type InsightsResult = {
 
 export async function computeInsights(tx: Executor, opts: { now?: { day: string; minute: number }; log?: boolean } = {}): Promise<InsightsResult> {
   const now = opts.now ?? nowLocal();
+  const empresa = empresaAtual();
   const cacheKey = `${now.day}:${Math.floor(now.minute / 5)}:${dataVersion()}`;
+  const cache = caches.get(empresa);
   if (!opts.now && cache && cache.key === cacheKey && Date.now() - cache.at < 60_000) return cache.value;
 
   const D = await load(tx, now.day);
@@ -656,6 +660,6 @@ export async function computeInsights(tx: Executor, opts: { now?: { day: string;
           ? `Histórico consolidado: ${dataDays} dias. Tendências, dia da semana e anomalias liberados.`
           : `Histórico robusto: ${dataDays} dias.`;
   const result: InsightsResult = { level, dataDays, firstDay, message, top, all, generatedAt: new Date().toISOString() };
-  if (!opts.now) cache = { key: cacheKey, at: Date.now(), value: result };
+  if (!opts.now) caches.set(empresa, { key: cacheKey, at: Date.now(), value: result });
   return result;
 }

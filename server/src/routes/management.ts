@@ -96,7 +96,8 @@ export async function managementRoutes(app: FastifyInstance) {
   app.patch('/api/expense-categories/:id', admin, async (req) => {
     const { id } = parse(idParam, req.params);
     const b = parse(z.object({ name: z.string().trim().min(2).max(40).optional(), active: z.boolean().optional() }), req.body);
-    await db.update(expenseCategories).set(b).where(eq(expenseCategories.id, id));
+    const upd = await db.update(expenseCategories).set(b).where(eq(expenseCategories.id, id)).returning({ id: expenseCategories.id });
+    if (!upd.length) throw notFound('Categoria não encontrada.');
     return { ok: true };
   });
 

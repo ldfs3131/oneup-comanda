@@ -1,4 +1,7 @@
-/** Versão dos dados operacionais: muda a cada pedido/pagamento. Usada para invalidar caches (ex.: insights). */
-let version = 0;
-export const bumpDataVersion = () => { version++; };
-export const dataVersion = () => version;
+import { currentContext } from '../db/index.js';
+
+/** Versão dos dados operacionais POR EMPRESA: muda a cada pedido/pagamento. Usada para invalidar caches. */
+const versions = new Map<number, number>();
+const key = () => currentContext()?.empresaId ?? 0;
+export const bumpDataVersion = () => { const k = key(); versions.set(k, (versions.get(k) ?? 0) + 1); };
+export const dataVersion = () => versions.get(key()) ?? 0;

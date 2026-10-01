@@ -7,12 +7,13 @@ import { bad, conflict, idParam, notFound, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { config } from '../config.js';
 export async function authRoutes(app) {
-    app.get('/api/meta', async () => {
+    app.get('/api/meta', async (req) => {
         const [s] = await db.select().from(restaurantSettings).limit(1);
-        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Happy Alpha', tagline: s?.tagline ?? 'Gourmet R2', version: config.version };
+        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', version: config.version, product: config.productName, empresa: req.empresa?.slug ?? null };
     });
     app.post('/api/auth/login', async (req, reply) => {
-        checkLoginRate(req.ip);
+        const rateKey = `${req.empresa?.id ?? 0}:${req.ip}`; // por empresa + aparelho
+        checkLoginRate(rateKey);
         const body = parse(z.object({ username: z.string().trim().toLowerCase().min(1), password: z.string().min(1), remember: z.boolean().default(true) }), req.body);
         const rows = await db.select({ u: users, role: roles.code }).from(users)
             .innerJoin(roles, eq(roles.id, users.roleId)).where(eq(users.username, body.username)).limit(1);
@@ -20,7 +21,7 @@ export async function authRoutes(app) {
         if (!row || !row.u.active || !(await checkPassword(body.password, row.u.passwordHash))) {
             throw bad('Usuário ou senha incorretos.');
         }
-        clearLoginRate(req.ip);
+        clearLoginRate(rateKey);
         const s = await createSession(row.u.id, body.remember);
         reply.setCookie(COOKIE, s.token, {
             path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, ...(body.remember ? { expires: s.expiresAt } : {}),

@@ -5,7 +5,9 @@ import fastifyStatic from '@fastify/static';
 import { existsSync, mkdirSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { config } from './config.js';
-import { ensureBaseData, pool, runMigrations, waitForDatabase } from './db/index.js';
+import { appPool, bindContext, db, ensureEmpresaBase, ensurePlatformData, releaseContext, runAsEmpresa, runAsSystem, runMigrations, systemPool, waitForDatabase } from './db/index.js';
+import { empresas } from './db/schema.js';
+import { empresaPorSlug, slugDaRequisicao } from './lib/empresa.js';
 import { errorHandler } from './lib/http.js';
 import { initRealtime } from './realtime.js';
 import { authRoutes } from './routes/auth.js';
@@ -18,15 +20,38 @@ import { publicRoutes } from './routes/public.js';
 import { stockRoutes } from './routes/stock.js';
 import { managementRoutes } from './routes/management.js';
 import { cleanupIdempotency } from './lib/idempotency.js';
-import { upgradeMenuIfNeeded } from './seed/menu.js';
+/**
+ * Cada chamada de API pertence a UMA empresa (descoberta pelo endereço). A conexão do banco dessa
+ * requisição fica presa a ela (RLS) e é devolvida ao terminar. Sem empresa válida: 404.
+ */
+function empresaPorRequisicao(app) {
+    app.addHook('onRequest', async (req, reply) => {
+        if (!req.url.startsWith('/api/') || req.url.startsWith('/api/health'))
+            return;
+        const emp = await empresaPorSlug(slugDaRequisicao(req.headers.host, req.headers['x-empresa']));
+        if (!emp)
+            return reply.code(404).send({ error: 'Empresa não encontrada. Confira o endereço de acesso.', code: 'EMPRESA_NAO_ENCONTRADA' });
+        req.empresa = emp;
+        req.dbCtx = { kind: 'app', empresaId: emp.id };
+    });
+    // depois da leitura do corpo: liga o contexto ao restante da requisição (hooks de login e rota)
+    app.addHook('preValidation', (req, _reply, done) => { if (req.dbCtx)
+        bindContext(req.dbCtx, done);
+    else
+        done(); });
+    app.addHook('onResponse', async (req) => { await releaseContext(req.dbCtx); });
+    app.addHook('onRequestAbort', async (req) => { await releaseContext(req.dbCtx); });
+}
 export async function buildApp() {
     const app = Fastify({
         logger: { level: process.env.LOG_LEVEL ?? 'warn' },
         bodyLimit: 1024 * 1024,
-        trustProxy: false,
+        // atrás do proxy (Coolify/Cloudflare) o IP real vem do cabeçalho; sem isso todos parecem o mesmo aparelho
+        trustProxy: (config.trustProxy || false), // número de saltos aceito em tempo de execução
     });
     app.setErrorHandler(errorHandler);
     securityHeaders(app);
+    empresaPorRequisicao(app);
     await app.register(cookie);
     await app.register(multipart);
     mkdirSync(config.uploadsDir, { recursive: true });
@@ -71,6 +96,7 @@ async function buildPublicApp() {
     const app = Fastify({ logger: { level: 'warn' }, bodyLimit: 256 * 1024 });
     app.setErrorHandler(errorHandler);
     securityHeaders(app);
+    empresaPorRequisicao(app);
     await app.register(fastifyStatic, { root: config.uploadsDir, prefix: '/uploads/', decorateReply: false });
     await app.register(publicRoutes);
     app.get('/api/meta', async () => ({ demoMode: config.demoMode, public: true }));
@@ -94,17 +120,17 @@ function lanAddresses() {
 async function main() {
     await waitForDatabase();
     await runMigrations();
-    await ensureBaseData();
-    const added = await upgradeMenuIfNeeded();
-    if (added)
-        console.log(`  Cardápio atualizado para a R2: ${added} produto(s) adicionados.`);
-    await cleanupIdempotency();
+    await ensurePlatformData();
+    const lista = await runAsSystem(() => db.select().from(empresas));
+    for (const e of lista.filter((x) => x.status !== 'CANCELADA')) {
+        await runAsEmpresa(e.id, async () => { await ensureEmpresaBase(); await cleanupIdempotency(); });
+    }
     const app = await buildApp();
     await app.ready();
     initRealtime(app.server);
     await app.listen({ port: config.port, host: config.host });
     const ips = lanAddresses();
-    console.log(`\n  HAPPY ALPHA ${config.demoMode ? '(DEMONSTRAÇÃO) ' : ''}rodando`);
+    console.log(`\n  ${config.productName} ${config.demoMode ? '(DEMONSTRAÇÃO) ' : ''}rodando · ${lista.length} empresa(s)`);
     console.log(`  Neste computador:  http://localhost:${config.port}`);
     for (const ip of ips)
         console.log(`  Tablet/celular:    http://${ip}:${config.port}`);
@@ -114,7 +140,7 @@ async function main() {
         console.log(`  Cardápio público:  http://localhost:${config.publicPort}/cardapio (somente cardápio)`);
     }
     console.log('');
-    const stop = async () => { await app.close(); await pool.end(); process.exit(0); };
+    const stop = async () => { await app.close(); await appPool.end(); await systemPool.end(); process.exit(0); };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
 }

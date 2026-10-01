@@ -1,3 +1,4 @@
+import { empresaAtual } from '../db/index.js';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, stat, unlink } from 'node:fs/promises';
@@ -78,7 +79,7 @@ export async function runBackupAndRecord(userId, action) {
     const saved = results.filter((r) => r.ok).map((r) => r.file);
     const failed = results.filter((r) => !r.ok).map((r) => `${r.dir}: ${r.error}`);
     const info = [saved.length ? `Salvo em: ${saved.join(' · ')}` : '', failed.length ? `FALHOU em: ${failed.join('; ')}` : ''].filter(Boolean).join(' | ');
-    await db.update(restaurantSettings).set({ lastBackupAt: new Date(), lastBackupOk: allOk, lastBackupInfo: info }).where(eq(restaurantSettings.id, 1));
+    await db.update(restaurantSettings).set({ lastBackupAt: new Date(), lastBackupOk: allOk, lastBackupInfo: info }).where(eq(restaurantSettings.id, empresaAtual()));
     const kind = action === 'backup.auto' ? 'automático' : 'manual';
     await audit(db, {
         userId, action,

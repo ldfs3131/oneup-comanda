@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { db, type Executor } from '../db/index.js';
+import { db, type Executor, empresaAtual } from '../db/index.js';
 import { categories, optionGroups, options, products, restaurantSettings } from '../db/schema.js';
 
 /**
@@ -153,7 +153,7 @@ export async function seedMenu(tx: Executor = db) {
     const [target] = await tx.select().from(products).where(sql`lower(${products.name}) = lower(${o.stockOf})`);
     await tx.insert(options).values({ groupId: o.groupId, name: o.name, priceDeltaCents: o.delta, sortOrder: o.sortOrder, stockProductId: target?.trackStock ? target.id : null });
   }
-  await tx.update(restaurantSettings).set({ menuSeedVersion: 2 }).where(eq(restaurantSettings.id, 1));
+  await tx.update(restaurantSettings).set({ menuSeedVersion: 2 }).where(eq(restaurantSettings.id, empresaAtual()));
   return added;
 }
 

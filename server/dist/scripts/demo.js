@@ -1,5 +1,5 @@
 import { sql, eq, and } from 'drizzle-orm';
-import { db, ensureBaseData, nextNumber, pool, runMigrations } from '../db/index.js';
+import { closePools, db, ensureBaseData, nextNumber, runAsEmpresa, runAsSystem, runMigrations } from '../db/index.js';
 import { accounts, cashRegisters, orderItems, orders, paymentMethods, payments, products, roles, stockMovements, users, optionGroups, options, discounts, restaurantSettings, statusEvents, } from '../db/schema.js';
 import { hashPassword } from '../auth.js';
 import { config } from '../config.js';
@@ -21,10 +21,14 @@ async function main() {
         process.exit(1);
     }
     console.log(`Recriando banco de demonstração "${dbName}"...`);
-    await db.execute(sql `DROP SCHEMA IF EXISTS public CASCADE`);
-    await db.execute(sql `DROP SCHEMA IF EXISTS drizzle CASCADE`);
-    await db.execute(sql `CREATE SCHEMA public`);
+    await runAsSystem(async () => {
+        await db.execute(sql `DROP SCHEMA IF EXISTS public CASCADE`);
+        await db.execute(sql `DROP SCHEMA IF EXISTS drizzle CASCADE`);
+        await db.execute(sql `CREATE SCHEMA public`);
+    });
     await runMigrations();
+    // empresa fictícia de demonstração (acesso: DEFAULT_EMPRESA=demo ou demo.<domínio>)
+    await runAsSystem(() => db.execute(sql `UPDATE empresas SET slug = 'demo', nome = '[DEMO] Restaurante Exemplo', status = 'TESTE' WHERE id = 1`));
     await ensureBaseData();
     const roleRows = await db.select().from(roles);
     const rid = (c) => roleRows.find((r) => r.code === c).id;
@@ -153,6 +157,6 @@ async function main() {
     void and;
     await audit(db, { userId: admin.id, action: 'demo.seed', message: `Banco de demonstração recriado: ${histCount} contas de histórico [DEMO] + dia em andamento.` });
     console.log(`\n✔ Demonstração pronta (${histCount} contas de histórico). Logins: admin / caixa / cozinha — senha 1234.\n`);
-    await pool.end();
 }
-main().catch(async (e) => { console.error(e); await pool.end(); process.exit(1); });
+// os dados são gerados dentro da empresa nº 1 (RLS ligado, como na aplicação)
+runAsEmpresa(1, main).then(closePools).catch(async (e) => { console.error(e); await closePools(); process.exit(1); });

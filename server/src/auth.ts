@@ -14,7 +14,7 @@ declare module 'fastify' {
   interface FastifyRequest { user?: AuthUser }
 }
 
-export const COOKIE = 'ha_session';
+export const COOKIE = 'onefood_sessao';
 const sha = (t: string) => createHash('sha256').update(t).digest('hex');
 
 export const hashPassword = (p: string) => bcrypt.hash(p, 10);

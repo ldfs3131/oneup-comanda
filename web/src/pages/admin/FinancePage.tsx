@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../../api';
 import { addDaysISO, brl, dateOnly, fmtDay, pct, todayISO } from '../../format';
 import { Badge, Modal, MoneyInput, ReasonModal, Spinner, useAction } from '../../components/ui';
+import RitmoMes from './RitmoMes';
 
 type Fin = {
   from: string; to: string; grossSalesCents: number; discountsCents: number; revenueCents: number; receivedCents: number;
@@ -18,7 +19,7 @@ const monthStart = () => todayISO().slice(0, 8) + '01';
 
 export default function FinancePage() {
   const [range, setRange] = useState({ from: monthStart(), to: todayISO() });
-  const [tab, setTab] = useState<'dre' | 'products' | 'expenses'>('dre');
+  const [tab, setTab] = useState<'dre' | 'products' | 'expenses' | 'ritmo'>('dre');
   const [newExp, setNewExp] = useState(false);
   const [cancel, setCancel] = useState<Expense | null>(null);
   const [sort, setSort] = useState<'revenue' | 'margin' | 'qty'>('revenue');
@@ -36,9 +37,9 @@ export default function FinancePage() {
       <div className="row between wrap">
         <div>
           <h1>Financeiro</h1>
-          <div className="muted small">{fmtDay(range.from)} a {fmtDay(range.to)} · valores em regime de venda (data do pedido)</div>
+          <div className="muted small">{tab === 'ritmo' ? 'Receita acumulada do mês comparada com os meses anteriores, no mesmo dia' : `${fmtDay(range.from)} a ${fmtDay(range.to)} · valores em regime de venda (data do pedido)`}</div>
         </div>
-        <div className="row wrap">
+        {tab !== 'ritmo' && <div className="row wrap">
           <div className="seg">
             <button onClick={() => quick(todayISO(), todayISO())}>Hoje</button>
             <button onClick={() => quick(addDaysISO(todayISO(), -6), todayISO())}>7 dias</button>
@@ -47,15 +48,18 @@ export default function FinancePage() {
           </div>
           <input type="date" className="input" style={{ width: 160 }} value={range.from} max={range.to} onChange={(e) => e.target.value && setRange((r) => ({ ...r, from: e.target.value }))} />
           <input type="date" className="input" style={{ width: 160 }} value={range.to} min={range.from} max={todayISO()} onChange={(e) => e.target.value && setRange((r) => ({ ...r, to: e.target.value }))} />
-        </div>
+        </div>}
       </div>
       <div className="seg">
         <button className={tab === 'dre' ? 'on' : ''} onClick={() => setTab('dre')}>Resultado</button>
         <button className={tab === 'products' ? 'on' : ''} onClick={() => setTab('products')}>Por produto</button>
         <button className={tab === 'expenses' ? 'on' : ''} onClick={() => setTab('expenses')}>Despesas</button>
+        <button className={tab === 'ritmo' ? 'on' : ''} onClick={() => setTab('ritmo')}>Ritmo do mês</button>
       </div>
 
-      {isLoading || !f ? <Spinner /> : <>
+      {tab === 'ritmo' && <RitmoMes />}
+
+      {tab !== 'ritmo' && (isLoading || !f ? <Spinner /> : <>
         {tab === 'dre' && <>
           {f.costCoverage < 0.999 && f.grossSalesCents > 0 && (
             <div className="info-box small">⚠ Só {pct(f.costCoverage)} das vendas do período têm custo cadastrado. O CMV e o lucro bruto consideram apenas esses itens — cadastre os custos em <b>Cardápio</b> para o resultado ficar completo.</div>
@@ -163,7 +167,7 @@ export default function FinancePage() {
             </div>
           </div>
         )}
-      </>}
+      </>)}
       {newExp && <ExpenseModal onClose={() => setNewExp(false)} onDone={refresh} />}
       {cancel && (
         <ReasonModal title={`Cancelar despesa "${cancel.description}"`} confirmLabel="Cancelar despesa" danger

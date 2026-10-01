@@ -14,10 +14,24 @@ function inkFor(hex: string) {
   return lum > 0.35 ? '#1a1508' : '#ffffff';
 }
 
-/** Aplica a cor de destaque escolhida pelo Dono em todas as telas. */
+/** Aplica o tema (escuro/claro/automático) e a cor de destaque escolhidos pelo Dono em todas as telas. */
 export function ThemeApplier() {
   const { meta } = useAuth();
   const accent = meta?.accent;
+  const tema = meta?.tema ?? 'escuro';
+  useEffect(() => {
+    const root = document.documentElement;
+    const mq = window.matchMedia?.('(prefers-color-scheme: light)');
+    const aplicar = () => {
+      const claro = tema === 'claro' || (tema === 'auto' && !!mq?.matches);
+      root.dataset.theme = claro ? 'light' : 'dark';
+      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', claro ? '#f6f4ee' : '#161513');
+    };
+    aplicar();
+    if (tema !== 'auto' || !mq) return;
+    mq.addEventListener('change', aplicar);
+    return () => mq.removeEventListener('change', aplicar);
+  }, [tema]);
   useEffect(() => {
     const root = document.documentElement;
     if (accent && /^#[0-9a-f]{6}$/i.test(accent)) {

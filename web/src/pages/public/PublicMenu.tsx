@@ -101,7 +101,7 @@ export default function PublicMenu() {
                 <div className="grow" style={{ textAlign: 'left' }}>
                   <div style={{ fontWeight: 700 }}>{p.name}</div>
                   {p.description && <div className="small muted">{p.description}</div>}
-                  <div className="num" style={{ color: 'var(--brand)', fontWeight: 800, marginTop: 4 }}>{brl(p.priceCents)}</div>
+                  <div className="num" style={{ color: 'var(--brand-text)', fontWeight: 800, marginTop: 4 }}>{brl(p.priceCents)}</div>
                 </div>
                 {p.soldOut ? <span className="badge">Acabou</span> : data.isOpen && <span className="pub-add">＋</span>}
               </button>

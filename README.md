@@ -21,7 +21,7 @@ mesmo servidor (usa o Nginx que já existir, Node e porta próprios). Comando do
 
 ## Testes
 
-`./testes.sh` roda tudo em bancos novos: e2e (124), insights (30), isolamento (145), personalização (56), conexões (7), comitê (26), ONE UP (48).
+`./testes.sh` roda tudo em bancos novos: e2e (124), insights (30), isolamento (145), personalização (56), conexões (7), comitê (26), ONE UP (48), ritmo (35).
 
 ## Garantias
 

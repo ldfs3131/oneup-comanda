@@ -13,7 +13,7 @@ import { brl, dateTime } from '../../format';
 
 type Item = {
   chave: string; secao: string; rotulo: string; ajuda: string; tipo: string; padrao: unknown; valor: unknown;
-  min?: number; max?: number; maxLen?: number; minLen?: number; opcional: boolean; requer: string | null;
+  min?: number; max?: number; maxLen?: number; minLen?: number; opcional: boolean; requer: string | null; opcoes?: { valor: string; rotulo: string }[];
   quem: 'DONO' | 'ONEUP'; ehPadrao: boolean; trava: string | null; editavel: boolean;
 };
 type Tela = { secoes: { id: string; titulo: string; descricao: string }[]; itens: Item[] };
@@ -179,6 +179,15 @@ function Campo({ it, busy, dependeOk, onSave, onPadrao, onHist }: {
       break;
     case 'texto_longo':
       controle = <textarea className="input" rows={2} disabled={bloqueado} maxLength={it.maxLen} value={String(atual ?? '')} onChange={(e) => setDraft(e.target.value)} />;
+      break;
+    case 'escolha':
+      controle = (
+        <div className="seg" role="radiogroup" aria-label={it.rotulo}>
+          {(it.opcoes ?? []).map((o) => (
+            <button key={o.valor} role="radio" aria-checked={atual === o.valor} className={atual === o.valor ? 'on' : ''} disabled={bloqueado} onClick={() => onSave(o.valor)}>{o.rotulo}</button>
+          ))}
+        </div>
+      );
       break;
     case 'imagem':
       controle = <Imagem value={(atual as string | null) ?? null} disabled={bloqueado} onRemove={() => onSave(null)} />;

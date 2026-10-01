@@ -15,7 +15,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/api/meta', async (req) => {
     const [s] = await db.select().from(restaurantSettings).limit(1);
     const pub = await configuracoesPublicas();
-    return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null };
+    return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null, tema: pub.tema ?? 'escuro' };
   });
 
   app.post('/api/auth/login', async (req, reply) => {

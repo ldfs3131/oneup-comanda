@@ -479,3 +479,59 @@ export const configTravas = pgTable('config_travas', {
   motivo: text('motivo').notNull(),
   createdAt: ts('created_at').notNull().defaultNow(),
 });
+
+// ---------- Central de Análise e Recuperação de vendas (só o acesso ONE UP) ----------
+export const analiseRelatorios = pgTable('analise_relatorios', {
+  id: serial('id').primaryKey(),
+  empresaId: empresaRef(),
+  mes: text('mes').notNull(),
+  status: text('status').notNull().default('RASCUNHO'),
+  parecer: text('parecer').notNull().default(''),
+  acoes: jsonb('acoes').$type<unknown[]>().notNull().default([]),
+  retrato: jsonb('retrato'),
+  finalizadoEm: ts('finalizado_em'),
+  userId: integer('user_id').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  createdAt: createdAt(),
+});
+
+export const crmCobrancas = pgTable('crm_cobrancas', {
+  id: serial('id').primaryKey(),
+  empresaId: empresaRef(),
+  accountId: integer('account_id').notNull().references(() => accounts.id),
+  status: text('status').notNull().default('NOVO'),
+  entradaEm: ts('entrada_em').notNull().defaultNow(),
+  pendenteDesde: ts('pendente_desde').notNull(),
+  valorEntradaCents: integer('valor_entrada_cents').notNull(),
+  diasAtrasoEntrada: integer('dias_atraso_entrada').notNull().default(0),
+  percentualBp: integer('percentual_bp').notNull().default(0),
+  proximoContato: date('proximo_contato'),
+  prometidoPara: date('prometido_para'),
+  tentativas: integer('tentativas').notNull().default(0),
+  promessasQuebradas: integer('promessas_quebradas').notNull().default(0),
+  recuperadoCents: integer('recuperado_cents').notNull().default(0),
+  comissaoCents: integer('comissao_cents').notNull().default(0),
+  recuperadoEm: ts('recuperado_em'),
+  encerradoEm: ts('encerrado_em'),
+  naoCobrarMotivo: text('nao_cobrar_motivo'),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+export const crmEventos = pgTable('crm_eventos', {
+  id: serial('id').primaryKey(),
+  empresaId: empresaRef(),
+  cobrancaId: integer('cobranca_id').notNull().references(() => crmCobrancas.id),
+  tipo: text('tipo').notNull(),
+  canal: text('canal'),
+  resultado: text('resultado'),
+  dataPrometida: date('data_prometida'),
+  nota: text('nota'),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const crmConfig = pgTable('crm_config', {
+  empresaId: integer('empresa_id').primaryKey().default(sql`app_empresa()`),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});

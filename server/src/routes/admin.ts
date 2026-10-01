@@ -20,6 +20,8 @@ const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const TZ = 'America/Sao_Paulo';
 
 export function todayLocal() {
+  // só para demonstração e prints (nunca em produção): fixa o "hoje"
+  if (process.env.ONEUP_HOJE && process.env.NODE_ENV !== 'production' && /^\d{4}-\d{2}-\d{2}$/.test(process.env.ONEUP_HOJE)) return process.env.ONEUP_HOJE;
   return new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 function lanUrls() {

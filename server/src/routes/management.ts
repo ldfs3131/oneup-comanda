@@ -9,6 +9,7 @@ import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
 import { currentRegister, requireOpenRegister } from '../services/accounts.js';
 import { rangeOf, todayLocal } from './admin.js';
+import { ritmoDoMes } from '../services/ritmo.js';
 
 const TZ = 'America/Sao_Paulo';
 const n = (v: unknown) => Number(v ?? 0);
@@ -85,6 +86,12 @@ export async function managementRoutes(app: FastifyInstance) {
         marginCents: p.cost == null ? null : n(p.revenue) - n(p.cost), qtyWithoutCost: n(p.qty_without_cost),
       })),
     };
+  });
+
+  // =============== RITMO DO MÊS (mesma permissão do financeiro) ===============
+  app.get('/api/finance/ritmo', admin, async (req) => {
+    const q = parse(z.object({ mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(), modo: z.enum(['liquido', 'bruto']).default('liquido') }), req.query);
+    return ritmoDoMes(db, { mes: q.mes, modo: q.modo, hoje: todayLocal() });
   });
 
   // =============== DESPESAS ===============

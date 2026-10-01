@@ -133,7 +133,7 @@ npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error
 install -m 644 deploy/oneup.service /etc/systemd/system/oneup.service
 install -m 644 deploy/oneup-backup.service /etc/systemd/system/oneup-backup.service
 install -m 644 deploy/oneup-backup.timer /etc/systemd/system/oneup-backup.timer
-install -m 755 deploy/oneup /usr/local/bin/oneup
+install -m 755 deploy/oneup /usr/local/bin/oneup.novo && mv -f /usr/local/bin/oneup.novo /usr/local/bin/oneup
 systemctl daemon-reload
 systemctl enable oneup oneup-backup.timer >/dev/null
 systemctl restart oneup

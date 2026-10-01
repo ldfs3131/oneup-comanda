@@ -55,7 +55,8 @@ case "${1:-ajuda}" in
     backup || { vermelho "Sem cópia de segurança, não atualizo."; exit 1; }
     git reset --quiet --hard "origin/$ramo"
     npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error
-    install -m 755 deploy/oneup /usr/local/bin/oneup
+    # troca o próprio comando por renomeação (o bash que está rodando continua lendo a versão antiga)
+    install -m 755 deploy/oneup /usr/local/bin/oneup.novo && mv -f /usr/local/bin/oneup.novo /usr/local/bin/oneup
     systemctl restart oneup
     if saude 90; then
       verde "Atualizado: $(git log -1 --format='%h %s')"

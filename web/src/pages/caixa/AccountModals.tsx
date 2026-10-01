@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../../api';
+import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { brl } from '../../format';
 import type { AccountDetail, Board, OrderItem, PaymentMethod } from '../../types';
 import { Modal, MoneyInput, useAction } from '../../components/ui';
 import { useMesaLabel } from '../../components/brand';
+
+const chavesPagamento = new Map<number, ChaveEnvio>();
 
 type Part = { methodId: number; amountCents: number; tenderedCents: number | null };
 
@@ -19,7 +21,6 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
   const [tendered, setTendered] = useState<number | null>(null);
   const [split, setSplit] = useState(1);
   const { busy, run } = useAction();
-  const key = useMemo(() => api.newKey(), []);
 
   const method = methods.find((m) => m.id === methodId);
   const curAmount = amount ?? 0;
@@ -39,9 +40,12 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
   };
 
   const submit = async (close: boolean) => {
-    const ok = await run(() => api.post(`/api/accounts/${account.id}/payments`, { payments: all, close }, `${key}-${all.length}-${total}-${close}`),
+    // a chave fica guardada por conta: fechar e reabrir a janela depois de uma falha de internet não paga duas vezes
+    const ref = chavesPagamento.get(account.id) ?? chavesPagamento.set(account.id, { current: null }).get(account.id)!;
+    const corpo = { payments: all, close };
+    const ok = await run(() => api.post(`/api/accounts/${account.id}/payments`, corpo, chaveDoEnvio(ref, { conta: account.id, saldo: balance, ...corpo })),
       close && full ? `Conta #${account.number} paga e encerrada.` : 'Pagamento registrado.');
-    if (ok) { onDone(); onClose(); }
+    if (ok) { ref.current = null; onDone(); onClose(); }
   };
 
   const name = (id: number) => methods.find((m) => m.id === id)?.name ?? '';

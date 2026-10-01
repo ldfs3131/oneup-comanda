@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../../api';
+import { api, chaveDoEnvio, idAparelho, type ChaveEnvio } from '../../api';
 import { brl } from '../../format';
 import { Modal, Spinner } from '../../components/ui';
 import { BrandLogo, usePageTitle } from '../../components/brand';
@@ -16,7 +16,7 @@ const waLink = (n: string) => `https://wa.me/${n.startsWith('55') ? n : `55${n}`
 export default function PublicMenu() {
   usePageTitle('Cardápio');
   // Estado ABERTO/FECHADO segue o botão do caixa; confere a cada 15 s e ao voltar para a aba
-  const { data, isLoading } = useQuery({ queryKey: ['public-menu'], queryFn: () => api.get<PMenu>('/api/public/menu'), refetchInterval: 15_000, refetchOnWindowFocus: true });
+  const { data, isLoading } = useQuery({ queryKey: ['public-menu'], queryFn: () => api.get<PMenu>('/api/public/menu'), refetchInterval: 60_000, refetchOnWindowFocus: true });
   const [cart, setCart] = useState<Line[]>([]);
   const [pick, setPick] = useState<PProduct | null>(null);
   const [checkout, setCheckout] = useState(false);
@@ -164,6 +164,7 @@ function Checkout({ cart, setCart, total, deliveryOpen, onClose, onDone }: {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const envio: ChaveEnvio = useRef(null);
   const valid = cart.length > 0 && (mode !== 'ENTREGA' || location.trim().length > 2);
   type Mode = 'BALCAO' | 'LOCAL' | 'ENTREGA';
   const modes = useMemo(() => {
@@ -175,10 +176,13 @@ function Checkout({ cart, setCart, total, deliveryOpen, onClose, onDone }: {
   const send = async () => {
     setBusy(true); setErr('');
     try {
-      const r = await api.post<{ orderNumber: number; totalCents: number }>('/api/public/orders', {
+      const corpo = {
         customerName: name, mode, location, note,
         items: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity, optionIds: l.optionIds })),
-      });
+      };
+      // a mesma chave num novo toque depois de falha de internet: o restaurante não recebe o pedido duas vezes
+      const r = await api.post<{ orderNumber: number; totalCents: number }>('/api/public/orders', corpo, chaveDoEnvio(envio, corpo), { 'x-aparelho': idAparelho() });
+      envio.current = null;
       onDone(r);
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };

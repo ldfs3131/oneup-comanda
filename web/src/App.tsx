@@ -30,10 +30,23 @@ import TimingPage from './pages/admin/TimingPage';
 import OrdersHistory from './pages/admin/OrdersHistory';
 import { ThemeApplier } from './components/brand';
 
+/** Carregando; sem internet, avisa que está tentando reconectar (não pede a senha de novo). */
+function Carregando() {
+  const { offline } = useAuth();
+  if (!offline) return <Spinner />;
+  return (
+    <div className="loading" style={{ flexDirection: 'column', gap: 12, textAlign: 'center', padding: 24 }}>
+      <div className="spinner" />
+      <b>Sem conexão com o servidor</b>
+      <span className="muted">Tentando reconectar sozinho… Assim que a internet voltar, a tela abre.</span>
+    </div>
+  );
+}
+
 function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
   const { user, loading } = useAuth();
   const loc = useLocation();
-  if (loading) return <Spinner />;
+  if (loading) return <Carregando />;
   if (!user) return <Navigate to="/login" state={{ from: loc.pathname }} replace />;
   if (user.role !== 'ADMIN' && !roles.includes(user.role)) return <Navigate to={homeFor(user.role)} replace />;
   return <>{children}</>;
@@ -41,7 +54,7 @@ function Guard({ roles, children }: { roles: Role[]; children: ReactNode }) {
 
 function Home() {
   const { user, loading } = useAuth();
-  if (loading) return <Spinner />;
+  if (loading) return <Carregando />;
   return <Navigate to={user ? homeFor(user.role) : '/login'} replace />;
 }
 

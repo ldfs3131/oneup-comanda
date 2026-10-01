@@ -16,6 +16,26 @@ function num(v: string | undefined, d: number) {
 }
 
 import { readFileSync } from 'node:fs';
+
+// Faixas publicadas pela Cloudflare (https://www.cloudflare.com/ips/)
+const CLOUDFLARE = ['173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
+  '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14',
+  '172.64.0.0/13', '131.0.72.0/22', '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32',
+  '2a06:98c0::/29', '2c0f:f248::/32'];
+const PRIVADAS = ['loopback', 'linklocal', 'uniquelocal'];
+export const avisosConfig: string[] = [];
+function confiancaProxy(v: string | undefined): boolean | string[] {
+  const t = (v ?? '').trim().toLowerCase();
+  if (!t || t === '0' || t === 'false') return false;
+  if (t === 'true') return true;
+  if (t === 'cloudflare') return [...PRIVADAS, ...CLOUDFLARE];
+  if (t === 'privado') return PRIVADAS;
+  if (/^\d+$/.test(t)) {
+    avisosConfig.push(`TRUST_PROXY=${t} (número) não funciona no Fastify 5: usando "privado". Atrás da Cloudflare use TRUST_PROXY=cloudflare.`);
+    return PRIVADAS;
+  }
+  return t.split(',').map((x) => x.trim()).filter(Boolean);
+}
 const pkgVersion = (() => { try { return JSON.parse(readFileSync(resolve(SERVER_ROOT, 'package.json'), 'utf8')).version as string; } catch { return '2.0.0'; } })();
 
 export const config = {
@@ -24,8 +44,10 @@ export const config = {
   // Porta pública opcional, só com o cardápio do cliente (para Tailscale Funnel / internet). 0 = desligada.
   publicPort: Number(process.env.PUBLIC_PORT ?? 0) || 0,
   cookieSecure: process.env.COOKIE_SECURE === 'true',
-  // TRUST_PROXY: número de proxies na frente (ex.: 2 = Cloudflare + Coolify). 0 = acesso direto.
-  trustProxy: Number(process.env.TRUST_PROXY ?? 0) || 0,
+  // TRUST_PROXY: quem está na frente do servidor e informa o IP real do aparelho (X-Forwarded-For).
+  //   cloudflare = Cloudflare + proxy local (Coolify/Traefik) · privado = só proxy local · vazio/0 = acesso direto
+  //   ou uma lista de redes (ex.: 10.0.0.0/8,172.16.0.0/12). Número de saltos NÃO é aceito pelo Fastify 5.
+  trustProxy: confiancaProxy(process.env.TRUST_PROXY),
   host: process.env.HOST ?? '0.0.0.0',
   // Banco: DATABASE_URL = dono do banco (migrações e plataforma; precisa ser superusuário ou ter BYPASSRLS).
   // A aplicação usa o papel APP_DB_ROLE (sem BYPASSRLS) — por padrão na mesma conexão, ou em APP_DATABASE_URL.

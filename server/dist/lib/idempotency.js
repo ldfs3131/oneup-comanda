@@ -16,6 +16,8 @@ export async function idempotent(req, route, fn) {
         .onConflictDoNothing().returning({ key: idempotencyKeys.key });
     if (!inserted.length) {
         const [row] = await db.select().from(idempotencyKeys).where(eq(idempotencyKeys.key, key));
+        if (row && row.route !== route)
+            throw new HttpError(409, 'Este envio pertence a outra ação. Atualize a tela e tente de novo.', 'IDEMPOTENCY_ROUTE');
         if (row?.status === 200)
             return row.response;
         throw new HttpError(409, 'Este envio já está sendo processado. Aguarde um instante.', 'DUPLICATE_IN_FLIGHT');

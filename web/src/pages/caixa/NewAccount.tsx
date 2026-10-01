@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../../api';
+import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { time } from '../../format';
 import type { StockDecision } from '../../types';
 import { useToast } from '../../components/ui';
@@ -28,18 +28,18 @@ export default function NewAccount() {
   const [phone, setPhone] = useState('');
   const [more, setMore] = useState(false);
   const { guard, modal, busy } = useStockGuard();
+  const envio: ChaveEnvio = useRef(null);
 
   if (data && !data.register) return <OpenDay />;
   const closed = settings && !settings.restaurant.isOpen;
 
   const create = async (items: ReturnType<typeof linesToItems>, orderNote = '', consumptionType = 'LOCAL') => {
-    const key = api.newKey();
-    let attempt = 0;
-    const r = await guard<Created>((stockDecisions?: StockDecision[]) =>
-      api.post<Created>('/api/accounts', {
-        customerName, customerId, note, tableLabel, phone, items, orderNote, consumptionType, stockDecisions,
-      }, `${key}-${attempt++}`));
+    const r = await guard<Created>((stockDecisions?: StockDecision[]) => {
+      const corpo = { customerName, customerId, note, tableLabel, phone, items, orderNote, consumptionType, stockDecisions };
+      return api.post<Created>('/api/accounts', corpo, chaveDoEnvio(envio, corpo));
+    });
     if (!r) return false;
+    envio.current = null;
     qc.invalidateQueries({ queryKey: ['board'] }); qc.invalidateQueries({ queryKey: ['menu'] });
     toast(`Conta #${r.number} aberta${r.orderNumber ? ` · pedido #${r.orderNumber} ${r.goesToKitchen ? `na cozinha${r.expectedReadyAt ? ` (previsão ${time(r.expectedReadyAt)})` : ''}` : 'lançado'}` : ''}`, 'ok');
     nav('/caixa');

@@ -1,3 +1,4 @@
+import { respostaCompartilhada } from '../lib/cacheRota.js';
 import { z } from 'zod';
 import { eq, sql } from 'drizzle-orm';
 import { networkInterfaces } from 'node:os';
@@ -42,7 +43,7 @@ export async function adminRoutes(app) {
     const insightsAdmin = { preHandler: [requireRole('ADMIN'), insightsOn] };
     const anyUser = { preHandler: requireRole() };
     // ---------- Dashboard por período ----------
-    app.get('/api/dashboard', admin, async (req) => {
+    app.get('/api/dashboard', { preHandler: [requireRole('ADMIN'), respostaCompartilhada('painel', 'dados', 15000)] }, async (req) => {
         const r = rangeOf(parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional(), date: dateSchema.optional() }), req.query));
         const q = async (s) => (await db.execute(s)).rows;
         const liveOrders = sql `o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')`;

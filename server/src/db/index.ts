@@ -31,6 +31,8 @@ export type DbContext = {
   released?: boolean;
   broken?: boolean;
   offError?: () => void;
+  /** a requisição mexeu no estoque (o cardápio precisa ser atualizado nas telas) */
+  estoqueMudou?: boolean;
 };
 
 const als = new AsyncLocalStorage<DbContext>();
@@ -109,6 +111,28 @@ class ConexaoDaEmpresa {
 }
 
 export const db = drizzle(new ConexaoDaEmpresa() as unknown as pg.Pool, { schema });
+
+/*
+ * Duas pessoas mexendo na mesma conta no mesmo instante podem travar uma à outra no banco (deadlock).
+ * O PostgreSQL desfaz uma das duas; aqui ela é REPETIDA sozinha (até 4 vezes), em vez de virar "erro interno".
+ * Seguro porque a transação inteira é desfeita antes de repetir, e os avisos (tempo real) só saem depois.
+ */
+const pgCode = (e: unknown): string | undefined => {
+  const x = e as { code?: string; cause?: unknown };
+  return x?.code ?? (x?.cause ? pgCode(x.cause) : undefined);
+};
+export const ehConflitoDeConcorrencia = (e: unknown) => ['40P01', '40001'].includes(pgCode(e) ?? '');
+const transacaoOriginal = db.transaction.bind(db);
+db.transaction = (async (fn: Parameters<typeof transacaoOriginal>[0], cfg?: Parameters<typeof transacaoOriginal>[1]) => {
+  for (let tentativa = 1; ; tentativa++) {
+    try {
+      return await transacaoOriginal(fn, cfg);
+    } catch (e) {
+      if (tentativa >= 4 || !ehConflitoDeConcorrencia(e)) throw e;
+      await new Promise((r) => setTimeout(r, 5 + Math.random() * 30 * tentativa));
+    }
+  }
+}) as typeof db.transaction;
 export type DB = NodePgDatabase<typeof schema>;
 export type Tx = Parameters<Parameters<DB['transaction']>[0]>[0];
 export type Executor = DB | Tx;

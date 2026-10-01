@@ -1,3 +1,5 @@
+import { salvarImagem } from '../lib/imagem.js';
+import { respostaCompartilhada } from '../lib/cacheRota.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, isNull, max, sql } from 'drizzle-orm';
@@ -13,14 +15,14 @@ import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
 import { config } from '../config.js';
 
-export async function loadMenu(tx: Executor, f: { includeInactive: boolean; onlyAvailable?: boolean }) {
+export async function loadMenu(tx: Executor, f: { includeInactive: boolean; onlyAvailable?: boolean; semMaisVendidos?: boolean }) {
   const cats = await tx.select().from(categories).orderBy(asc(categories.sortOrder), asc(categories.id));
   const prods = await tx.select().from(products).orderBy(asc(products.sortOrder), asc(products.id));
   const groups = await tx.select().from(optionGroups).orderBy(asc(optionGroups.sortOrder), asc(optionGroups.id));
   const opts = await tx.select().from(options).orderBy(asc(options.sortOrder), asc(options.id));
   const show = (active: boolean, available = true) => (f.includeInactive || active) && (!f.onlyAvailable || available);
   // ranking de mais vendidos (últimos 30 dias) para ordenar o caixa
-  const sold = (await tx.execute(sql`
+  const sold = f.semMaisVendidos ? [] : (await tx.execute(sql`
     SELECT oi.product_id, SUM(oi.quantity)::int AS q FROM order_items oi JOIN orders o ON o.id = oi.order_id
     WHERE oi.status = 'ACTIVE' AND oi.product_id IS NOT NULL AND o.created_at > now() - interval '30 days'
     GROUP BY oi.product_id`)).rows as { product_id: number; q: number }[];
@@ -130,7 +132,7 @@ export async function menuRoutes(app: FastifyInstance) {
   const admin = { preHandler: requireRole('ADMIN') };
   const ops = { preHandler: requireRole('CAIXA') };
 
-  app.get('/api/menu', anyUser, async (req) => {
+  app.get('/api/menu', { preHandler: [requireRole(), respostaCompartilhada('menu', 'menu', 30000)] }, async (req) => {
     return loadMenu(db, { includeInactive: me(req).role === 'ADMIN' && (req.query as { all?: string }).all === '1' });
   });
 
@@ -272,17 +274,7 @@ export async function menuRoutes(app: FastifyInstance) {
     const { id } = parse(idParam, req.params);
     const [p] = await db.select().from(products).where(eq(products.id, id));
     if (!p) throw notFound();
-    const file = await req.file({ limits: { fileSize: 5 * 1024 * 1024 } });
-    if (!file) throw bad('Envie uma imagem.');
-    const ext = extname(file.filename).toLowerCase();
-    if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) throw bad('Use JPG, PNG ou WEBP.');
-    // fotos na pasta da própria empresa
-    const pasta = join(config.uploadsDir, String(empresaAtual()));
-    mkdirSync(pasta, { recursive: true });
-    const name = `p${id}-${randomBytes(4).toString('hex')}${ext}`;
-    await pipeline(file.file, createWriteStream(join(pasta, name)));
-    if (file.file.truncated) throw bad('Imagem muito grande (máximo 5 MB).');
-    const url = `/uploads/${empresaAtual()}/${name}`;
+    const url = await salvarImagem(req, `p${id}`, 5 * 1024 * 1024);
     await db.update(products).set({ imageUrl: url, updatedAt: new Date() }).where(eq(products.id, id));
     await audit(db, { userId: me(req).id, action: 'menu.product.image', entityType: 'product', entityId: id, message: `${me(req).name} trocou a foto de "${p.name}".` });
     notify.menuChanged();

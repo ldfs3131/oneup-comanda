@@ -47,8 +47,32 @@ export default function CashierLayout() {
   };
   useEffect(() => () => window.clearInterval(titleTimer.current), []);
 
+  // Som também pela LISTA: pedido pronto ou pedido do QR que chegou durante uma queda do Wi-Fi não passa calado
+  const vistos = useRef<{ prontos: Set<number>; qr: Set<number> } | null>(null);
+  const avisadosPorEvento = useRef(new Set<number>());
+  useEffect(() => {
+    if (!data) return;
+    const prontos = new Set(data.ready.filter((r) => r.status === 'READY').map((r) => r.orderId));
+    const qr = new Set(data.awaiting.map((o) => o.orderId));
+    const antes = vistos.current;
+    vistos.current = { prontos, qr };
+    if (!antes) return;
+    const novosProntos = [...prontos].filter((id) => !antes.prontos.has(id) && !avisadosPorEvento.current.has(id));
+    if (novosProntos.length) { playReady(); setFlash((f) => [...f, ...novosProntos]); setTimeout(() => setFlash((f) => f.filter((x) => !novosProntos.includes(x))), 12_000); }
+    if ([...qr].some((id) => !antes.qr.has(id))) playNew();
+  }, [data]);
+  // pedido do QR esperando há mais de 3 min: lembra com som a cada minuto
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (data?.awaiting.some((o) => minutesSince(o.createdAt) >= 3)) playNew();
+    }, 60_000);
+    return () => clearInterval(t);
+  }, [data]);
+
   useRealtimeEvent((ev, p) => {
     if (ev === 'order:ready') {
+      avisadosPorEvento.current.add(p.orderId);
+      if (avisadosPorEvento.current.size > 500) avisadosPorEvento.current.clear();
       playReady();
       setFlash((f) => [...f, p.orderId]);
       setTimeout(() => setFlash((f) => f.filter((x) => x !== p.orderId)), 12_000);
@@ -61,7 +85,6 @@ export default function CashierLayout() {
       blinkTitle(`⚠ PROBLEMA NO PEDIDO #${p.orderNumber}`);
     }
     if (ev === 'qr:new') {
-      playNew();
       toast(`📱 Novo pedido pelo QR Code: #${p.orderNumber}. Confirme para enviar à cozinha.`, 'info');
     }
   });
@@ -96,6 +119,13 @@ function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
   const { guard, modal } = useStockGuard();
   const nav = useNavigate();
   const [reject, setReject] = useState<number | null>(null);
+  // botão fica travado enquanto envia (dois toques não geram aviso de erro falso)
+  const [enviando, setEnviando] = useState<Set<string>>(new Set());
+  const acao = async (k: string, fn: () => Promise<unknown>) => {
+    if (enviando.has(k)) return;
+    setEnviando((s) => new Set(s).add(k));
+    try { await fn(); } finally { setEnviando((s) => { const n = new Set(s); n.delete(k); return n; }); }
+  };
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 30_000); return () => clearInterval(t); }, []);
 
@@ -112,7 +142,7 @@ function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
             <div className="alert-sub">Conta #{r.accountNumber}{r.customerName ? ` · ${r.customerName}` : ''} — “{r.problemNote}”</div>
           </div>
           <Link className="btn sm" to={`/caixa/conta/${r.accountId}`}>Ver conta</Link>
-          <button className="btn sm" onClick={() => run(() => api.post(`/api/orders/${r.orderId}/clear-problem`))}>Resolvido</button>
+          <button className="btn sm" disabled={enviando.has(`p${r.orderId}`)} onClick={() => acao(`p${r.orderId}`, () => run(() => api.post(`/api/orders/${r.orderId}/clear-problem`)))}>Resolvido</button>
         </div>
       ))}
       {ready.map((r) => (
@@ -128,19 +158,20 @@ function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
             </div>
           </div>
           <button className="btn sm ghost" onClick={() => nav(`/caixa/conta/${r.accountId}`)}>Conta</button>
-          <button className="btn go" onClick={() => run(() => api.post(`/api/orders/${r.orderId}/deliver`))}>✓ Entregue</button>
+          <button className="btn go" disabled={enviando.has(`e${r.orderId}`)} onClick={() => acao(`e${r.orderId}`, () => run(() => api.post(`/api/orders/${r.orderId}/deliver`)))}>✓ Entregue</button>
         </div>
       ))}
       {board.awaiting.map((o) => (
         <div key={`q${o.orderId}`} className="alert-card qr">
           <div className="alert-bell">📱</div>
           <div className="grow">
-            <div className="alert-title">QR CODE · PEDIDO #{o.orderNumber} · {brl(o.totalCents)}</div>
+            <div className="alert-title">QR CODE · PEDIDO #{o.orderNumber} · {brl(o.totalCents)}
+              <span className={minutesSince(o.createdAt) >= 3 ? 'alert-age late' : 'alert-age'}> · esperando há {minutesSince(o.createdAt)} min</span></div>
             <div className="alert-sub">{o.customerName ?? 'Cliente sem nome'}{o.accountNote ? ` · ${o.accountNote}` : ''}{o.note ? ` · “${o.note}”` : ''}</div>
           </div>
           <Link className="btn sm ghost" to={`/caixa/conta/${o.accountId}`}>Ver itens</Link>
           <button className="btn sm danger" onClick={() => setReject(o.orderId)}>Recusar</button>
-          <button className="btn go" onClick={() => guard((stockDecisions) => api.post(`/api/orders/${o.orderId}/confirm`, { stockDecisions }, true), 'Pedido confirmado e enviado à cozinha.')}>Confirmar</button>
+          <button className="btn go" disabled={enviando.has(`q${o.orderId}`)} onClick={() => acao(`q${o.orderId}`, () => guard((stockDecisions) => api.post(`/api/orders/${o.orderId}/confirm`, { stockDecisions }, true), 'Pedido confirmado e enviado à cozinha.'))}>Confirmar</button>
         </div>
       ))}
       {modal}

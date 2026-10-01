@@ -1,3 +1,4 @@
+import { marcarEstoqueMudou } from '../lib/cache.js';
 import { asc, eq, inArray, sql } from 'drizzle-orm';
 import type { Executor } from '../db/index.js';
 import { products, stockMovements } from '../db/schema.js';
@@ -53,7 +54,7 @@ export async function applyStockForSale(
         productId: pid, type: 'AJUSTE', quantity: d.newQty - p.stockQty, before: p.stockQty, after: d.newQty,
         reason: `Contagem corrigida na venda (${label})`, userId,
       });
-      await tx.update(products).set({ stockQty: d.newQty }).where(eq(products.id, pid));
+      await tx.update(products).set({ stockQty: d.newQty }).where(eq(products.id, pid)); marcarEstoqueMudou();
       p.stockQty = d.newQty;
     } else {
       if (!d.reason || d.reason.trim().length < 3) throw bad('Informe o motivo para liberar a venda sem estoque.');
@@ -78,7 +79,7 @@ export async function applyStockForSale(
       reason: missing > 0 ? `Venda liberada sem estoque registrado (${label}). Motivo: ${d && d.action === 'RELEASE' ? d.reason.trim() : ''}` : label,
       orderItemId: itemIds[n.itemIndex] ?? null, userId,
     });
-    await tx.update(products).set({ stockQty: p.stockQty }).where(eq(products.id, n.productId));
+    await tx.update(products).set({ stockQty: p.stockQty }).where(eq(products.id, n.productId)); marcarEstoqueMudou();
   }
 }
 
@@ -98,7 +99,7 @@ export async function returnStockForItem(tx: Executor, orderItemId: number, qty:
       productId: p.id, type: 'CANCELAMENTO', quantity: qty, before: p.stockQty, after: p.stockQty + qty,
       reason: label, orderItemId, userId,
     });
-    await tx.update(products).set({ stockQty: p.stockQty + qty }).where(eq(products.id, p.id));
+    await tx.update(products).set({ stockQty: p.stockQty + qty }).where(eq(products.id, p.id)); marcarEstoqueMudou();
     returned = true;
   }
   return returned;

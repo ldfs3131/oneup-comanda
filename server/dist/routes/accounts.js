@@ -1,3 +1,4 @@
+import { respostaCompartilhada } from '../lib/cacheRota.js';
 import { z } from 'zod';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, nextNumber } from '../db/index.js';
@@ -58,7 +59,7 @@ export async function accountRoutes(app) {
         return db.select().from(paymentMethods).where(todas ? undefined : eq(paymentMethods.active, true)).orderBy(asc(paymentMethods.sortOrder), asc(paymentMethods.id));
     });
     // Painel do caixa: contas vivas + prontos + aguardando confirmação (QR)
-    app.get('/api/cashier/board', ops, async () => {
+    app.get('/api/cashier/board', { preHandler: [requireRole('CAIXA'), respostaCompartilhada('board', 'dados', 5000)] }, async () => {
         const live = await listAccountsWithTotals(db, sql `a.status IN ('OPEN','PARTIALLY_PAID','PAID')
       AND (a.origin = 'CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id = a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`);
         const ready = await db.execute(sql `
@@ -259,7 +260,7 @@ export async function accountRoutes(app) {
             notify.kitchenNewOrder({ orderNumber: result.orderNumber, accountNumber: result.number, sequence: 1 });
         notify.ordersChanged();
         notify.accountsChanged(result.id);
-        notify.menuChanged();
+        notify.stockMaybeChanged();
         return result;
     });
     app.patch('/api/accounts/:id', ops, async (req) => {
@@ -330,7 +331,7 @@ export async function accountRoutes(app) {
             notify.kitchenNewOrder({ orderNumber: r.orderNumber, accountNumber: r.accountNumber, sequence: r.sequence });
         notify.ordersChanged();
         notify.accountsChanged(id);
-        notify.menuChanged();
+        notify.stockMaybeChanged();
         return r;
     });
     // Alterar tipo de consumo (até ficar pronto)
@@ -550,7 +551,7 @@ export async function accountRoutes(app) {
         notify.ordersChanged();
         notify.accountsChanged(id);
         notify.registerChanged();
-        notify.menuChanged();
+        notify.stockMaybeChanged();
         return { ok: true };
     });
     // ----- Cancelamentos de item (total ou parcial) e de pedido -----
@@ -612,7 +613,7 @@ export async function accountRoutes(app) {
         notify.ordersChanged();
         notify.accountsChanged(info.acc.id);
         notify.registerChanged();
-        notify.menuChanged();
+        notify.stockMaybeChanged();
         return { ok: true };
     });
     app.post('/api/orders/:id/cancel', ops, async (req) => {
@@ -666,7 +667,7 @@ export async function accountRoutes(app) {
         notify.ordersChanged();
         notify.accountsChanged(info.acc.id);
         notify.registerChanged();
-        notify.menuChanged();
+        notify.stockMaybeChanged();
         return { ok: true };
     });
     // Consulta se o item consumiu estoque (para mostrar "devolver ao estoque")
@@ -714,7 +715,8 @@ export async function accountRoutes(app) {
             const { o, acc } = await orderWithAccount(tx, id, true);
             if (o.status !== 'AWAITING_CONFIRMATION')
                 throw conflict('Este pedido não está aguardando confirmação.');
-            const reg = await requireTakingOrders(tx);
+            // quem já pediu é atendido mesmo com a casa pausada para pedidos novos: basta o caixa aberto
+            const reg = await requireOpenRegister(tx);
             const now = new Date();
             const status = o.goesToKitchen ? 'CONFIRMED' : 'DELIVERED';
             const { needs, itemIds } = await stockNeedsForOrder(tx, id);
@@ -734,7 +736,7 @@ export async function accountRoutes(app) {
             notify.kitchenNewOrder({ orderNumber: r.o.number, accountNumber: r.acc.number, sequence: r.o.sequence });
         notify.ordersChanged();
         notify.accountsChanged(r.acc.id);
-        notify.menuChanged();
+        notify.stockMaybeChanged();
         return { ok: true };
     });
     // Juntar contas: a conta de origem passa para a de destino (sem contar como cancelamento)

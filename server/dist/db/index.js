@@ -98,6 +98,29 @@ class ConexaoDaEmpresa {
     }
 }
 export const db = drizzle(new ConexaoDaEmpresa(), { schema });
+/*
+ * Duas pessoas mexendo na mesma conta no mesmo instante podem travar uma à outra no banco (deadlock).
+ * O PostgreSQL desfaz uma das duas; aqui ela é REPETIDA sozinha (até 4 vezes), em vez de virar "erro interno".
+ * Seguro porque a transação inteira é desfeita antes de repetir, e os avisos (tempo real) só saem depois.
+ */
+const pgCode = (e) => {
+    const x = e;
+    return x?.code ?? (x?.cause ? pgCode(x.cause) : undefined);
+};
+export const ehConflitoDeConcorrencia = (e) => ['40P01', '40001'].includes(pgCode(e) ?? '');
+const transacaoOriginal = db.transaction.bind(db);
+db.transaction = (async (fn, cfg) => {
+    for (let tentativa = 1;; tentativa++) {
+        try {
+            return await transacaoOriginal(fn, cfg);
+        }
+        catch (e) {
+            if (tentativa >= 4 || !ehConflitoDeConcorrencia(e))
+                throw e;
+            await new Promise((r) => setTimeout(r, 5 + Math.random() * 30 * tentativa));
+        }
+    }
+});
 export function runInContext(ctx, fn) {
     return als.run(ctx, async () => {
         try {

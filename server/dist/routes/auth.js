@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { and, asc, eq, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { roles, users, restaurantSettings } from '../db/schema.js';
-import { COOKIE, checkLoginRate, checkPassword, clearLoginRate, createSession, destroySession, hashPassword, me, requireRole, userFromToken, } from '../auth.js';
+import { COOKIE, HASH_FALSO, checkLoginRate, checkPassword, clearLoginRate, createSession, derrubarSessoes, destroySession, esquecerSessoesDoUsuario, hashPassword, me, registerLoginFailure, requireRole, userFromToken, } from '../auth.js';
 import { bad, conflict, idParam, notFound, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { config } from '../config.js';
@@ -11,19 +11,22 @@ export async function authRoutes(app) {
     app.get('/api/meta', async (req) => {
         const [s] = await db.select().from(restaurantSettings).limit(1);
         const pub = await configuracoesPublicas();
-        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', version: config.version, product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null };
+        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null };
     });
     app.post('/api/auth/login', async (req, reply) => {
-        const rateKey = `${req.empresa?.id ?? 0}:${req.ip}`; // por empresa + aparelho
-        checkLoginRate(rateKey);
-        const body = parse(z.object({ username: z.string().trim().toLowerCase().min(1), password: z.string().min(1), remember: z.boolean().default(true) }), req.body);
+        const body = parse(z.object({ username: z.string().trim().toLowerCase().min(1).max(60), password: z.string().min(1).max(200), remember: z.boolean().default(true) }), req.body);
+        const empId = req.empresa?.id ?? 0;
+        checkLoginRate(empId, req.ip, body.username);
         const rows = await db.select({ u: users, role: roles.code }).from(users)
             .innerJoin(roles, eq(roles.id, users.roleId)).where(eq(users.username, body.username)).limit(1);
         const row = rows[0];
-        if (!row || !row.u.active || !(await checkPassword(body.password, row.u.passwordHash))) {
+        // sempre confere uma senha (mesmo sem usuário), para o tempo de resposta não revelar quem existe
+        const senhaOk = await checkPassword(body.password, row?.u.passwordHash ?? HASH_FALSO);
+        if (!row || !row.u.active || !senhaOk) {
+            registerLoginFailure(empId, req.ip, body.username);
             throw bad('Usuário ou senha incorretos.');
         }
-        clearLoginRate(rateKey);
+        clearLoginRate(empId, req.ip, body.username);
         const s = await createSession(row.u.id, body.remember);
         reply.setCookie(COOKIE, s.token, {
             path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, ...(body.remember ? { expires: s.expiresAt } : {}),
@@ -46,6 +49,7 @@ export async function authRoutes(app) {
         if (!(await checkPassword(b.current, u.passwordHash)))
             throw bad('Senha atual incorreta.');
         await db.update(users).set({ passwordHash: await hashPassword(b.next) }).where(eq(users.id, u.id));
+        await derrubarSessoes(u.id, req.cookies[COOKIE]); // outros aparelhos com a senha antiga saem
         await audit(db, { userId: u.id, action: 'user.password', entityType: 'user', entityId: u.id, message: `${u.name} alterou a própria senha.` });
         return { ok: true };
     });
@@ -106,6 +110,11 @@ export async function authRoutes(app) {
             set.passwordHash = await hashPassword(b.password);
         if (Object.keys(set).length)
             await db.update(users).set(set).where(eq(users.id, id));
+        // senha redefinida ou pessoa desativada: os aparelhos dela saem na hora; mudança de perfil vale já
+        if (b.password || b.active === false)
+            await derrubarSessoes(id);
+        else
+            esquecerSessoesDoUsuario(id);
         const what = [b.name && 'nome', b.role && `perfil → ${b.role}`, b.active !== undefined && (b.active ? 'ativado' : 'desativado'), b.password && 'senha redefinida']
             .filter(Boolean).join(', ');
         await audit(db, { userId: me(req).id, action: 'user.update', entityType: 'user', entityId: id, message: `${me(req).name} alterou o usuário ${u.name}: ${what}.` });

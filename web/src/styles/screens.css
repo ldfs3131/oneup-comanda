@@ -22,6 +22,7 @@
 .alert-card.qr .alert-title { color: var(--warn); }
 .alert-sub { color: var(--text); opacity: 0.9; }
 .alert-age { color: var(--muted); }
+.alert-age.late { color: var(--danger, #e5484d); font-weight: 700; }
 @keyframes flash { 0%, 100% { background: rgba(143, 225, 83, 0.12); } 50% { background: rgba(143, 225, 83, 0.4); } }
 
 /* ================= Painel de contas ================= */

@@ -1,3 +1,4 @@
+import { respostaCompartilhada } from '../lib/cacheRota.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
@@ -73,7 +74,7 @@ export async function accountRoutes(app: FastifyInstance) {
   });
 
   // Painel do caixa: contas vivas + prontos + aguardando confirmação (QR)
-  app.get('/api/cashier/board', ops, async () => {
+  app.get('/api/cashier/board', { preHandler: [requireRole('CAIXA'), respostaCompartilhada('board', 'dados', 5000)] }, async () => {
     const live = await listAccountsWithTotals(db, sql`a.status IN ('OPEN','PARTIALLY_PAID','PAID')
       AND (a.origin = 'CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id = a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`);
     const ready = await db.execute(sql`
@@ -269,7 +270,7 @@ export async function accountRoutes(app: FastifyInstance) {
       };
     }));
     if (result.goesToKitchen) notify.kitchenNewOrder({ orderNumber: result.orderNumber, accountNumber: result.number, sequence: 1 });
-    notify.ordersChanged(); notify.accountsChanged(result.id); notify.menuChanged();
+    notify.ordersChanged(); notify.accountsChanged(result.id); notify.stockMaybeChanged();
     return result;
   });
 
@@ -334,7 +335,7 @@ export async function accountRoutes(app: FastifyInstance) {
       };
     }));
     if (r.goesToKitchen) notify.kitchenNewOrder({ orderNumber: r.orderNumber, accountNumber: r.accountNumber, sequence: r.sequence });
-    notify.ordersChanged(); notify.accountsChanged(id); notify.menuChanged();
+    notify.ordersChanged(); notify.accountsChanged(id); notify.stockMaybeChanged();
     return r;
   });
 
@@ -537,7 +538,7 @@ export async function accountRoutes(app: FastifyInstance) {
       await audit(tx, { userId: user.id, action: 'account.cancel', entityType: 'account', entityId: id, message: `${user.name} cancelou a ${label(acc)} (${brl(t.subtotal)}; ${ACCOUNT_STATUS_PT[acc.status]} → Cancelada). Motivo: ${reason}` });
     });
     notify.kitchenCancelled({ message: 'Uma conta foi cancelada' });
-    notify.ordersChanged(); notify.accountsChanged(id); notify.registerChanged(); notify.menuChanged();
+    notify.ordersChanged(); notify.accountsChanged(id); notify.registerChanged(); notify.stockMaybeChanged();
     return { ok: true };
   });
 
@@ -594,7 +595,7 @@ export async function accountRoutes(app: FastifyInstance) {
     if (info.it.goesToKitchen && ['CONFIRMED', 'IN_PREPARATION', 'READY'].includes(info.o.status)) {
       notify.kitchenCancelled({ message: `Pedido #${info.o.number}: ${info.qty}× ${info.it.productName} CANCELADO` });
     }
-    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged(); notify.menuChanged();
+    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged(); notify.stockMaybeChanged();
     return { ok: true };
   });
 
@@ -643,7 +644,7 @@ export async function accountRoutes(app: FastifyInstance) {
     if (info.o.goesToKitchen && ['CONFIRMED', 'IN_PREPARATION', 'READY'].includes(info.o.status)) {
       notify.kitchenCancelled({ message: `Pedido #${info.o.number} CANCELADO` });
     }
-    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged(); notify.menuChanged();
+    notify.ordersChanged(); notify.accountsChanged(info.acc.id); notify.registerChanged(); notify.stockMaybeChanged();
     return { ok: true };
   });
 
@@ -690,7 +691,8 @@ export async function accountRoutes(app: FastifyInstance) {
     const r = await db.transaction(async (tx) => {
       const { o, acc } = await orderWithAccount(tx, id, true);
       if (o.status !== 'AWAITING_CONFIRMATION') throw conflict('Este pedido não está aguardando confirmação.');
-      const reg = await requireTakingOrders(tx);
+      // quem já pediu é atendido mesmo com a casa pausada para pedidos novos: basta o caixa aberto
+      const reg = await requireOpenRegister(tx);
       const now = new Date();
       const status = o.goesToKitchen ? 'CONFIRMED' : 'DELIVERED';
       const { needs, itemIds } = await stockNeedsForOrder(tx, id);
@@ -706,7 +708,7 @@ export async function accountRoutes(app: FastifyInstance) {
       return { o, acc };
     });
     if (r.o.goesToKitchen) notify.kitchenNewOrder({ orderNumber: r.o.number, accountNumber: r.acc.number, sequence: r.o.sequence });
-    notify.ordersChanged(); notify.accountsChanged(r.acc.id); notify.menuChanged();
+    notify.ordersChanged(); notify.accountsChanged(r.acc.id); notify.stockMaybeChanged();
     return { ok: true };
   });
 

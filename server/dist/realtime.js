@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { tokenFromCookieHeader, userFromToken } from './auth.js';
-import { bumpDataVersion } from './lib/cache.js';
+import { bumpDataVersion, bumpMenuVersion, estoqueMudou } from './lib/cache.js';
 import { currentContext, runAsEmpresa } from './db/index.js';
 import { empresaPorSlug, slugDaRequisicao } from './lib/empresa.js';
 let io = null;
@@ -57,8 +57,13 @@ export function emit(rooms, event, payload = {}) {
 export const notify = {
     ordersChanged: () => { bumpDataVersion(); emit(['kitchen', 'cashier'], 'orders:changed'); },
     accountsChanged: (accountId) => { bumpDataVersion(); emit(['cashier', 'admin'], 'accounts:changed', { accountId }); },
-    menuChanged: () => emit(['kitchen', 'cashier', 'admin'], 'menu:changed'),
-    settingsChanged: () => emit(['kitchen', 'cashier', 'admin'], 'settings:changed'),
+    menuChanged: () => { bumpMenuVersion(); emit(['kitchen', 'cashier', 'admin'], 'menu:changed'); },
+    /** Depois de pedido/cancelamento: só avisa o cardápio se o estoque realmente mudou. */
+    stockMaybeChanged: () => { if (estoqueMudou()) {
+        bumpMenuVersion();
+        emit(['kitchen', 'cashier', 'admin'], 'menu:changed');
+    } },
+    settingsChanged: () => { bumpMenuVersion(); bumpDataVersion(); emit(['kitchen', 'cashier', 'admin'], 'settings:changed'); },
     registerChanged: () => { bumpDataVersion(); emit(['cashier', 'admin'], 'register:changed'); },
     kitchenNewOrder: (p) => emit(['kitchen'], 'kitchen:new', p),
     kitchenCancelled: (p) => emit(['kitchen'], 'kitchen:cancelled', p),

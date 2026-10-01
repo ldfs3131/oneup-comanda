@@ -1,3 +1,4 @@
+import { marcarEstoqueMudou } from '../lib/cache.js';
 import { asc, eq, inArray, sql } from 'drizzle-orm';
 import { products, stockMovements } from '../db/schema.js';
 import { HttpError, bad } from '../lib/http.js';
@@ -42,6 +43,7 @@ export async function applyStockForSale(tx, needs, itemIds, decisions, userId, l
                 reason: `Contagem corrigida na venda (${label})`, userId,
             });
             await tx.update(products).set({ stockQty: d.newQty }).where(eq(products.id, pid));
+            marcarEstoqueMudou();
             p.stockQty = d.newQty;
         }
         else {
@@ -69,6 +71,7 @@ export async function applyStockForSale(tx, needs, itemIds, decisions, userId, l
             orderItemId: itemIds[n.itemIndex] ?? null, userId,
         });
         await tx.update(products).set({ stockQty: p.stockQty }).where(eq(products.id, n.productId));
+        marcarEstoqueMudou();
     }
 }
 /** Produtos de estoque vinculados a um item vendido (o próprio produto e/ou produtos de opções). */
@@ -88,6 +91,7 @@ export async function returnStockForItem(tx, orderItemId, qty, userId, label) {
             reason: label, orderItemId, userId,
         });
         await tx.update(products).set({ stockQty: p.stockQty + qty }).where(eq(products.id, p.id));
+        marcarEstoqueMudou();
         returned = true;
     }
     return returned;

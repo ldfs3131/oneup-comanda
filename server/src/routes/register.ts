@@ -79,8 +79,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const b = parse(z.object({ countedCashCents: z.number().int().min(0).max(100_000_00), note: z.string().trim().max(300).nullable().optional() }), req.body);
     const user = me(req);
     const out = await db.transaction(async (tx) => {
-      const reg = await requireOpenRegister(tx);
-      await tx.select().from(cashRegisters).where(eq(cashRegisters.id, reg.id)).for('update');
+      const reg = await requireOpenRegister(tx, 'fechar');
       const s = await registerSummary(tx, reg.id);
       const diff = b.countedCashCents - s.expectedCashCents;
       const closedAt = new Date();

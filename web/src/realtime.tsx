@@ -28,7 +28,23 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     });
     s.on('disconnect', () => setConnected(false));
     s.on('connect_error', () => setConnected(false));
-    const inv = (...keys: unknown[][]) => keys.forEach((k) => qc.invalidateQueries({ queryKey: k }));
+    // Junta os avisos que chegam em sequência (um pedido gera 2–3 avisos) e busca UMA vez.
+    // O painel do dono (consulta pesada) atualiza no máximo a cada 30 s por aviso; o resto em 0,3 s.
+    const pendentes = new Map<string, unknown[]>();
+    let timer: number | undefined;
+    let ultimoPainel = 0;
+    const flush = () => {
+      timer = undefined;
+      for (const k of pendentes.values()) qc.invalidateQueries({ queryKey: k });
+      pendentes.clear();
+    };
+    const inv = (...keys: unknown[][]) => {
+      for (const k of keys) {
+        if (k[0] === 'dashboard') { if (Date.now() - ultimoPainel < 30_000) continue; ultimoPainel = Date.now(); }
+        pendentes.set(JSON.stringify(k), k);
+      }
+      if (timer === undefined) timer = window.setTimeout(flush, 300);
+    };
     s.onAny((event: string, payload: any) => {
       switch (event) {
         case 'orders:changed': inv(['board'], ['kitchen'], ['account'], ['dashboard'], ['ordersToday'], ['order'], ['stock']); break;
@@ -39,7 +55,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       }
       listeners.current.forEach((l) => l(event, payload));
     });
-    return () => { s.close(); };
+    return () => { s.close(); if (timer !== undefined) window.clearTimeout(timer); };
   }, [user, qc]);
 
   const subscribe = useCallback((fn: Listener) => { listeners.current.add(fn); return () => { listeners.current.delete(fn); }; }, []);

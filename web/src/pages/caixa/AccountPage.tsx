@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../api';
+import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { useAuth } from '../../auth';
 import { CONSUMPTION_LABEL, ORIGIN_LABEL, SITUATION, brl, dateTime, minutesUntil, time } from '../../format';
 import type { AccountDetail, Consumption, Order, OrderItem, StockDecision } from '../../types';
@@ -31,6 +31,7 @@ export default function AccountPage() {
   });
   const { busy, run } = useAction();
   const { guard, modal: stockModal, busy: sending } = useStockGuard();
+  const envio: ChaveEnvio = useRef(null);
   const [modal, setModal] = useState<null | 'add' | 'pay' | 'discount' | 'pending' | 'edit' | 'cancel' | 'reopen' | 'merge'>(null);
   const [cancelItem, setCancelItem] = useState<{ item: OrderItem; delivered: boolean } | null>(null);
   const [cancelOrder, setCancelOrder] = useState<Order | null>(null);
@@ -51,11 +52,11 @@ export default function AccountPage() {
   const orders = [...acc.orders].reverse(); // mais recente primeiro
 
   const sendOrder = async (items: unknown[], note: string, consumptionType: Consumption, okMsg = 'Pedido enviado.') => {
-    const key = api.newKey();
-    let n = 0;
-    const r = await guard((stockDecisions?: StockDecision[]) =>
-      api.post(`/api/accounts/${acc.id}/orders`, { items, note, consumptionType, stockDecisions }, `${key}-${n++}`), okMsg);
-    if (r) refresh();
+    const r = await guard((stockDecisions?: StockDecision[]) => {
+      const corpo = { items, note, consumptionType, stockDecisions };
+      return api.post(`/api/accounts/${acc.id}/orders`, corpo, chaveDoEnvio(envio, { conta: acc.id, ...corpo }));
+    }, okMsg);
+    if (r) { envio.current = null; refresh(); }
     return !!r;
   };
 

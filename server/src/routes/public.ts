@@ -1,4 +1,6 @@
-import type { FastifyInstance } from 'fastify';
+import { respostaCompartilhada } from '../lib/cacheRota.js';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { idempotent } from '../lib/idempotency.js';
 import { z } from 'zod';
 import { currentContext, db, nextNumber } from '../db/index.js';
 import { accounts, deliverySettings, restaurantSettings } from '../db/schema.js';
@@ -9,17 +11,26 @@ import { currentRegister, insertOrder } from '../services/accounts.js';
 import { loadMenu } from './menu.js';
 import { configuracoesPublicas, lerConfig } from '../services/configuracoes.js';
 
-// Limite simples por IP para o canal público
+/*
+ * Limites do canal público (sem login). Todos os clientes no Wi-Fi do restaurante saem pelo MESMO IP,
+ * então o limite principal é por APARELHO (identificador aleatório guardado no navegador do cliente):
+ *  - por aparelho: 6 pedidos ENVIADOS em 10 min (erros não contam)
+ *  - por IP (proteção contra robô): 150 tentativas por minuto
+ */
 const hits = new Map<string, number[]>();
 setInterval(() => { const now = Date.now(); for (const [k, l] of hits) if (!l.some((t) => now - t < 3_600_000)) hits.delete(k); }, 10 * 60_000).unref();
-function rateLimit(ip: string, max: number, windowMs: number) {
+function excedeu(chave: string, max: number, janelaMs: number) {
   const now = Date.now();
-  ip = `${currentContext()?.empresaId ?? 0}:${ip}`; // limite por empresa + aparelho
-  const list = (hits.get(ip) ?? []).filter((t) => now - t < windowMs);
-  if (list.length >= max) throw new HttpError(429, 'Muitos pedidos em pouco tempo. Aguarde um instante ou peça no balcão.');
-  list.push(now);
-  hits.set(ip, list);
+  const list = (hits.get(chave) ?? []).filter((t) => now - t < janelaMs);
+  hits.set(chave, list);
+  return list.length >= max;
 }
+function registrar(chave: string) {
+  if (hits.size > 200_000) hits.clear();
+  (hits.get(chave) ?? hits.set(chave, []).get(chave)!).push(Date.now());
+}
+const LIMITE_APARELHO = { max: 6, janela: 10 * 60_000 };
+const LIMITE_IP = { max: 150, janela: 60_000 };
 
 async function settings() {
   const [r] = await db.select().from(restaurantSettings).limit(1);
@@ -28,11 +39,11 @@ async function settings() {
 }
 
 export async function publicRoutes(app: FastifyInstance) {
-  app.get('/api/public/menu', async () => {
+  app.get('/api/public/menu', { preHandler: respostaCompartilhada('cardapio-publico', 'menu', 30000) }, async () => {
     const { r, d } = await settings();
     const cfg = await configuracoesPublicas();
     if (!r.qrEnabled) return { enabled: false, name: r.name, whatsappNumber: r.whatsappNumber, config: cfg };
-    const menu = await loadMenu(db, { includeInactive: false, onlyAvailable: true });
+    const menu = await loadMenu(db, { includeInactive: false, onlyAvailable: true, semMaisVendidos: true });
     const marcaAcabou = await lerConfig<boolean>('esconder_sem_estoque');
     return {
       enabled: true, name: r.name, isOpen: r.isOpen, deliveryOpen: d.isOpen, whatsappNumber: r.whatsappNumber, config: cfg,
@@ -47,7 +58,21 @@ export async function publicRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/public/orders', async (req) => {
-    rateLimit(req.ip, 5, 60_000);
+    const emp = currentContext()?.empresaId ?? 0;
+    const chaveIp = `ip:${emp}:${req.ip}`;
+    if (excedeu(chaveIp, LIMITE_IP.max, LIMITE_IP.janela)) throw new HttpError(429, 'Muitos pedidos em pouco tempo. Aguarde um instante ou peça no balcão.');
+    registrar(chaveIp);
+    const ap = req.headers['x-aparelho'];
+    const chaveAparelho = `ap:${emp}:${typeof ap === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(ap) ? ap : req.ip}`;
+    if (excedeu(chaveAparelho, LIMITE_APARELHO.max, LIMITE_APARELHO.janela)) throw new HttpError(429, 'Você já enviou vários pedidos agora há pouco. Aguarde a confirmação ou chame um atendente.');
+    return idempotent(req, 'public.order', async () => {
+      const r = await criarPedidoPublico(req);
+      registrar(chaveAparelho);
+      return r;
+    });
+  });
+
+  async function criarPedidoPublico(req: FastifyRequest) {
     const { r, d } = await settings();
     if (!r.qrEnabled) throw new HttpError(403, 'Pedidos pelo QR Code não estão disponíveis.');
     if (!r.isOpen) throw conflict('O restaurante está fechado no momento.');
@@ -81,5 +106,5 @@ export async function publicRoutes(app: FastifyInstance) {
     notify.qrNew({ orderNumber: res.o.order.number, accountNumber: res.acc.number, customerName: res.acc.customerName });
     notify.ordersChanged(); notify.accountsChanged(res.acc.id);
     return { orderNumber: res.o.order.number, totalCents: res.o.totalCents };
-  });
+  }
 }

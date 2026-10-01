@@ -152,7 +152,13 @@ async function main() {
   const empA = (await sys.query("SELECT id FROM empresas WHERE slug='alfa'")).rows[0].id;
   check('Dono envia logotipo; fica na pasta da própria empresa', r.status === 200 && r.data.logo?.startsWith(`/uploads/${empA}/`), r.data);
   check('Logotipo aparece no login', (await new C('alfa').get('/api/meta')).data.logo === r.data.logo);
-  check('Arquivo do logotipo é servido', (await fetch(BASE + r.data.logo)).status === 200);
+  check('Arquivo do logotipo é servido no endereço da própria empresa', (await fetch(BASE + r.data.logo, { headers: { 'x-empresa': 'alfa' } })).status === 200);
+  check('Logotipo da Alfa NÃO é servido no endereço da Beta', (await fetch(BASE + r.data.logo, { headers: { 'x-empresa': 'beta' } })).status === 404);
+  {
+    const falso = new FormData(); falso.append('file', new Blob(['<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'], { type: 'image/png' }), 'logo.png');
+    const rf = await dono.req('POST', '/api/configuracoes/logo', undefined, { body: falso });
+    check('Arquivo que não é imagem de verdade (SVG com script renomeado .png) é recusado', rf.status === 400, rf);
+  }
   const empB = (await sys.query("SELECT id FROM empresas WHERE slug='beta'")).rows[0].id;
   check('Beta não consegue usar o logotipo da pasta da Alfa', (await donoB.patch('/api/configuracoes', { valores: { logo: r.data.logo } })).status === 400 && empB !== empA);
 

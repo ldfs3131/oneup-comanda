@@ -1,3 +1,4 @@
+import { respostaCompartilhada } from '../lib/cacheRota.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq, sql } from 'drizzle-orm';
@@ -46,7 +47,7 @@ export async function adminRoutes(app: FastifyInstance) {
   const anyUser = { preHandler: requireRole() };
 
   // ---------- Dashboard por período ----------
-  app.get('/api/dashboard', admin, async (req) => {
+  app.get('/api/dashboard', { preHandler: [requireRole('ADMIN'), respostaCompartilhada('painel', 'dados', 15000)] }, async (req) => {
     const r = rangeOf(parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional(), date: dateSchema.optional() }), req.query));
     const q = async (s: ReturnType<typeof sql>) => (await db.execute(s)).rows as any[];
     const liveOrders = sql`o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')`;

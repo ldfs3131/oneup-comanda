@@ -58,6 +58,9 @@ export default function Board() {
                 <div className="row small wrap" style={{ gap: 8 }}>
                   {a.inKitchen > 0 && <span className={`pill ${eta != null && eta < 0 ? 'danger' : 'warn'}`}>🍳 {a.inKitchen}{eta != null ? (eta >= 0 ? ` · ~${time(a.nextReadyAt)}` : ` · atrasado ${-eta} min`) : ''}</span>}
                   {a.ready > 0 && <span className="pill ok">🔔 {a.ready} pronto</span>}
+                  {data.register && new Date(a.openedAt) < new Date(data.register.openedAt)
+                    ? <span className="pill danger">📅 de um dia anterior</span>
+                    : minutesSince(a.openedAt) >= 240 && <span className="pill warn">⏳ aberta há {Math.floor(minutesSince(a.openedAt) / 60)} h</span>}
                   {!a.inKitchen && !a.ready && a.lastOrderAt && <span className="faint">{time(a.lastOrderAt)} · {minutesSince(a.lastOrderAt)} min</span>}
                 </div>
                 <div className="acc-total num">{brl(a.balance)}</div>

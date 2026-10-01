@@ -4,7 +4,7 @@ import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { existsSync, mkdirSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
-import { config } from './config.js';
+import { avisosConfig, config } from './config.js';
 import { appPool, bindContext, db, ensureEmpresaBase, ensurePlatformData, releaseContext, runAsEmpresa, runAsSystem, runMigrations, systemPool, waitForDatabase } from './db/index.js';
 import { empresas } from './db/schema.js';
 import { empresaPorSlug, slugDaRequisicao } from './lib/empresa.js';
@@ -21,6 +21,8 @@ import { stockRoutes } from './routes/stock.js';
 import { managementRoutes } from './routes/management.js';
 import { configuracoesRoutes } from './routes/configuracoes.js';
 import { cleanupIdempotency } from './lib/idempotency.js';
+import { registrarRespostaCompartilhada } from './lib/cacheRota.js';
+import { rotaUploads } from './lib/imagem.js';
 /**
  * Cada chamada de API pertence a UMA empresa (descoberta pelo endereço). A conexão do banco dessa
  * requisição fica presa a ela (RLS) e é devolvida ao terminar. Sem empresa válida: 404.
@@ -49,15 +51,16 @@ export async function buildApp() {
         logger: { level: process.env.LOG_LEVEL ?? 'warn' },
         bodyLimit: 1024 * 1024,
         // atrás do proxy (Coolify/Cloudflare) o IP real vem do cabeçalho; sem isso todos parecem o mesmo aparelho
-        trustProxy: (config.trustProxy || false), // número de saltos aceito em tempo de execução
+        trustProxy: config.trustProxy,
     });
     app.setErrorHandler(errorHandler);
     securityHeaders(app);
     empresaPorRequisicao(app);
+    registrarRespostaCompartilhada(app);
     await app.register(cookie);
     await app.register(multipart);
     mkdirSync(config.uploadsDir, { recursive: true });
-    await app.register(fastifyStatic, { root: config.uploadsDir, prefix: '/uploads/', decorateReply: false });
+    rotaUploads(app);
     await app.register(authRoutes);
     await app.register(menuRoutes);
     await app.register(accountRoutes);
@@ -87,10 +90,21 @@ export async function buildApp() {
     return app;
 }
 function securityHeaders(app) {
-    app.addHook('onSend', async (_req, reply, payload) => {
+    app.addHook('onSend', async (req, reply, payload) => {
         reply.header('X-Content-Type-Options', 'nosniff');
         reply.header('X-Frame-Options', 'SAMEORIGIN');
         reply.header('Referrer-Policy', 'same-origin');
+        // só código do próprio sistema roda na página (barra script injetado em nome de cliente, observação etc.)
+        if (!reply.hasHeader('content-security-policy')) {
+            const host = /^[a-z0-9.-]+(:\d+)?$/i.test(req.headers.host ?? '') ? req.headers.host : '';
+            reply.header('Content-Security-Policy', [
+                "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
+                `connect-src 'self'${host ? ` wss://${host} ws://${host}` : ''}`, "font-src 'self' data:", "object-src 'none'",
+                "base-uri 'self'", "form-action 'self'", "frame-ancestors 'self'", "manifest-src 'self'",
+            ].join('; '));
+        }
+        if (config.cookieSecure)
+            reply.header('Strict-Transport-Security', 'max-age=15552000');
         return payload;
     });
 }
@@ -100,7 +114,8 @@ async function buildPublicApp() {
     app.setErrorHandler(errorHandler);
     securityHeaders(app);
     empresaPorRequisicao(app);
-    await app.register(fastifyStatic, { root: config.uploadsDir, prefix: '/uploads/', decorateReply: false });
+    registrarRespostaCompartilhada(app);
+    rotaUploads(app);
     await app.register(publicRoutes);
     app.get('/api/meta', async () => ({ demoMode: config.demoMode, public: true }));
     if (existsSync(config.webDist)) {
@@ -124,6 +139,10 @@ async function main() {
     if (config.allowEmpresaHeader && process.env.NODE_ENV === 'production') {
         throw new Error('EMPRESA_HEADER=true é só para testes: recusado em produção (qualquer um escolheria a empresa pelo cabeçalho).');
     }
+    for (const a of avisosConfig)
+        console.warn('  Aviso: ' + a);
+    if (config.baseDomain && !config.trustProxy)
+        console.warn('  Aviso: online sem TRUST_PROXY — todos os aparelhos parecerão um só (limites de tentativa ficam por empresa). Use TRUST_PROXY=cloudflare.');
     if (config.baseDomain && config.defaultEmpresa)
         console.warn('  Aviso: BASE_DOMAIN e DEFAULT_EMPRESA juntos — endereços desconhecidos caem na empresa padrão.');
     await waitForDatabase();

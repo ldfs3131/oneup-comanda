@@ -25,7 +25,7 @@ espera 3200
 roda isolamento env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/isolamento-test.js
 roda personalizacao env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/personalizacao-test.js
 roda conexoes env DATABASE_URL=$PG/of_iso node dist/scripts/conexao-test.js
-for extra in "${EXTRA_TESTS:-}"; do [ -n "$extra" ] && roda "$(basename "$extra" .js)" env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node "$extra"; done
+roda comite env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/comite-test.js
 kill $S2 2>/dev/null; wait $S2 2>/dev/null
 
 echo; [ $falhas -eq 0 ] && echo "TUDO OK" || echo "$falhas suíte(s) falharam"

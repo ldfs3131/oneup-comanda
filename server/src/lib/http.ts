@@ -38,6 +38,7 @@ export function errorHandler(err: unknown, _req: FastifyRequest, reply: FastifyR
   // (o Drizzle embrulha o erro do PostgreSQL em "cause")
   const pgErr = (e?.code ? e : (err as { cause?: { code?: string; message?: string } })?.cause) ?? {};
   if (pgErr.code === 'P0001') return reply.status(409).send({ error: pgErr.message });
+  if (pgErr.code === '40P01' || pgErr.code === '40001') return reply.status(409).send({ error: 'Outra pessoa alterou esta conta no mesmo instante. Confira a tela e tente de novo.', code: 'CONCORRENCIA' });
   if (pgErr.code === '23505') return reply.status(409).send({ error: 'Registro duplicado.' });
   if (pgErr.code === '23503') return reply.status(400).send({ error: 'Referência inválida: registro não encontrado.' });
   if (pgErr.code === '42501') return reply.status(403).send({ error: 'Operação não permitida.' });

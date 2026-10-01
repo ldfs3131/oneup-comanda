@@ -57,9 +57,28 @@ export default function Kitchen() {
     return () => document.removeEventListener('visibilitychange', vis);
   }, [started]);
 
+  // O som sai pela LISTA, não só pelo aviso em tempo real: pedido que chegou durante uma queda do Wi-Fi
+  // (e apareceu na atualização automática) também toca. O mesmo para pedido que sumiu da fila (cancelado).
+  const conhecidos = useRef<Map<number, string> | null>(null);
+  const ultimoAvisoCancel = useRef(0);
+  useEffect(() => {
+    const atual = new Map(data.map((o) => [o.id, o.status]));
+    const antes = conhecidos.current;
+    conhecidos.current = atual;
+    if (!antes) return; // primeira carga: sem som
+    const novos = data.filter((o) => o.status === 'CONFIRMED' && !antes.has(o.id));
+    if (novos.length) playNew();
+    const sumiram = [...antes.entries()].filter(([id, st]) => (st === 'CONFIRMED' || st === 'IN_PREPARATION') && !atual.has(id));
+    if (sumiram.length && Date.now() - ultimoAvisoCancel.current > 20_000) {
+      playAlert();
+      setAlerts((a) => [...a, { id: Date.now() + Math.random(), msg: `${sumiram.length === 1 ? 'Um pedido saiu' : `${sumiram.length} pedidos saíram`} da fila (cancelado pelo caixa). Confira antes de preparar.` }]);
+    }
+  }, [data]);
+
   useRealtimeEvent((ev, p) => {
-    if (ev === 'kitchen:new') { playNew(); qc.invalidateQueries({ queryKey: ['kitchen'] }); setTab('CONFIRMED'); }
+    if (ev === 'kitchen:new') qc.invalidateQueries({ queryKey: ['kitchen'] });
     if (ev === 'kitchen:cancelled') {
+      ultimoAvisoCancel.current = Date.now();
       playAlert();
       setAlerts((a) => [...a, { id: Date.now() + Math.random(), msg: p.message }]);
     }

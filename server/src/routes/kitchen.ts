@@ -1,3 +1,4 @@
+import { respostaCompartilhada } from '../lib/cacheRota.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
@@ -11,7 +12,7 @@ import { notify } from '../realtime.js';
 export async function kitchenRoutes(app: FastifyInstance) {
   const k = { preHandler: requireRole('COZINHA') };
 
-  app.get('/api/kitchen/orders', k, async () => {
+  app.get('/api/kitchen/orders', { preHandler: [requireRole('COZINHA'), respostaCompartilhada('cozinha', 'dados', 5000)] }, async () => {
     // Novos e em preparo + prontos ainda não entregues (últimos 30)
     const rows = await db.execute(sql`
       (SELECT o.* FROM orders o WHERE o.goes_to_kitchen AND o.status IN ('CONFIRMED','IN_PREPARATION'))

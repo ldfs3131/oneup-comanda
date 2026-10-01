@@ -1,11 +1,7 @@
-import { randomBytes } from 'node:crypto';
-import { createWriteStream, mkdirSync } from 'node:fs';
-import { extname, join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
+import { salvarImagem } from '../lib/imagem.js';
 import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { config } from '../config.js';
-import { db, empresaAtual } from '../db/index.js';
+import { db } from '../db/index.js';
 import { configHistorico, paymentMethods } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
 import { bad, idParam, notFound, parse } from '../lib/http.js';
@@ -36,19 +32,7 @@ export async function configuracoesRoutes(app) {
     });
     /** Logotipo: gravado na pasta da própria empresa. */
     app.post('/api/configuracoes/logo', dono, async (req) => {
-        const file = await req.file({ limits: { fileSize: 2 * 1024 * 1024 } });
-        if (!file)
-            throw bad('Envie uma imagem.');
-        const ext = extname(file.filename).toLowerCase();
-        if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext))
-            throw bad('Use PNG, JPG ou WEBP.');
-        const pasta = join(config.uploadsDir, String(empresaAtual()));
-        mkdirSync(pasta, { recursive: true });
-        const nome = `logo-${randomBytes(5).toString('hex')}${ext}`;
-        await pipeline(file.file, createWriteStream(join(pasta, nome)));
-        if (file.file.truncated)
-            throw bad('Imagem muito grande (máximo 2 MB).');
-        const url = `/uploads/${empresaAtual()}/${nome}`;
+        const url = await salvarImagem(req, 'logo', 2 * 1024 * 1024);
         await aplicarConfiguracoes({ logo: url }, me(req));
         notify.settingsChanged();
         return { logo: url };

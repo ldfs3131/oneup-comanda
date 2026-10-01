@@ -5,11 +5,11 @@ export class ApiError extends Error {
 const TIMEOUT_MS = 15_000;
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
-async function request<T>(method: string, path: string, body?: unknown, opts: { idem?: string | boolean } = {}): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, opts: { idem?: string | boolean; headers?: Record<string, string> } = {}): Promise<T> {
   let res: Response;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(opts.headers ?? {}) };
   if (body !== undefined && !(body instanceof FormData)) headers['content-type'] = 'application/json';
   if (opts.idem) headers['idempotency-key'] = typeof opts.idem === 'string' ? opts.idem : newKey();
   try {
@@ -35,13 +35,38 @@ async function request<T>(method: string, path: string, body?: unknown, opts: { 
 
 export const api = {
   get: <T,>(p: string) => request<T>('GET', p),
-  post: <T,>(p: string, b: unknown = {}, idem?: string | boolean) => request<T>('POST', p, b, { idem }),
+  post: <T,>(p: string, b: unknown = {}, idem?: string | boolean, headers?: Record<string, string>) => request<T>('POST', p, b, { idem, headers }),
   put: <T,>(p: string, b: unknown) => request<T>('PUT', p, b),
   patch: <T,>(p: string, b: unknown) => request<T>('PATCH', p, b),
   del: <T,>(p: string) => request<T>('DELETE', p),
   upload: <T,>(p: string, fd: FormData) => request<T>('POST', p, fd),
   newKey,
 };
+
+/**
+ * Chave anti-duplicidade que SOBREVIVE a um novo toque em "Enviar": se a internet falhou e a pessoa
+ * reenvia exatamente o mesmo pedido, o servidor reconhece e não lança duas vezes. Muda quando o
+ * conteúdo muda; zere (ref.current = null) depois que der certo.
+ */
+/** Identificador aleatório deste celular (sem dado pessoal): o limite de pedidos do cardápio é por aparelho. */
+let aparelhoMem = '';
+export function idAparelho() {
+  try {
+    let v = localStorage.getItem('oneup:aparelho');
+    if (!v) { v = newKey().replace(/[^A-Za-z0-9_-]/g, ''); localStorage.setItem('oneup:aparelho', v); }
+    return v;
+  } catch {
+    if (!aparelhoMem) aparelhoMem = newKey().replace(/[^A-Za-z0-9_-]/g, '');
+    return aparelhoMem;
+  }
+}
+
+export type ChaveEnvio = { current: { fp: string; key: string } | null };
+export function chaveDoEnvio(ref: ChaveEnvio, conteudo: unknown) {
+  const fp = JSON.stringify(conteudo);
+  if (!ref.current || ref.current.fp !== fp) ref.current = { fp, key: newKey() };
+  return ref.current.key;
+}
 
 export const qs = (o: Record<string, string | number | null | undefined | boolean>) => {
   const s = Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '' && v !== false).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&');

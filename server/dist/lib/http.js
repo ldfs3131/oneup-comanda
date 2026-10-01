@@ -42,6 +42,8 @@ export function errorHandler(err, _req, reply) {
     const pgErr = (e?.code ? e : err?.cause) ?? {};
     if (pgErr.code === 'P0001')
         return reply.status(409).send({ error: pgErr.message });
+    if (pgErr.code === '40P01' || pgErr.code === '40001')
+        return reply.status(409).send({ error: 'Outra pessoa alterou esta conta no mesmo instante. Confira a tela e tente de novo.', code: 'CONCORRENCIA' });
     if (pgErr.code === '23505')
         return reply.status(409).send({ error: 'Registro duplicado.' });
     if (pgErr.code === '23503')

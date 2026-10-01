@@ -1,16 +1,22 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { nextNumber } from '../db/index.js';
+import { db, nextNumber } from '../db/index.js';
 import { accounts, cancellations, cashRegisters, customers, discounts, optionGroups, options, orderItems, orders, paymentMethods, payments, products, restaurantSettings, users, } from '../db/schema.js';
 import { HttpError, bad, conflict, notFound } from '../lib/http.js';
 import { applyStockForSale } from './stock.js';
 export const LIVE_ACCOUNT = ['OPEN', 'PARTIALLY_PAID', 'PAID'];
 export const DEFAULT_PREP = 15;
-export async function currentRegister(tx) {
-    const r = await tx.select().from(cashRegisters).where(eq(cashRegisters.status, 'OPEN')).limit(1);
+/**
+ * Caixa aberto. Dentro de uma transação, o caixa fica PRESO até ela terminar: o fechamento espera os
+ * pagamentos/pedidos em andamento entrarem no resumo, e quem chega depois do fechamento recebe "dia não aberto".
+ * modo 'fechar' (só o fechamento) prende com exclusividade.
+ */
+export async function currentRegister(tx, modo = 'auto') {
+    const q = tx.select().from(cashRegisters).where(eq(cashRegisters.status, 'OPEN')).limit(1);
+    const r = modo === 'fechar' ? await q.for('update') : tx !== db ? await q.for('key share') : await q;
     return r[0] ?? null;
 }
-export async function requireOpenRegister(tx) {
-    const r = await currentRegister(tx);
+export async function requireOpenRegister(tx, modo = 'auto') {
+    const r = await currentRegister(tx, modo);
     if (!r)
         throw conflict('O dia ainda não foi aberto. Clique em "Abrir o dia" (caixa) antes de continuar.');
     return r;

@@ -233,3 +233,4 @@ textarea.input { min-height: 80px; resize: vertical; }
 .brand-word { font-weight: 900; color: var(--brand); letter-spacing: 0.01em; line-height: 1.05; display: inline-block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-mark { font-size: 0.8rem; color: var(--muted); letter-spacing: 0.04em; }
 .product-mark b { color: var(--brand); }
+.logo-link, .logo-link:hover { text-decoration: none; display: inline-flex; align-items: center; }

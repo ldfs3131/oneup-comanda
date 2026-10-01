@@ -409,3 +409,4 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
   .cfg-item { grid-template-columns: 1fr; }
   .cfg-ctrl { align-items: stretch; }
 }
+.pub-logo-wrap .brand-word { white-space: normal; text-align: center; max-width: 100%; overflow: visible; }

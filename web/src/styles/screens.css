@@ -240,9 +240,9 @@
   .login-brand-logo { width: min(240px, 70%); }
   .login-brand-name { font-size: 1.6rem; margin-top: 10px; }
 }
-.oneup { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.8rem; text-decoration: none; opacity: 0.85; }
-.oneup img { height: 22px; width: auto; }
-.oneup:hover { opacity: 1; }
+.oneup { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; color: var(--muted); font-size: 0.8rem; opacity: 0.9; }
+.oneup img { height: 40px; width: auto; }
+.product-mark-img { width: auto; max-width: 100%; object-fit: contain; display: block; filter: drop-shadow(0 4px 14px rgba(0, 20, 60, .35)); }
 .info-box { background: rgba(108, 180, 245, 0.1); border: 1px solid rgba(108, 180, 245, 0.4); color: #cfe6ff; border-radius: 10px; padding: 10px 12px; }
 
 /* Estado do estabelecimento */

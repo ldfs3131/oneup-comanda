@@ -1,4 +1,4 @@
-# Instalação no computador do caixa (Windows) — Gourmet R2
+# Instalação local no computador do caixa (Windows, versão R2 — legado) — ONE UP Comanda
 
 > **Já usa a V1.1?** Pule para [Atualizar da V1.1 para a R2](#atualizar-da-v11-para-a-r2). O banco é o mesmo e nada do histórico se perde.
 

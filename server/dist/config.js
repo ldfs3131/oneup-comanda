@@ -64,7 +64,7 @@ export const config = {
     baseDomain: (process.env.BASE_DOMAIN ?? '').toLowerCase().replace(/^\./, ''),
     defaultEmpresa: (process.env.DEFAULT_EMPRESA ?? '').toLowerCase() || undefined,
     allowEmpresaHeader: process.env.EMPRESA_HEADER === 'true',
-    productName: 'ONE UP',
+    productName: 'ONE UP Comanda',
     demoMode: process.env.DEMO_MODE === 'true',
     // Tela de Insights (leitura/interpretação dos números). Desligada por padrão: a interpretação é serviço
     // do Administrador (ONE UP) e não aparece para o restaurante. Os dados continuam sendo gravados.

@@ -1,4 +1,4 @@
-# Guia rápido da equipe — Gourmet R2
+# Guia rápido da equipe — ONE UP Comanda
 
 ## Caixa
 

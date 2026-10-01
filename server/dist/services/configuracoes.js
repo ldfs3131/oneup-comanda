@@ -12,7 +12,7 @@ export const SECOES = [
     { id: 'cozinha', titulo: 'Cozinha', descricao: 'Como a tela da cozinha avisa sobre pedidos atrasados.' },
     { id: 'delivery', titulo: 'Delivery', descricao: 'Entrega pronta no sistema; ligue quando quiser usar.' },
     { id: 'financeiro', titulo: 'Financeiro', descricao: 'Indicadores de acompanhamento.' },
-    { id: 'plano', titulo: 'Seu plano ONE UP', descricao: 'Recursos liberados pelo seu plano. Para mudar, fale com a ONE UP.' },
+    { id: 'plano', titulo: 'Seu plano ONE UP Comanda', descricao: 'Recursos liberados pelo seu plano. Para mudar, fale com a ONE UP.' },
 ];
 export const CATALOGO = [
     // Identidade

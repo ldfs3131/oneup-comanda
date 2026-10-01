@@ -1,12 +1,13 @@
 {
-  "name": "ONE UP",
-  "short_name": "ONE UP",
+  "name": "ONE UP Comanda",
+  "description": "Sistema de gestão para restaurantes",
+  "short_name": "Comanda",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#161513",
   "theme_color": "#161513",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "/comanda-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/comanda-icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# ONE UP — comandos do servidor. Digite: oneup ajuda
+# ONE UP Comanda — comandos do servidor. Digite: oneup ajuda
 set -uo pipefail
 APP=/opt/oneup/app
 BASE=/opt/oneup
 ENVF=$BASE/.env
 BKP=$BASE/backups
 GUARDAR_DIAS=${GUARDAR_DIAS:-14}
+export PATH="$BASE/node/bin:$PATH"   # Node próprio do ONE UP Comanda (o dos outros sistemas não muda)
 
 verde() { printf '\033[1;32m%s\033[0m\n' "$*"; }
 vermelho() { printf '\033[1;31m%s\033[0m\n' "$*"; }
@@ -13,7 +14,36 @@ vermelho() { printf '\033[1;31m%s\033[0m\n' "$*"; }
 senha() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'); echo "${s:0:${1:-10}}"; }
 pin() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc '0-9'); echo "${s:0:${1:-6}}"; }
 carregar_env() { set -a; . "$ENVF"; set +a; }
-saude() { for i in $(seq 1 "${1:-60}"); do curl -fsS http://127.0.0.1:3010/api/health >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
+porta() { grep '^PORT=' "$ENVF" 2>/dev/null | cut -d= -f2 || echo 3010; }
+saude() { local p; p=$(porta); for i in $(seq 1 "${1:-60}"); do curl -fsS "http://127.0.0.1:${p:-3010}/api/health" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
+
+# HTTPS no modo Nginx: um certificado com todos os restaurantes que já têm DNS apontando para cá
+certificado() {
+  carregar_env
+  [ "${ONEUP_WEB:-caddy}" = nginx ] || { verde "Caddy emite o certificado sozinho na primeira visita. Nada a fazer."; return 0; }
+  local ip nomes=() faltam=() n
+  ip=$(curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
+  for slug in $(sudo -u postgres psql -d oneup -tAc "SELECT slug FROM empresas WHERE status <> 'CANCELADA' AND EXISTS (SELECT 1 FROM users u WHERE u.empresa_id = empresas.id) ORDER BY id"); do
+    n="$slug.$BASE_DOMAIN"
+    if [ "${ONEUP_ENSAIO:-}" = 1 ] || { [ -n "$ip" ] && dig +short A "$n" | grep -qx "$ip"; } || { [ -z "$ip" ] && [ -n "$(dig +short A "$n")" ]; }; then nomes+=("$n"); else faltam+=("$n"); fi
+  done
+  if [ ${#faltam[@]} -gt 0 ]; then
+    vermelho "Estes endereços ainda não apontam para este servidor (${ip:-IP desconhecido}): ${faltam[*]}"
+    echo "  No painel da Hostinger → Domínios → oneupsistemas.com.br → DNS, crie o registro:"
+    echo "    Tipo A · Nome: *.${BASE_DOMAIN%.oneupsistemas.com.br} · Aponta para: ${ip:-<IP da VPS>} · TTL 300"
+    echo "  Espere uns minutos e rode de novo: oneup certificado"
+  fi
+  [ ${#nomes[@]} -gt 0 ] || return 1
+  if [ "${ONEUP_ENSAIO:-}" = 1 ]; then verde "Ensaio: certificado pulado para ${nomes[*]}"; return 0; fi
+  local args=(); for n in "${nomes[@]}"; do args+=(-d "$n"); done
+  if certbot --nginx --non-interactive --agree-tos --redirect --expand --cert-name oneup-comanda \
+       $([ -n "${ONEUP_EMAIL:-}" ] && echo "-m $ONEUP_EMAIL" || echo "--register-unsafely-without-email") "${args[@]}"; then
+    verde "HTTPS ativo: ${nomes[*]} (renovação automática pelo certbot)"
+    [ ${#faltam[@]} -eq 0 ]
+  else
+    vermelho "O Let's Encrypt recusou o certificado. Confira o DNS e rode de novo: oneup certificado"; return 1
+  fi
+}
 plataforma() { carregar_env; cd "$APP/server" && node dist/scripts/plataforma.js "$@"; local r=$?; chown -R oneup:oneup "$BASE/uploads" 2>/dev/null; return $r; }
 
 backup() {
@@ -34,15 +64,16 @@ backup() {
 
 case "${1:-ajuda}" in
   status)
-    systemctl --no-pager --lines=0 status oneup caddy postgresql | grep -E '●|Active' ; echo
+    carregar_env; systemctl --no-pager --lines=0 status oneup "${ONEUP_WEB:-caddy}" postgresql | grep -E '●|Active' ; echo
     saude 3 && verde "Sistema respondendo." || vermelho "Sistema NÃO está respondendo."
-    carregar_env; echo "Endereço base: $BASE_DOMAIN · versão: $(node -p "require('$APP/server/package.json').version")"
+    carregar_env; echo "Endereço base: $BASE_DOMAIN · servidor web: ${ONEUP_WEB:-caddy} · porta interna: $PORT · versão: $(node -p "require('$APP/server/package.json').version")"
     echo "Última cópia: $(ls -1t $BKP/oneup-*.dump 2>/dev/null | head -1 || echo nenhuma)"
     df -h / | tail -1 | awk '{print "Disco: "$3" usados de "$2" ("$5")"}'
     ;;
   logs) journalctl -u oneup -n "${2:-100}" --no-pager ;;
   reiniciar) systemctl restart oneup && saude && verde "Reiniciado." || vermelho "Não voltou. Veja: oneup logs" ;;
   backup) backup ;;
+  certificado) certificado ;;
   acessos) cat /root/oneup-acessos.txt 2>/dev/null || echo "Nenhum acesso registrado." ;;
   atualizar)
     cd "$APP" || exit 1
@@ -86,6 +117,7 @@ case "${1:-ajuda}" in
     printf '==================== %s — criado em %s ====================\nEndereço:   https://%s.%s\nDono:       login %s   senha %s\nCaixa:      login caixa   senha %s\nCozinha:    login cozinha senha %s\n\n' \
       "$nome" "$(date '+%d/%m/%Y %H:%M')" "$slug" "$BASE_DOMAIN" "$dono" "$pd" "$pc" "$pk" | tee -a /root/oneup-acessos.txt
     echo "Para entrar com o seu acesso de suporte: oneup plataforma oneup-usuario --empresa=$slug --login=lucas --nome=\"Lucas (ONE UP)\" --senha=<senha>"
+    certificado || true
     ;;
   senha)
     slug=${2:-}; login=${3:-}
@@ -114,7 +146,7 @@ case "${1:-ajuda}" in
   plataforma) shift; plataforma "$@" ;;
   ajuda|*)
     cat <<'TXT'
-ONE UP — comandos do servidor
+ONE UP Comanda — comandos do servidor
   oneup status                 situação do sistema, endereço, última cópia e disco
   oneup logs [linhas]          últimos registros do sistema
   oneup reiniciar              reinicia o sistema
@@ -122,6 +154,7 @@ ONE UP — comandos do servidor
   oneup backup                 cópia de segurança agora (automática todo dia às 03:30, guarda 14 dias)
   oneup restaurar <arquivo>    volta o banco para uma cópia (faz cópia do estado atual antes)
   oneup acessos                mostra endereços e senhas criados na instalação
+  oneup certificado            HTTPS dos restaurantes (modo Nginx; confere o DNS antes)
   oneup nova-empresa <endereco> "Nome" [login]   cria outro restaurante (ex.: oneup nova-empresa bom-sabor "Bom Sabor")
   oneup senha <empresa> <login>                  gera senha nova para alguém que esqueceu
   oneup plataforma <comando>   ferramenta da ONE UP (empresas, catalogo, travar, definir, provisionar, oneup-usuario)

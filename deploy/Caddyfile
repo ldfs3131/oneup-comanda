@@ -1,9 +1,9 @@
-# ONE UP — HTTPS automático. Cada restaurante é um endereço <empresa>.<BASE_DOMAIN>.
+# ONE UP Comanda — HTTPS automático. Cada restaurante é um endereço <empresa>.<BASE_DOMAIN>.
 # O certificado de cada endereço é emitido na primeira visita, só se o sistema confirmar que a empresa existe.
 {
 	email __EMAIL__
 	on_demand_tls {
-		ask http://127.0.0.1:3010/api/health/tls
+		ask http://127.0.0.1:__PORTA__/api/health/tls
 	}
 }
 
@@ -18,7 +18,7 @@ https:// {
 	request_body {
 		max_size 10MB
 	}
-	reverse_proxy 127.0.0.1:3010 {
+	reverse_proxy 127.0.0.1:__PORTA__ {
 		header_up X-Forwarded-Proto https
 	}
 	log {

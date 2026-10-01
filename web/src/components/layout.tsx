@@ -71,13 +71,13 @@ export function SoundToggle() {
   return <button className="btn icon ghost" title={m ? 'Som desligado — toque para ligar' : 'Som ligado — toque para silenciar'} aria-label="Som" onClick={() => setMuted(!m)}>{m ? '🔇' : '🔔'}</button>;
 }
 
+/** Rodapé do produto: logotipo ONE UP Comanda + versão (desenvolvido pela ONE UP). */
 export function OneUpCredit({ version }: { version?: string }) {
   return (
-    <a className="oneup" href="#" onClick={(e) => e.preventDefault()} aria-label="Desenvolvido por ONE UP">
-      <span>Desenvolvido por</span>
-      <img src="/oneup.png" alt="ONE UP" />
-      {version && <span className="faint">v{version}</span>}
-    </a>
+    <div className="oneup" aria-label="ONE UP Comanda — desenvolvido pela ONE UP">
+      <img className="product-mark-img" src="/comanda-logo-sm.webp" alt="ONE UP Comanda" />
+      <span className="faint small">{version ? `v${version} · ` : ''}desenvolvido pela ONE UP</span>
+    </div>
   );
 }
 

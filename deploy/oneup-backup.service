@@ -1,5 +1,5 @@
 [Unit]
-Description=ONE UP — cópia de segurança do banco
+Description=ONE UP Comanda — cópia de segurança do banco
 After=postgresql.service
 
 [Service]

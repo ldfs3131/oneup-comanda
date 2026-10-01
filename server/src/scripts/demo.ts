@@ -42,7 +42,7 @@ async function main() {
   const [admin] = await db.insert(users).values({ name: 'Admin Demo', username: 'admin', passwordHash: pass, roleId: rid('ADMIN') }).returning();
   const [caixa] = await db.insert(users).values({ name: 'Caixa Demo', username: 'caixa', passwordHash: pass, roleId: rid('CAIXA') }).returning();
   const [coz] = await db.insert(users).values({ name: 'Cozinha Demo', username: 'cozinha', passwordHash: pass, roleId: rid('COZINHA') }).returning();
-  await db.update(restaurantSettings).set({ tagline: 'Gourmet R2' }).where(eq(restaurantSettings.id, 1));
+  await db.update(restaurantSettings).set({ tagline: 'Demonstração ONE UP Comanda' }).where(eq(restaurantSettings.id, 1));
 
   await seedMenu();
   // Demo: alguns sabores de Monster ativos e custos de exemplo [DEMO] para o Financeiro ter o que mostrar

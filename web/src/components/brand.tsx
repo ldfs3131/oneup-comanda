@@ -34,7 +34,7 @@ export function ThemeApplier() {
 /** Título da aba: "<restaurante> — <tela>". */
 export function usePageTitle(tela: string) {
   const { meta } = useAuth();
-  const nome = meta?.restaurantName || meta?.product || 'ONE UP';
+  const nome = meta?.restaurantName || meta?.product || 'ONE UP Comanda';
   useEffect(() => { document.title = `${nome} — ${tela}`; }, [nome, tela]);
   return `${nome} — ${tela}`;
 }
@@ -43,14 +43,14 @@ export function usePageTitle(tela: string) {
 export function BrandLogo({ height = 40, className, logo, name }: { height?: number; className?: string; logo?: string | null; name?: string }) {
   const { meta } = useAuth();
   const src = logo !== undefined ? logo : meta?.logo;
-  const nome = name ?? meta?.restaurantName ?? 'ONE UP';
+  const nome = name ?? meta?.restaurantName ?? 'ONE UP Comanda';
   if (src) return <img className={className} src={src} alt={nome} style={{ height, maxWidth: '100%', objectFit: 'contain' }} />;
   return <span className={`brand-word ${className ?? ''}`} style={{ fontSize: Math.max(14, height * 0.45) }}>{nome}</span>;
 }
 
-/** Assinatura do produto. */
-export function ProductMark() {
-  return <span className="product-mark">ONE <b>UP</b></span>;
+/** Assinatura do produto (logotipo ONE UP Comanda, em cartão de bordas suaves). */
+export function ProductMark({ height = 36 }: { height?: number }) {
+  return <img className="product-mark-img" src="/comanda-logo-sm.webp" alt="ONE UP Comanda" style={{ height }} />;
 }
 
 /** Nome que o Dono deu ao campo "Mesa" (Quiosque, Comanda, Casa…). */

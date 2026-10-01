@@ -7,7 +7,7 @@ import { Modal, MoneyInput, Spinner, Toggle, useAction, useToast } from '../../c
 import { brl, dateTime } from '../../format';
 
 /*
- * Configurações do ONE UP — tela GERADA pelo catálogo do servidor (/api/configuracoes).
+ * Configurações do ONE UP Comanda — tela GERADA pelo catálogo do servidor (/api/configuracoes).
  * Cada opção mostra: o que faz, se está no padrão, quem pode mudar, cadeado da ONE UP e histórico.
  */
 

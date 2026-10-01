@@ -1,4 +1,4 @@
-# Cardápio digital online — Gourmet R2
+# Cardápio digital online — ONE UP Comanda
 
 O cliente abre um link no celular, vê o cardápio, monta o pedido e envia **direto para o caixa**.
 

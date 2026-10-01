@@ -52,7 +52,7 @@ export default function Login() {
       <section className="login-form-side">
         <form className="login-form" onSubmit={submit}>
           <h1>Entrar</h1>
-          <p className="muted small" style={{ marginTop: -4 }}>Use o usuário e a senha que o administrador criou para você.</p>
+          <p className="muted small" style={{ marginTop: -4 }}>Use o usuário e a senha que o Dono do restaurante criou para você.</p>
           <label className="field">
             <span>Usuário</span>
             <input className="input" autoFocus={!last} autoCapitalize="none" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -68,7 +68,7 @@ export default function Login() {
             <label className="check small"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />Lembrar acesso neste aparelho</label>
             <button type="button" className="linkish small" onClick={() => setForgot((f) => !f)}>Esqueci minha senha</button>
           </div>
-          {forgot && <div className="info-box small">Peça ao administrador para redefinir sua senha em <b>Admin → Usuários</b>. Por segurança, o sistema não envia senha por e-mail.</div>}
+          {forgot && <div className="info-box small">Peça ao Dono do restaurante para redefinir sua senha em <b>Usuários</b>. Por segurança, o sistema não envia senha por e-mail.</div>}
           {error && <div className="login-error">{error}</div>}
           <button className="btn primary lg block" disabled={busy || !username || !password}>{busy ? 'Entrando…' : 'Entrar'}</button>
           {!remember && <div className="small faint center">Sem “lembrar”, o acesso expira ao fechar o navegador ou em até 14 horas.</div>}

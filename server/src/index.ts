@@ -76,7 +76,7 @@ export async function buildApp() {
   await app.register(managementRoutes);
   await app.register(configuracoesRoutes);
   app.get('/api/health', async () => ({ ok: true, time: new Date().toISOString() }));
-  // App instalável (tablet da cozinha, celular do caixa): nome do restaurante no ícone da tela inicial
+  // App instalável (tablet da cozinha, celular do caixa): nome do restaurante no ícone da tela inicial (ícone ONE UP Comanda)
   app.get('/manifest.webmanifest', async (req, reply) => {
     const emp = await empresaPorSlug(slugDaRequisicao(req.headers.host, req.headers['x-empresa']));
     let nome = config.productName;
@@ -87,10 +87,11 @@ export async function buildApp() {
     reply.type('application/manifest+json').header('Cache-Control', 'no-cache');
     return {
       name: nome, short_name: nome.length > 12 ? nome.split(/\s+/)[0].slice(0, 12) : nome, lang: 'pt-BR',
+      description: `${config.productName} — sistema de gestão para restaurantes`,
       start_url: '/', scope: '/', display: 'standalone', orientation: 'any', background_color: '#161513', theme_color: '#161513',
       icons: [
-        { src: '/oneup-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-        { src: '/oneup-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+        { src: '/comanda-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+        { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
       ],
     };
   });

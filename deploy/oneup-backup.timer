@@ -1,5 +1,5 @@
 [Unit]
-Description=ONE UP — cópia de segurança diária (03:30)
+Description=ONE UP Comanda — cópia de segurança diária (03:30)
 
 [Timer]
 OnCalendar=*-*-* 03:30:00

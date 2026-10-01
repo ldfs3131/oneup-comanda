@@ -382,12 +382,12 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
 .banner.sound { position: fixed; left: 12px; bottom: 12px; z-index: 70; border-radius: 999px; padding: 10px 16px; box-shadow: var(--shadow); border: 1px solid var(--border); max-width: calc(100vw - 24px); font-size: 0.9rem; }
 .page-head-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
-/* ONE Food: cardápio digital personalizado */
+/* ONE UP: cardápio digital personalizado */
 .pub-logo-wrap { display: flex; justify-content: center; padding: 12px 0 4px; }
 .pub-welcome { text-align: center; color: var(--muted); margin: 4px 16px 8px; white-space: pre-line; }
 .pub-item.sold-out { opacity: 0.55; }
 
-/* ONE Food: Configurações geradas pelo catálogo */
+/* ONE UP: Configurações geradas pelo catálogo */
 .cfg-search { max-width: 520px; }
 .cfg-nav { display: flex; flex-wrap: wrap; gap: 6px; }
 .cfg-nav a { padding: 6px 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); text-decoration: none; font-size: 0.85rem; }

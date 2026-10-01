@@ -1,13 +1,13 @@
-# ONE Food — Definições em discussão (não implementar ainda)
+# ONE UP — Definições em discussão (não implementar ainda)
 
-> Parecer do comitê analítico de 01/10: ver `ONE-FOOD-COMITE-2026-10-01.md` (matriz de votos, definições recomendadas e 5 decisões do Lucas).
+> Parecer do comitê analítico de 01/10: ver `ONE-UP-COMITE-2026-10-01.md` (matriz de votos, definições recomendadas e 5 decisões do Lucas).
 
 Registro de 01/10/2026 (manhã). Entram no prompt mestre quando o Lucas fechar a discussão.
 Referências visuais: `docs/referencias/financeiro-panorama-lucas.png` (modelo aprovado) e `docs/referencias/financeiro-atual-reprovado.png` (tela atual reprovada).
 
 ## D1. Aba "Empresas" do Administrador (cadastrar quem fechou com a ONE UP)
-- Pedido: o Administrador adiciona uma empresa nova, que recebe o mesmo sistema do Happy Alpha dentro do ONE Food; logotipo (espaço reservado por empresa), cores e demais personalizações de funcionamento.
-- Recomendação: assistente em 4 passos — (1) dados e endereço (`slug.onefood…`), (2) marca (logotipo, cor, nome, subtítulo), (3) plano e módulos, (4) acesso do Dono (convite ou senha inicial) e cardápio (em branco, planilha ou modelo genérico). Lista de empresas com status, abrir, suspender.
+- Pedido: o Administrador adiciona uma empresa nova, que recebe o mesmo sistema do Happy Alpha dentro do ONE UP; logotipo (espaço reservado por empresa), cores e demais personalizações de funcionamento.
+- Recomendação: assistente em 4 passos — (1) dados e endereço (`slug.restaurantes.oneup…`), (2) marca (logotipo, cor, nome, subtítulo), (3) plano e módulos, (4) acesso do Dono (convite ou senha inicial) e cardápio (em branco, planilha ou modelo genérico). Lista de empresas com status, abrir, suspender.
 - Depende de: login próprio da ONE UP, separado do restaurante (fase 3). Não pode morar dentro do painel de um restaurante: quem administra um restaurante não pode criar outros.
 - Reaproveita: catálogo de personalização, logotipo por empresa e cadeados (fase 2, já prontos); comando `setup.js` vira tela.
 - Pré-requisito antes de cadastrar o 2º cliente: trocar o cardápio de exemplo (hoje é o do Happy Alpha) por um modelo genérico e tirar o logotipo do Happy Alpha do pacote.

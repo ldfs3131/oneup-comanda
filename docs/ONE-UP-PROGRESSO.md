@@ -1,10 +1,10 @@
-# ONE Food — Progresso por fase
+# ONE UP — Progresso por fase
 
 Leia este arquivo no início de cada sessão (o prompt mestre manda começar pela próxima fase não concluída).
 
 | Fase | Situação | Portão |
 |---|---|---|
-| 0. Auditoria e prompt mestre | ✅ 01/10 | `docs/ONE-FOOD-AUDITORIA.md`, `docs/PROMPT-MESTRE-ONE-FOOD.md` |
+| 0. Auditoria e prompt mestre | ✅ 01/10 | `docs/ONE-UP-AUDITORIA.md`, `docs/PROMPT-MESTRE-ONE-UP.md` |
 | 1. ONE Base multi-empresa | ✅ 01/10 | 124 e2e + 30 insights + demo + **145 de vazamento** |
 | 2. Personalização pelo Dono | ✅ 01/10 | **54 de personalização** + telas no navegador (computador, tablet e celular) |
 | 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ⏭ próxima | escassez + às cegas |
@@ -15,7 +15,7 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 
 ## Fase 1 — o que foi feito
 
-- **Migração 0005:** tabela `empresas`; `empresa_id` em 29 tabelas, preenchido pelo próprio banco; RLS ligado e forçado com "nega tudo" sem empresa; unicidades, numeração e "um caixa aberto" passam a ser por empresa; papel `onefood_app` sem BYPASSRLS; trava `ha_ref_mesma_empresa` impede vínculo com registro de outra empresa (a chave estrangeira do PostgreSQL não olha o RLS). Um banco existente vira a **empresa nº 1** sem mover dados.
+- **Migração 0005:** tabela `empresas`; `empresa_id` em 29 tabelas, preenchido pelo próprio banco; RLS ligado e forçado com "nega tudo" sem empresa; unicidades, numeração e "um caixa aberto" passam a ser por empresa; papel `oneup_app` sem BYPASSRLS; trava `ha_ref_mesma_empresa` impede vínculo com registro de outra empresa (a chave estrangeira do PostgreSQL não olha o RLS). Um banco existente vira a **empresa nº 1** sem mover dados.
 - **Contexto por requisição** (`server/src/db/index.ts`): cada chamada de API usa uma conexão exclusiva presa à empresa; consulta fora de contexto é recusada; `runAsEmpresa` e `runAsSystem` para tarefas de fundo, scripts e plataforma. Ponto único de escolha da conexão.
 - **Empresa pelo endereço:** `<slug>.BASE_DOMAIN`; `DEFAULT_EMPRESA` para instalação de uma empresa só; cabeçalho `x-empresa` apenas com `EMPRESA_HEADER=true` (testes). A sessão só vale na empresa onde foi criada.
 - **Tempo real, caches e limites de tentativa por empresa** (o cache de insights e as salas do Socket.IO eram globais).
@@ -50,8 +50,8 @@ Verificado e OK pelo revisor: ordem dos hooks e contexto em uploads, salas do te
 - **Imagem Docker** não foi construída neste ambiente (Docker Hub bloqueado); os passos dela foram testados fora do Docker. Validar no primeiro deploy no Coolify.
 - **Backup online** (Cloudflare R2) é configuração do servidor, fora da aplicação: montar no deploy.
 - Exportar/restaurar **uma** empresa: ferramenta prevista para a fase 5.
-- Pasta `windows/` é da instalação offline (R2); não é usada no ONE Food online.
-- O teste T24 (tempo de preparo) da R2 falha entre 0h e 2h11 por causa do horário; corrigido no ONE Food, não na R2.
+- Pasta `windows/` é da instalação offline (R2); não é usada no ONE UP online.
+- O teste T24 (tempo de preparo) da R2 falha entre 0h e 2h11 por causa do horário; corrigido no ONE UP, não na R2.
 
 ## Como rodar os testes
 

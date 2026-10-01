@@ -1,4 +1,4 @@
-# ONE Food — imagem para o Coolify (VPS). Migrações rodam sozinhas ao iniciar.
+# ONE UP — imagem para o Coolify (VPS). Migrações rodam sozinhas ao iniciar.
 FROM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./

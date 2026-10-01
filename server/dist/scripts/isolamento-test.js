@@ -226,7 +226,7 @@ async function main() {
     check('Impressão digital dos dados da Alfa IDÊNTICA depois de todos os ataques (16 tabelas)', mudou.length === 0, mudou);
     check('Alfa continua vendo a própria conta intacta', (await aCx.get(`/api/accounts/${aAcc.data.id}`)).data.customerName === MARCA);
     console.log('\n[5] Direto no banco, com o papel da aplicação (como se houvesse um erro no código)');
-    const app = new pg.Client({ connectionString: DB_URL, options: '-c role=onefood_app' });
+    const app = new pg.Client({ connectionString: DB_URL, options: '-c role=oneup_app' });
     await app.connect();
     const q = async (s, p = []) => { try {
         return { ok: true, r: await app.query(s, p) };

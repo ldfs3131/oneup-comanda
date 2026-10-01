@@ -7,7 +7,7 @@ import { Modal, MoneyInput, Spinner, Toggle, useAction } from '../../components/
 import { brl, dateTime } from '../../format';
 
 /*
- * Configurações do ONE Food — tela GERADA pelo catálogo do servidor (/api/configuracoes).
+ * Configurações do ONE UP — tela GERADA pelo catálogo do servidor (/api/configuracoes).
  * Cada opção mostra: o que faz, se está no padrão, quem pode mudar, cadeado da ONE UP e histórico.
  */
 

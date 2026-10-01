@@ -5,7 +5,7 @@ import { db } from './db/index.js';
 import { roles, sessions, users } from './db/schema.js';
 import { HttpError } from './lib/http.js';
 import { config } from './config.js';
-export const COOKIE = 'onefood_sessao';
+export const COOKIE = 'oneup_sessao';
 const sha = (t) => createHash('sha256').update(t).digest('hex');
 export const hashPassword = (p) => bcrypt.hash(p, 10);
 export const checkPassword = (p, h) => bcrypt.compare(p, h);

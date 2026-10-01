@@ -229,7 +229,7 @@ textarea.input { min-height: 80px; resize: vertical; }
 .loading { display: flex; justify-content: center; padding: 40px; }
 @media (min-width: 700px) { .tiles .tile.hero { grid-column: span 2; } }
 
-/* ---------- Marca da empresa (ONE Food) ---------- */
+/* ---------- Marca da empresa (ONE UP) ---------- */
 .brand-word { font-weight: 900; color: var(--brand); letter-spacing: 0.01em; line-height: 1.05; display: inline-block; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-mark { font-size: 0.8rem; color: var(--muted); letter-spacing: 0.04em; }
 .product-mark b { color: var(--brand); }

@@ -1,6 +1,6 @@
-# ONE Food — Auditoria e plano (etapa 0)
+# ONE UP — Auditoria e plano (etapa 0)
 
-01/10/2026 · base: Happy Alpha R2.0.2 (commit `ca374e1`) · projeto novo em `one-food/`
+01/10/2026 · base: Happy Alpha R2.0.2 (commit `ca374e1`) · projeto novo em `one-food/` (pasta de trabalho; produto: ONE UP)
 
 ## 1. Estado real do código (lido, não suposto)
 
@@ -35,7 +35,7 @@ Fonte: PROMPT-R3-LEVA1 v3, PROMPT-R3-LEVA2 v3, auditoria de 30/09 (seções 10�
 - **Plataforma:** multi-empresa (RLS), Command Center, dois financeiros, Raio-X, Recuperador, manifesto do produto.
 - **R3 Leva 1:** perfis por pessoa com PIN (Caixa, Cozinha, Dono, Administrador); menu do Dono com 6 itens; pedido com pelo menos um identificador; cardápio digital com resumo, consentimento e acompanhamento por token; avulso "Outro/Adicional"; estoque nunca trava a venda; Pendências; A receber com data combinada; fechamento às cegas total; financeiro do Dono em 3 abas; estoque do Dono em 4 blocos; importação CSV; nada do Happy Alpha fixo no código; horários de todas as etapas.
 - **R3 Leva 2:** financeiro completo, engenharia de cardápio, estoque do consultor, operação e equipe, clientes e fiado, aba IA com anti-alucinação, Radar, Central de serviços, Recuperação de vendas, Relatório Mensal ONE UP (Módulo I).
-- **Novas (01/10):** nome **ONE Food**; Rafael online; **o Dono personaliza o máximo possível em Configurações**, com histórico, voltar ao padrão e cadeado do Administrador; o que protege dinheiro fica travado para todos.
+- **Novas (01/10):** nome **ONE UP**; Rafael online; **o Dono personaliza o máximo possível em Configurações**, com histórico, voltar ao padrão e cadeado do Administrador; o que protege dinheiro fica travado para todos.
 
 ## 4. O que muda de status com a ida para o online
 
@@ -45,14 +45,14 @@ Fonte: PROMPT-R3-LEVA1 v3, PROMPT-R3-LEVA2 v3, auditoria de 30/09 (seções 10�
 | Backup local + lembrete de cópia manual no Drive | Backup diário automático no servidor (R2, 30 dias) + exportação por empresa |
 | Acesso de suporte pelo Tailscale | Modo suporte do Command Center (motivo, 60 min, auditoria visível ao Dono) |
 | "Permitir suporte" do Dono para ver dados de clientes | Mantido: dados pessoais de clientes finais ficam mascarados para o Administrador sem esse interruptor ou contrato de recuperação |
-| Porta pública + Tailscale Funnel para o cardápio | Endereço próprio da empresa (`slug.onefood…`) |
+| Porta pública + Tailscale Funnel para o cardápio | Endereço próprio da empresa (`slug.restaurantes.oneup…`) |
 
 ## 5. Plano por fases, com portões
 
 | Fase | Entrega | Portão | Complexidade |
 |---|---|---|---|
 | **1. ONE Base** | empresas; `empresa_id` + RLS forçado; contexto por requisição; empresa pelo endereço; tempo real e cache por empresa; criar empresa por comando; Dockerfile | 154 testes antigos passando dentro da empresa 1 + **testes de vazamento** A × B (API, tempo real e banco direto) | Alta |
-| **2. Personalização** | catálogo de configurações; tela gerada; histórico; padrão; cadeado; marca ONE Food sem nada fixo | dono muda, admin trava, caixa não vê; nada de dinheiro configurável | Média |
+| **2. Personalização** | catálogo de configurações; tela gerada; histórico; padrão; cadeado; marca ONE UP sem nada fixo | dono muda, admin trava, caixa não vê; nada de dinheiro configurável | Média |
 | 3. Perfis e permissões | PIN, Dono × Administrador, aparelho autorizado, permissões nomeadas, fechamento às cegas total | teste "ninguém além do Administrador recebe interpretação" | Média |
 | 4. R3 Leva 1 restante | módulos 2–9 | e2e por módulo | Média |
 | 5. Command Center fase 1 | carteira, Financeiro ONE UP manual, desempenho, modo suporte | vazamento + auditoria | Alta |
@@ -73,4 +73,4 @@ Regras de negócio da R2 (cálculo no servidor, congelamento de preço e custo, 
 
 ## 8. Perguntas de negócio (resolvidas pelas decisões de 01/10)
 
-1. Nome: **ONE Food**. 2. Rafael online: **sim**, após portões e checagem de internet. 3. Quem personaliza: **Dono**, com cadeado do Administrador. 4. Onde roda: VPS Hostinger + Coolify + Cloudflare. 5. Ordem: restaurante primeiro, cria a ONE Base.
+1. Nome: **ONE UP**. 2. Rafael online: **sim**, após portões e checagem de internet. 3. Quem personaliza: **Dono**, com cadeado do Administrador. 4. Onde roda: VPS Hostinger + Coolify + Cloudflare. 5. Ordem: restaurante primeiro, cria a ONE Base.

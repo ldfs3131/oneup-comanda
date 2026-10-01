@@ -7,7 +7,7 @@ import { HttpError } from '../lib/http.js';
 import type { AuthUser } from '../auth.js';
 
 /*
- * CATÁLOGO DE CONFIGURAÇÕES DO ONE FOOD
+ * CATÁLOGO DE CONFIGURAÇÕES DO ONE UP
  * -------------------------------------
  * Uma entrada por configuração. A tela de Configurações é GERADA daqui: opção nova = entrada nova.
  * Regra do produto: o que é GOSTO/JEITO do negócio, o Dono decide (quem: 'DONO'). O que é plano/módulo,
@@ -35,7 +35,7 @@ export const SECOES = [
   { id: 'cozinha', titulo: 'Cozinha', descricao: 'Como a tela da cozinha avisa sobre pedidos atrasados.' },
   { id: 'delivery', titulo: 'Delivery', descricao: 'Entrega pronta no sistema; ligue quando quiser usar.' },
   { id: 'financeiro', titulo: 'Financeiro', descricao: 'Indicadores de acompanhamento.' },
-  { id: 'plano', titulo: 'Seu plano ONE Food', descricao: 'Recursos liberados pelo seu plano. Para mudar, fale com a ONE UP.' },
+  { id: 'plano', titulo: 'Seu plano ONE UP', descricao: 'Recursos liberados pelo seu plano. Para mudar, fale com a ONE UP.' },
 ];
 
 export const CATALOGO: Def[] = [

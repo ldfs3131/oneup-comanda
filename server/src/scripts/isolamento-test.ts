@@ -215,7 +215,7 @@ async function main() {
   check('Alfa continua vendo a própria conta intacta', (await aCx.get(`/api/accounts/${aAcc.data.id}`)).data.customerName === MARCA);
 
   console.log('\n[5] Direto no banco, com o papel da aplicação (como se houvesse um erro no código)');
-  const app = new pg.Client({ connectionString: DB_URL, options: '-c role=onefood_app' }); await app.connect();
+  const app = new pg.Client({ connectionString: DB_URL, options: '-c role=oneup_app' }); await app.connect();
   const q = async (s: string, p: unknown[] = []) => { try { return { ok: true, r: await app.query(s, p) }; } catch (e) { return { ok: false, err: (e as Error).message }; } };
   let r = await q('SELECT count(*)::int AS n FROM accounts');
   check('Sem empresa no contexto: nenhuma linha visível', r.ok && r.r!.rows[0].n === 0, r);

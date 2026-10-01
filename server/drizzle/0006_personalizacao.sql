@@ -1,4 +1,4 @@
--- ONE Food 3.0 — Personalização pelo Dono: valores por empresa, histórico imutável e cadeados da ONE UP.
+-- ONE UP 3.0 — Personalização pelo Dono: valores por empresa, histórico imutável e cadeados da ONE UP.
 
 -- Valor de cada configuração da empresa (só o que foi alterado; o resto usa o padrão do catálogo em código)
 CREATE TABLE IF NOT EXISTS empresa_config (
@@ -45,17 +45,17 @@ BEGIN
   END LOOP;
 END $$;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON empresa_config TO onefood_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON empresa_config TO oneup_app;
 --> statement-breakpoint
-GRANT SELECT, INSERT ON config_historico TO onefood_app;
+GRANT SELECT, INSERT ON config_historico TO oneup_app;
 --> statement-breakpoint
-GRANT USAGE, SELECT ON SEQUENCE config_historico_id_seq TO onefood_app;
+GRANT USAGE, SELECT ON SEQUENCE config_historico_id_seq TO oneup_app;
 --> statement-breakpoint
-REVOKE UPDATE, DELETE, TRUNCATE ON config_historico FROM onefood_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON config_historico FROM oneup_app;
 --> statement-breakpoint
-GRANT SELECT ON config_travas TO onefood_app;
+GRANT SELECT ON config_travas TO oneup_app;
 --> statement-breakpoint
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON config_travas FROM onefood_app;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON config_travas FROM oneup_app;
 --> statement-breakpoint
 CREATE TRIGGER no_update_config_historico BEFORE UPDATE ON config_historico FOR EACH ROW EXECUTE FUNCTION ha_block_update();
 --> statement-breakpoint

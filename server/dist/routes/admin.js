@@ -220,7 +220,7 @@ export async function adminRoutes(app) {
     });
     app.post('/api/backup', admin, async (req) => {
         if (!config.backupDirs.length)
-            throw bad('No ONE Food online o backup do banco é automático e diário, feito pela ONE UP.');
+            throw bad('No ONE UP online o backup do banco é automático e diário, feito pela ONE UP.');
         return { results: await runBackupAndRecord(me(req).id, 'backup.manual') };
     });
 }

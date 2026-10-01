@@ -1,6 +1,6 @@
-# Comitê analítico ONE Food — 01/10/2026
+# Comitê analítico ONE UP — 01/10/2026
 
-Pauta: definições D1–D5 (`ONE-FOOD-DEFINICOES-PENDENTES.md`). Cinco pareceres independentes, cada membro sem ver os outros:
+Pauta: definições D1–D5 (`ONE-UP-DEFINICOES-PENDENTES.md`). Cinco pareceres independentes, cada membro sem ver os outros:
 **Operação** (dono de restaurante pequeno) · **Finanças** (consultor de food service e dados) · **Arquitetura** (software e segurança) · **Comercial** (SaaS para pequeno varejo) · **Produto/UX**.
 
 Legenda: ✅ aprovar · 🟡 aprovar com ajuste · ⏸ adiar.

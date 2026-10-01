@@ -1,4 +1,4 @@
--- ONE Food 3.0 — ONE Base: várias empresas no mesmo banco, isoladas pelo próprio PostgreSQL (RLS).
+-- ONE UP 3.0 — ONE Base: várias empresas no mesmo banco, isoladas pelo próprio PostgreSQL (RLS).
 -- Aditiva: um banco existente (instalação de um restaurante) vira a EMPRESA Nº 1 sem mover nenhum dado.
 
 -- 1) Empresa da conexão atual. Sem empresa definida = NULL = nenhuma linha visível (nega tudo).
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS empresas (
   id serial PRIMARY KEY,
   slug text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$'),
   nome text NOT NULL,
-  produto text NOT NULL DEFAULT 'food',
+  produto text NOT NULL DEFAULT 'restaurante',
   status text NOT NULL DEFAULT 'ATIVA' CHECK (status IN ('ATIVA', 'IMPLANTACAO', 'SUSPENSA', 'CANCELADA', 'TESTE', 'CORTESIA')),
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -96,24 +96,24 @@ CREATE UNIQUE INDEX one_open_register ON cash_registers (empresa_id) WHERE statu
 --    migrações e tarefas de sistema usam o usuário dono do banco, num ponto único do código.
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'onefood_app') THEN
-    CREATE ROLE onefood_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'oneup_app') THEN
+    CREATE ROLE oneup_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
   END IF;
 END $$;
 --> statement-breakpoint
-GRANT onefood_app TO CURRENT_USER;
+GRANT oneup_app TO CURRENT_USER;
 --> statement-breakpoint
-GRANT USAGE ON SCHEMA public TO onefood_app;
+GRANT USAGE ON SCHEMA public TO oneup_app;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO onefood_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO oneup_app;
 --> statement-breakpoint
-REVOKE INSERT, UPDATE, DELETE ON roles, empresas FROM onefood_app;
+REVOKE INSERT, UPDATE, DELETE ON roles, empresas FROM oneup_app;
 --> statement-breakpoint
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO onefood_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO oneup_app;
 --> statement-breakpoint
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO onefood_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO oneup_app;
 --> statement-breakpoint
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO onefood_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO oneup_app;
 --> statement-breakpoint
 -- A aplicação só enxerga a própria empresa no cadastro de empresas
 ALTER TABLE empresas ENABLE ROW LEVEL SECURITY;

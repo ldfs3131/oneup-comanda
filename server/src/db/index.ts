@@ -14,7 +14,7 @@ pg.types.setTypeParser(1700, (v) => Number(v)); // numeric
  * ISOLAMENTO POR EMPRESA (ONE Base)
  * ----------------------------------
  * Toda consulta roda dentro de um CONTEXTO:
- *  - 'app'    → conexão com o papel `onefood_app` (sem privilégio de ignorar RLS) e `app.empresa_id`
+ *  - 'app'    → conexão com o papel `oneup_app` (sem privilégio de ignorar RLS) e `app.empresa_id`
  *               definido. O PostgreSQL só devolve e só aceita linhas daquela empresa.
  *  - 'system' → conexão do dono do banco (migrações, cadastro de empresas, tarefas da plataforma).
  * Cada requisição HTTP recebe uma conexão exclusiva (pega na primeira consulta, devolvida ao fim).

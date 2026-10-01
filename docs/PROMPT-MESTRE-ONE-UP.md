@@ -1,7 +1,7 @@
-# PROMPT MESTRE — ONE Food (ONE UP)
+# PROMPT MESTRE — ONE UP (ONE UP)
 
 > Versão 1 · 01/10/2026 · substitui PROMPT-R3-LEVA1 v3, PROMPT-R3-LEVA2 v3, o prompt de conversão e a ficha "ONE Gourmet". Esses documentos ficam em `docs/` só como referência de detalhe; **em caso de conflito, vale este**.
-> Hierarquia da verdade: (1) decisões registradas depois desta data, (2) este prompt, (3) `docs/ONE-FOOD-AUDITORIA.md`, (4) documentos antigos (histórico).
+> Hierarquia da verdade: (1) decisões registradas depois desta data, (2) este prompt, (3) `docs/ONE-UP-AUDITORIA.md`, (4) documentos antigos (histórico).
 
 ---
 
@@ -15,7 +15,7 @@ Você é o CTO e engenheiro principal da ONE UP, especialista em SaaS multi-empr
 
 ## 1. O PRODUTO
 
-**ONE Food** é o sistema da ONE UP para restaurantes, bares, lanchonetes e espetinhos. Promessa: eficiência, controle e economia. Diferencial: *"Não somos só o sistema que registra o que aconteceu. Mostramos ao dono onde ele está perdendo dinheiro e o que fazer para recuperar."*
+**ONE UP** é o sistema da ONE UP para restaurantes, bares, lanchonetes e espetinhos. Promessa: eficiência, controle e economia. Diferencial: *"Não somos só o sistema que registra o que aconteceu. Mostramos ao dono onde ele está perdendo dinheiro e o que fazer para recuperar."*
 
 Ciclo: operar → medir → identificar problemas → encontrar dinheiro na mesa → recuperar vendas → recomendar ações → acompanhar resultados → recorrência.
 
@@ -23,7 +23,7 @@ Ciclo: operar → medir → identificar problemas → encontrar dinheiro na mesa
 
 ## 2. ARQUITETURA DA PLATAFORMA (decidida; não reabrir, só apontar impedimento técnico real)
 
-2.1 **Hierarquia:** ONE UP → ONE Base → Produtos (ONE Food, depois ONE Lava…) → Empresas → Usuários.
+2.1 **Hierarquia:** ONE UP → ONE Base → Produtos (ONE UP, depois ONE Lava…) → Empresas → Usuários.
 
 2.2 **Isolamento:** um PostgreSQL compartilhado. Toda tabela com dados de empresa tem `empresa_id` e **Row Level Security ligado e forçado**. Regras:
 - Sem empresa no contexto = nenhuma linha (nega tudo por padrão).
@@ -31,7 +31,7 @@ Ciclo: operar → medir → identificar problemas → encontrar dinheiro na mesa
 - O `empresa_id` é preenchido pelo banco a partir do contexto (ninguém digita).
 - Unicidades (número da conta, do pedido, usuário, forma de pagamento, categoria) valem **por empresa**.
 - Tempo real (Socket.IO), caches em memória e limites de tentativa **por empresa**.
-- A empresa da requisição vem do endereço (`<slug>.onefood…`); a sessão só vale na empresa em que foi criada. Instalação de empresa única aceita `DEFAULT_EMPRESA`.
+- A empresa da requisição vem do endereço (`<slug>.restaurantes.oneup…`); a sessão só vale na empresa em que foi criada. Instalação de empresa única aceita `DEFAULT_EMPRESA`.
 - A escolha da conexão por empresa fica num único lugar, para um dia uma empresa ter banco próprio sem reescrever nada.
 - Ferramenta de exportar e restaurar **uma** empresa, testada.
 
@@ -68,7 +68,7 @@ Ciclo: operar → medir → identificar problemas → encontrar dinheiro na mesa
 
 **Admin ONE UP na empresa:** duas etapas obrigatórias; **somente leitura** por padrão; para alterar algo, "modo suporte" com motivo e expiração de 60 min; tudo na auditoria imutável; o Dono vê a aba "Acessos de suporte ONE UP". Dados pessoais de clientes finais ficam mascarados para o admin, salvo interruptor "Permitir suporte" do Dono (30 min, 2 h, 24 h) ou contrato de recuperação ativo.
 
-## 4. PERSONALIZAÇÃO PELO DONO (princípio central do ONE Food)
+## 4. PERSONALIZAÇÃO PELO DONO (princípio central do ONE UP)
 
 > Tudo o que é **gosto ou jeito do negócio** o Dono decide em Configurações. Tudo o que **protege o dinheiro** é travado para todos, inclusive para a ONE UP.
 
@@ -93,7 +93,7 @@ Ciclo: operar → medir → identificar problemas → encontrar dinheiro na mesa
 
 4.5 **Travado para todos (é a garantia vendida: "nem nós alteramos o seu caixa"):** nada se apaga nem se edita (só estorno, cancelamento com motivo, juntar contas); fechamento às cegas; auditoria e registro de acessos de suporte; valores calculados no servidor; preço e custo congelados na venda; estoque nunca negativo no banco.
 
-## 5. FICHA DO ONE FOOD (regras de negócio já decididas)
+## 5. FICHA DO ONE UP (regras de negócio já decididas)
 
 5.1 **Herdado da R2 (não mexer):** cozinha só recebe o que é dela; "+1/repetir" manda só o item novo, com os anteriores como referência; cancelamento parcial com devolução opcional ao estoque; juntar contas e transferir pedido; situação de pagamento por pedido (mais antigo primeiro); proteção contra clique duplo; custo congelado na venda; reabertura só com itens novos; cardápio digital segue ABERTO/FECHADO e passa pela confirmação do caixa; tempo-meta é referência, tempo real só para o Admin.
 
@@ -147,7 +147,7 @@ Padrão de todo achado: frase simples, número, amostra, confiança (baixa/médi
 
 ## 9. MARCA, PRIVACIDADE E LGPD
 
-- Identidade ONE UP: azul `#003778`, amarelo `#FCB132`, branco. Interface simples, botões grandes, linguagem de dono de negócio pequeno. A empresa aparece com o próprio nome e logo; "ONE Food" aparece como assinatura do produto.
+- Identidade ONE UP: azul `#003778`, amarelo `#FCB132`, branco. Interface simples, botões grandes, linguagem de dono de negócio pequeno. A empresa aparece com o próprio nome e logo; "ONE UP" aparece como assinatura do produto.
 - Nenhum nome ou dado real de cliente em demonstração, print, site ou material de venda. Demo com empresa fictícia restaurada toda madrugada.
 - Aceite versionado dos termos; exportação dos dados da empresa; retenção definida (IP com prazo marcado para validação jurídica). Liste o que precisa de advogado; não assuma conformidade.
 
@@ -171,4 +171,4 @@ Padrão de todo achado: frase simples, número, amostra, confiança (baixa/médi
 | 6 | Migração do Happy Alpha: ensaio em cópia, conferência de totais, paralelo, virada com reserva de 7 dias | zero diferença |
 | 7 | Inteligência (seção 8), Raio-X e Recuperador | escassez + verificador |
 
-Comece pela próxima fase ainda não concluída (veja `docs/ONE-FOOD-PROGRESSO.md`). Antes de código novo numa fase, entregue o plano curto da fase; se eu já tiver dado o ok geral, siga.
+Comece pela próxima fase ainda não concluída (veja `docs/ONE-UP-PROGRESSO.md`). Antes de código novo numa fase, entregue o plano curto da fase; se eu já tiver dado o ok geral, siga.

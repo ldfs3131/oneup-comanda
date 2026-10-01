@@ -174,7 +174,7 @@ async function main() {
     const tb = await cfg(donoB);
     check('Beta não vê nome, cadeados nem valores da Alfa', tb.nome.valor !== 'Restaurante do Teste' && tb.rotulo_mesa.valor === 'Mesa' && !tb.desconto_max_caixa.trava);
     check('Beta não vê o histórico da Alfa', (await donoB.get('/api/configuracoes/historico')).data.every((h) => h.depois !== 'Quiosque'));
-    const app = new pg.Client({ connectionString: DB_URL, options: '-c role=onefood_app' });
+    const app = new pg.Client({ connectionString: DB_URL, options: '-c role=oneup_app' });
     await app.connect();
     await app.query("SELECT set_config('app.empresa_id', $1, false)", [String(empA)]);
     const tenta = async (q) => { try {

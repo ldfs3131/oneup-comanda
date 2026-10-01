@@ -11,7 +11,7 @@ export const empresas = pgTable('empresas', {
   id: serial('id').primaryKey(),
   slug: text('slug').notNull().unique(),
   nome: text('nome').notNull(),
-  produto: text('produto').notNull().default('food'),
+  produto: text('produto').notNull().default('restaurante'),
   status: text('status').notNull().default('ATIVA'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });

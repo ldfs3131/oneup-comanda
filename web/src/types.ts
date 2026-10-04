@@ -52,6 +52,10 @@ export type AccountDetail = {
 export type ReadyItem = {
   orderId: number; orderNumber: number; sequence: number; readyAt: string | null; problemNote: string | null; status: string;
   consumptionType: Consumption; accountId: number; accountNumber: number; customerName: string | null; note: string | null; tableLabel: string | null;
+  /** itens resumidos: "2× Jantinha, 1× Coca" */
+  itemsText?: string | null;
+  /** pedido de um dia anterior (problema antigo não entra na barra) */
+  anterior?: boolean;
 };
 export type AwaitingItem = {
   orderId: number; orderNumber: number; note: string | null; createdAt: string; accountId: number; accountNumber: number;
@@ -71,6 +75,8 @@ export type RegisterSummary = {
   movements: { type: string; amountCents: number; reason: string; createdAt: string; userName: string }[];
   suprimentosCents: number; sangriasCents: number; cashReceivedCents: number | null; expectedCashCents: number | null;
   countedCashCents?: number; differenceCents?: number;
+  /** fechamento com recontagem: a 1ª contagem do caixa (e a diferença dela, só para o Dono) */
+  primeiraContagemCents?: number | null; primeiraDiferencaCents?: number | null;
 };
 
 export type Settings = {

@@ -1,0 +1,127 @@
+/* ================= Caixa pronto para uma sexta cheia (3.3) =================
+   Só tokens de cor (tema claro e escuro). Toques de 44 px no mínimo. */
+
+/* ---------- Barra de prontos: no máximo 2 linhas; o resto vai para a gaveta ---------- */
+.alertbar.cx-alertbar { display: grid; gap: 8px; align-items: stretch; }
+/* (este arquivo entra antes de screens.css no pacote: seletores com uma classe a mais para valer) */
+.alert-card.cx-alert { flex-wrap: nowrap; align-items: stretch; flex-direction: column; gap: 8px; padding: 10px 12px; min-width: 0; }
+.alert-card.cx-alert > .grow { flex: 0 0 auto; min-width: 0; }
+.alert-card.cx-alert > .cx-alert-acoes { margin-top: auto; }
+.cx-alert .alert-title { font-size: 1.05rem; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-alert-itens { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.95rem; line-height: 1.3; }
+.cx-alert-acoes { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.cx-alert-acoes .btn { min-height: 44px; padding: 0 14px; }
+.cx-mesa-aberta .btn.primary, .cx-desfazer-item .btn.go { min-height: 44px; }
+.cx-alert-acoes .btn.go { min-width: 120px; }
+.cx-alert-mais {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 44px;
+  border-radius: 14px; border: 2px dashed var(--lime); background: color-mix(in srgb, var(--lime) 8%, var(--surface));
+  color: var(--text); font: inherit; cursor: pointer; padding: 10px 12px;
+}
+.cx-alert-mais b { font-size: 1.15rem; color: var(--lime); }
+.cx-alert-mais span { color: var(--muted); font-size: 0.9rem; }
+.cx-alert-mais:focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
+
+/* Na "Nova conta": uma linha só */
+.cx-alertbar-min { padding: 8px 16px 0; max-width: 1400px; margin: 0 auto; width: 100%; }
+.btn.cx-alertbar-min-btn { width: 100%; justify-content: flex-start; min-height: 44px; font-weight: 800; white-space: normal; text-align: left; }
+.cx-alertbar-min-btn .grow { flex: 1 1 auto; }
+.cx-ver { color: var(--muted); white-space: nowrap; }
+.btn.cx-alertbar-min-btn.ready { border: 2px solid var(--lime); background: color-mix(in srgb, var(--lime) 10%, var(--surface)); }
+.btn.cx-alertbar-min-btn.problem { border: 2px solid var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
+.btn.cx-alertbar-min-btn.qr { border: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+
+/* Gaveta com todos */
+.cx-gaveta { display: flex; flex-direction: column; gap: 8px; }
+.cx-gaveta .alert-card.cx-alert { flex-direction: row; flex-wrap: wrap; align-items: center; }
+.cx-gaveta .alert-card.cx-alert > .grow { flex: 1 1 260px; }
+.cx-gaveta .alert-card.cx-alert > .cx-alert-acoes { margin-top: 0; }
+
+@media (max-width: 699px) {
+  .cx-alert .alert-title { font-size: 1rem; }
+  .cx-alert-acoes .btn { flex: 1 1 auto; }
+}
+
+/* ---------- Itens da conta: "+1" e "✕" afastados, 44×44 ---------- */
+.cx-item-acoes { display: flex; align-items: center; gap: 16px; margin-left: 4px; flex-shrink: 0; }
+.btn.cx-mais1 { min-width: 52px; min-height: 44px; padding: 0 12px; font-weight: 800; }
+.btn.ghost.cx-cancelar-item { width: 44px; min-height: 44px; padding: 0; color: var(--muted); }
+.btn.ghost.cx-cancelar-item:hover { color: var(--danger); }
+
+/* ---------- "+1" com desfazer (5 s) ---------- */
+.cx-desfazer {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 150;
+  display: flex; flex-direction: column; gap: 8px; width: min(560px, calc(100vw - 32px));
+}
+.cx-desfazer-item {
+  position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px 14px; border-radius: 14px; background: var(--surface); color: var(--text);
+  border: 2px solid var(--brand-text); box-shadow: var(--shadow);
+}
+.cx-desfazer-item .btn { min-height: 44px; }
+.cx-desfazer-item .grow { flex: 1 1 220px; }
+.cx-desfazer-item .btn { flex: 0 0 auto; }
+.cx-desfazer-barra {
+  position: absolute; left: 0; bottom: 0; height: 4px; width: 100%; background: var(--brand-text);
+  transform-origin: left; animation-name: cx-encolhe; animation-timing-function: linear; animation-fill-mode: forwards;
+}
+@keyframes cx-encolhe { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .cx-desfazer-barra { animation: none; } }
+
+/* ---------- Mesa já aberta (Nova conta) ---------- */
+.cx-mesa-aberta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px;
+  border: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--surface)); color: var(--text);
+}
+.cx-mesa-aberta .grow { flex: 1 1 240px; }
+.cx-mesa-aberta .btn { min-height: 44px; }
+
+/* ---------- Divisão por pessoas ---------- */
+.split-row .stepper button { width: 44px; height: 44px; }
+.cx-divisao {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; margin: -4px 0 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--info) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--info) 40%, transparent);
+}
+.cx-divisao-principal { font-size: 1.05rem; }
+.cx-divisao .btn.sm { align-self: flex-start; min-height: 44px; }
+
+/* ---------- Encerrar o dia: pendências antes da contagem ---------- */
+.cx-pend { display: flex; flex-direction: column; gap: 6px; }
+.cx-pend h3 { font-size: 1rem; }
+.cx-pend .btn { min-height: 44px; }
+.cx-pend-linha {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text); text-decoration: none;
+}
+.cx-pend-linha:hover { border-color: var(--brand-text); }
+.cx-pend-linha:focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
+.cx-pend-linha .grow { display: flex; flex-direction: column; min-width: 0; }
+.cx-pend-txt { display: block; }
+.cx-pend.problema h3 { color: var(--danger); }
+.cx-pend-resumo { display: flex; flex-wrap: wrap; gap: 6px; }
+.cx-pend-resumo .badge { font-size: 0.85rem; padding: 4px 10px; }
+
+/* ---------- Pré-conta (cupom) ---------- */
+.cx-cupom-tela { display: flex; justify-content: center; }
+.cx-cupom {
+  width: 100%; max-width: 340px; padding: 16px 14px; background: #fffdf7; color: #111; border-radius: 6px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.35; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.cx-cupom-centro { text-align: center; }
+.cx-cupom-nome { font-size: 15px; text-transform: uppercase; }
+.cx-cupom-sep { border-top: 1px dashed #777; margin: 8px 0; }
+.cx-cupom-linha { display: flex; justify-content: space-between; gap: 8px; }
+.cx-cupom-linha span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.cx-cupom-linha .num { white-space: nowrap; }
+.cx-cupom-det { font-size: 11px; color: #444; padding-left: 14px; }
+.cx-cupom-forte { font-weight: 800; font-size: 14px; }
+.cx-cupom-item + .cx-cupom-item { margin-top: 3px; }
+.cx-cupom-impressao { display: none; }
+
+@media print {
+  @page { size: 80mm auto; margin: 0; }
+  body.cx-tem-cupom > *:not(.cx-cupom-impressao) { display: none !important; }
+  body.cx-tem-cupom { background: #fff !important; }
+  body.cx-tem-cupom .cx-cupom-impressao { display: block !important; width: 80mm; }
+  body.cx-tem-cupom .cx-cupom { max-width: none; width: 80mm; box-shadow: none; border-radius: 0; padding: 4mm 3mm; background: #fff; }
+}

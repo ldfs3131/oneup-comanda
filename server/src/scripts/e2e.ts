@@ -196,12 +196,18 @@ async function main() {
   check('Resumo (admin) mostra pendência criada no caixa', regAdmin.summary.pendingCreated.length === 1 && regAdmin.summary.pendingCreatedCents === 4800);
   check('Resumo (admin) mostra desconto por operador', regAdmin.summary.discountsByUser[0]?.name === 'Caixa' && regAdmin.summary.discountsCents === 1000);
   check('Sangria registrada', (await caixa.post('/api/register/movements', { type: 'SANGRIA', amountCents: 5000, reason: 'Troco para o banco' })).status === 200);
+  // 1ª contagem fora da tolerância: "conte de novo", sem fechar e sem valores
+  const conta1 = await caixa.post('/api/register/close', { countedCashCents: 16500 });
+  const vazou1 = ['expectedCashCents', 'differenceCents', 'receivedCents', 'summary', 'countedCashCents'].filter((k) => k in (conta1.data ?? {}));
+  check('Fechamento: 1ª contagem acima da tolerância → "conte de novo", sem valores', conta1.status === 200 && conta1.data.recontar === true && conta1.data.cego === true && vazou1.length === 0, conta1.data);
+  check('…e o dia continua aberto', (await caixa.get('/api/register/current')).data.register?.status === 'OPEN');
   const close = await caixa.post('/api/register/close', { countedCashCents: 17000 });
   const vazou = ['expectedCashCents', 'differenceCents', 'receivedCents', 'summary'].filter((k) => k in (close.data ?? {}));
   check('Fechamento do caixa: só "contagem registrada", sem esperado nem diferença', close.status === 200 && close.data.cego === true && vazou.length === 0, close.data);
-  check('Diferença de R$ 10 acima da tolerância (R$ 5): "confira com o responsável"', close.data.conferir === true);
+  check('Diferença de R$ 10 acima da tolerância (R$ 5) na recontagem: fecha e "confira com o responsável"', close.data.conferir === true && close.data.recontado === true);
   const fechado = (await admin.get(`/api/registers/${close.data.id}`)).data;
   check('Admin vê: esperado 180, contado 170, diferença -10', fechado.register.expectedCashCents === 18000 && fechado.register.differenceCents === -1000, fechado.register);
+  check('Admin vê as duas contagens (1ª R$ 165, 2ª R$ 170)', fechado.register.primeiraContagemCents === 16500 && fechado.summary.primeiraContagemCents === 16500 && fechado.summary.countedCashCents === 17000, fechado.summary);
 
   // Pendência paga no dia seguinte entra no novo caixa
   await caixa.post('/api/register/open', { openingCashCents: 10000 });
@@ -215,6 +221,7 @@ async function main() {
   const msgs = log.map((l) => l.message).join('\n');
   check('26/30. Histórico registra abertura, pedido, pronto, desconto, pagamento, encerramento',
     /abriu a conta/.test(msgs) && /marcou como PRONTO/.test(msgs) && /ajuste de R\$ 10,00/.test(msgs) && /recebeu/.test(msgs) && /encerrou a conta/.test(msgs) && /reabriu/.test(msgs));
+  check('Histórico registra as duas contagens do fechamento (1ª e 2ª)', /1ª contagem da gaveta: R\$ 165,00/.test(msgs) && /1ª contagem R\$ 165,00.*2ª contagem R\$ 170,00/.test(msgs));
   check('Histórico registra alteração de preço', /preço R\$ 25,00 → R\$ 29,00/.test(msgs));
   const dash = (await admin.get('/api/dashboard')).data;
   check('27. Venda aparece no dashboard', dash.revenueCents > 0 && dash.ordersCount >= 4, dash);

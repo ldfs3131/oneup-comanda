@@ -1,18 +1,25 @@
 import { useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { brl, dateTime, signed } from '../../format';
 import type { RegisterSummary } from '../../types';
-import { Modal, MoneyInput, Spinner, useAction } from '../../components/ui';
+import { Modal, MoneyInput, Spinner, useAction, useToast } from '../../components/ui';
+import { useMesaLabel } from '../../components/brand';
 import { OpenDay } from './Board';
 
 type Current = { register: null; isOpen: boolean } | {
   register: { id: number; openedAt: string; openedByName: string; openingCashCents: number }; isOpen: boolean; blind: boolean; summary: RegisterSummary;
+  /** o caixa já fez a 1ª contagem (passou da tolerância): falta a recontagem */
+  recontagem?: boolean;
 };
 type CloseResult =
-  | { cego?: false; expectedCashCents: number; countedCashCents: number; differenceCents: number; receivedCents: number; openAccounts: number }
+  | { cego?: false; recontar?: undefined; expectedCashCents: number; countedCashCents: number; differenceCents: number; receivedCents: number; openAccounts: number; primeiraContagemCents?: number | null; primeiraDiferencaCents?: number | null }
   // Caixa (fechamento às cegas): nunca recebe esperado, diferença nem totais — só se precisa conferir
-  | { cego: true; countedCashCents: number; openAccounts: number; conferir: boolean };
+  | { cego: true; recontar?: undefined; countedCashCents: number; openAccounts: number; conferir: boolean; recontado?: boolean }
+  // 1ª contagem do caixa passou da tolerância: o dia NÃO fechou, "conte de novo" (sem valores)
+  | { cego: true; recontar: true };
+type Fechado = Exclude<CloseResult, { recontar: true }>;
 
 export function useRegister() {
   return useQuery({ queryKey: ['register'], queryFn: () => api.get<Current>('/api/register/current'), refetchInterval: 30_000 });
@@ -23,7 +30,7 @@ export default function RegisterPage() {
   const [move, setMove] = useState<null | 'SANGRIA' | 'SUPRIMENTO'>(null);
   const [expense, setExpense] = useState(false);
   const [closing, setClosing] = useState(false);
-  const [closed, setClosed] = useState<CloseResult | null>(null);
+  const [closed, setClosed] = useState<Fechado | null>(null);
 
   if (closed) return (
     <div className="page narrow" style={{ maxWidth: 520 }}>
@@ -31,17 +38,18 @@ export default function RegisterPage() {
         <h1>{closed.cego ? 'Contagem registrada ✔' : 'Dia encerrado ✔'}</h1>
         <div className="muted small">O dia foi encerrado, o estabelecimento ficou <b>FECHADO</b>. Tudo fica salvo no servidor e entra na cópia de segurança diária.</div>
         {closed.cego ? <>
-          <div className="kv"><span>Dinheiro que você contou</span><span className="v">{brl(closed.countedCashCents)}</span></div>
+          <div className="kv"><span>{closed.recontado ? 'Dinheiro que você contou (2ª contagem)' : 'Dinheiro que você contou'}</span><span className="v">{brl(closed.countedCashCents)}</span></div>
           {closed.conferir
             ? <div className="problem-box">⚠ Confira com o responsável antes de ir embora.</div>
             : <div className="info-box small">Tudo certo. O responsável confere os números do dia.</div>}
         </> : <div>
           <div className="kv"><span>Total recebido no dia</span><span className="v">{brl(closed.receivedCents)}</span></div>
           <div className="kv"><span>Dinheiro esperado na gaveta</span><span className="v">{brl(closed.expectedCashCents)}</span></div>
+          {closed.primeiraContagemCents != null && <div className="kv"><span>1ª contagem do caixa</span><span className="v">{brl(closed.primeiraContagemCents)}</span></div>}
           <div className="kv"><span>Dinheiro contado</span><span className="v">{brl(closed.countedCashCents)}</span></div>
           <div className="kv total"><span>Diferença</span><span className="v" style={{ color: closed.differenceCents === 0 ? 'var(--ok)' : 'var(--danger)' }}>{closed.differenceCents === 0 ? 'Sem diferença' : signed(closed.differenceCents)}</span></div>
         </div>}
-        {closed.openAccounts > 0 && <div className="info-box small">{closed.openAccounts} conta(s) continuam abertas e aparecem no próximo dia.</div>}
+        {closed.openAccounts > 0 && <div className="info-box small">{closed.openAccounts} conta(s) com saldo continuam abertas e aparecem no próximo dia.</div>}
         <button className="btn primary block" onClick={() => setClosed(null)}>OK</button>
       </div>
     </div>
@@ -61,13 +69,14 @@ export default function RegisterPage() {
           <button className="btn" onClick={() => setExpense(true)}>🧾 Despesa paga com a gaveta</button>
           <button className="btn" onClick={() => setMove('SANGRIA')}>− Sangria</button>
           <button className="btn" onClick={() => setMove('SUPRIMENTO')}>＋ Suprimento</button>
-          <button className="btn primary lg" onClick={() => setClosing(true)}>🌙 Encerrar o dia</button>
+          <button className="btn primary lg" onClick={() => setClosing(true)}>{data.recontagem ? '🌙 Encerrar o dia · conte de novo' : '🌙 Encerrar o dia'}</button>
         </div>
       </div>
       <RegisterSummaryView s={s} blind={blind} />
       {move && <MovementModal type={move} onClose={() => setMove(null)} />}
       {expense && <DrawerExpenseModal onClose={() => setExpense(false)} />}
-      {closing && <CloseModal s={s} blind={blind} onClose={() => setClosing(false)} onClosed={(r) => { setClosing(false); setClosed(r); }} />}
+      {data.recontagem && !closing && <div className="problem-box">⚠ Falta a <b>recontagem</b> da gaveta: toque em “Encerrar o dia” e conte o dinheiro de novo.</div>}
+      {closing && <CloseModal s={s} blind={blind} recontagem={!!data.recontagem} onClose={() => setClosing(false)} onClosed={(r) => { setClosing(false); setClosed(r as Fechado); }} />}
     </div>
   );
 }
@@ -106,7 +115,11 @@ export function RegisterSummaryView({ s, blind }: { s: RegisterSummary; blind?: 
           <div className="kv total"><span>Esperado</span><span className="v">{brl(s.expectedCashCents)}</span></div>
         </>}
         {s.countedCashCents != null && <>
-          <div className="kv"><span>Contado</span><span className="v">{brl(s.countedCashCents)}</span></div>
+          {s.primeiraContagemCents != null && <>
+            <div className="kv"><span>1ª contagem</span><span className="v">{brl(s.primeiraContagemCents)}</span></div>
+            {s.primeiraDiferencaCents != null && <div className="kv small"><span className="muted">· diferença na 1ª contagem</span><span className="v">{signed(s.primeiraDiferencaCents)}</span></div>}
+          </>}
+          <div className="kv"><span>{s.primeiraContagemCents != null ? 'Contado (2ª contagem)' : 'Contado'}</span><span className="v">{brl(s.countedCashCents)}</span></div>
           <div className="kv"><span>Diferença</span><span className="v" style={{ color: s.differenceCents === 0 ? 'var(--ok)' : 'var(--danger)' }}>{signed(s.differenceCents ?? 0)}</span></div>
         </>}
       </div>
@@ -134,7 +147,7 @@ function ResumoCego({ s }: { s: RegisterSummary }) {
         <div className="kv"><span>Contas</span><span className="v">{s.accountsCount}</span></div>
         <div className="kv"><span>Descontos/ajustes</span><span className="v">{s.discountsCount}</span></div>
         <div className="kv"><span>Cancelamentos</span><span className="v">{s.cancellationsCount}</span></div>
-        <div className="kv"><span>Contas abertas agora</span><span className="v">{s.openAccountsNow}</span></div>
+        <div className="kv"><span>Contas com saldo agora</span><span className="v">{s.openAccountsNow}</span></div>
       </div>
       <div className="card">
         <div className="panel-title">Dinheiro na gaveta</div>
@@ -220,34 +233,158 @@ function DrawerExpenseModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function CloseModal({ s, blind, onClose, onClosed }: { s: RegisterSummary; blind: boolean; onClose: () => void; onClosed: (r: CloseResult) => void }) {
+type ContaPend = { id: number; number: number; customerName: string | null; tableLabel: string | null; note: string | null; balance: number };
+type PedidoPend = {
+  id: number; number: number; status: string; problemNote: string | null; createdAt: string; accountId: number; accountNumber: number;
+  customerName: string | null; tableLabel: string | null; itemsText: string | null;
+};
+type Pendencias = { comSaldo: ContaPend[]; pagas: ContaPend[]; vazias: ContaPend[]; naCozinha: PedidoPend[]; aguardando: PedidoPend[]; problemas: PedidoPend[] };
+
+const STATUS_COZINHA: Record<string, string> = { CONFIRMED: 'na fila', IN_PREPARATION: 'preparando', READY: 'pronto, falta entregar', AWAITING_CONFIRMATION: 'QR esperando confirmar' };
+
+/** Encerrar o dia: 1) o que ainda está pendurado; 2) contagem às cegas da gaveta (com UMA recontagem para o caixa). */
+function CloseModal({ s, blind, recontagem, onClose, onClosed }: {
+  s: RegisterSummary; blind: boolean; recontagem: boolean; onClose: () => void; onClosed: (r: CloseResult) => void;
+}) {
+  const mesa = useMesaLabel();
+  const [etapa, setEtapa] = useState<'pendencias' | 'contagem'>(recontagem ? 'contagem' : 'pendencias');
+  const [recontar, setRecontar] = useState(recontagem);
   const [counted, setCounted] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [confirm, setConfirm] = useState(false);
   const { busy, run } = useAction();
   const qc = useQueryClient();
+  const envioFech: ChaveEnvio = useRef(null);
+  const { data: pend, refetch } = useQuery({ queryKey: ['day-pendencias'], queryFn: () => api.get<Pendencias>('/api/day/pendencias'), enabled: etapa === 'pendencias' });
   const diff = !blind && counted != null && s.expectedCashCents != null ? counted - s.expectedCashCents : null;
+  const comSaldo = pend?.comSaldo.length ?? s.openAccountsNow;
+
+  const toast = useToast();
+  const emLote = async (rota: string, msg: (r: any) => string) => {
+    let r: any;
+    if (await run(async () => { r = await api.post<any>(rota, {}, true); })) {
+      toast(msg(r), 'ok');
+      await refetch(); qc.invalidateQueries({ queryKey: ['board'] }); qc.invalidateQueries({ queryKey: ['register'] });
+    }
+  };
+
+  const fechar = async () => {
+    let r: CloseResult | undefined;
+    const corpo = { countedCashCents: counted, note: note.trim() || null };
+    const ok = await run(async () => { r = await api.post<CloseResult>('/api/day/close', corpo, chaveDoEnvio(envioFech, { ...corpo, recontar })); });
+    if (!ok || !r) return;
+    envioFech.current = null;
+    if ('recontar' in r && r.recontar) {
+      // 1ª contagem passou da tolerância: o dia NÃO fechou; conta de novo (sem mostrar valores)
+      setRecontar(true); setCounted(null); setConfirm(false);
+      qc.invalidateQueries({ queryKey: ['register'] });
+      return;
+    }
+    qc.invalidateQueries(); onClosed(r);
+  };
+
+  const linhaConta = (a: ContaPend, extra?: string) => (
+    <Link key={a.id} className="cx-pend-linha" to={`/caixa/conta/${a.id}`} onClick={onClose}>
+      <b className="num">#{a.number}</b>
+      <span className="grow ellipsis">{[a.tableLabel ? `${mesa} ${a.tableLabel}` : null, a.customerName, a.note].filter(Boolean).join(' · ') || 'Sem identificação'}</span>
+      <span className="num">{extra ?? brl(a.balance)}</span>
+      <span aria-hidden="true">›</span>
+    </Link>
+  );
+  const linhaPedido = (o: PedidoPend, txt: string) => (
+    <Link key={`${o.id}-${txt}`} className="cx-pend-linha" to={`/caixa/conta/${o.accountId}`} onClick={onClose}>
+      <b className="num">#{o.number}</b>
+      <span className="grow">
+        <span className="ellipsis cx-pend-txt">{o.tableLabel ? `${mesa} ${o.tableLabel}` : o.customerName ?? `Conta #${o.accountNumber}`}{o.itemsText ? ` — ${o.itemsText}` : ''}</span>
+        <span className="small muted">{txt}</span>
+      </span>
+      <span aria-hidden="true">›</span>
+    </Link>
+  );
+
+  if (etapa === 'pendencias') {
+    const p = pend;
+    const nada = p && !p.comSaldo.length && !p.pagas.length && !p.vazias.length && !p.naCozinha.length && !p.aguardando.length && !p.problemas.length;
+    return (
+      <Modal wide title="Encerrar o dia · antes de contar" onClose={onClose} footer={<>
+        <button className="btn" onClick={onClose}>Voltar</button>
+        <button className="btn primary lg" onClick={() => setEtapa('contagem')}>Continuar para a contagem</button>
+      </>}>
+        {!p ? <Spinner /> : nada ? (
+          <div className="info-box">✔ Tudo certo: nenhuma conta aberta, nada na cozinha e nenhum problema. Pode contar a gaveta.</div>
+        ) : (
+          <div className="col gap-lg">
+            <div className="cx-pend-resumo" aria-label="Resumo do que está aberto">
+              {p.comSaldo.length > 0 && <span className="badge warn">{p.comSaldo.length} com saldo</span>}
+              {p.pagas.length > 0 && <span className="badge ok">{p.pagas.length} paga(s) sem encerrar</span>}
+              {p.vazias.length > 0 && <span className="badge">{p.vazias.length} vazia(s)</span>}
+              {p.naCozinha.length + p.aguardando.length > 0 && <span className="badge info">{p.naCozinha.length + p.aguardando.length} sem entrega</span>}
+              {p.problemas.length > 0 && <span className="badge danger">{p.problemas.length} problema(s)</span>}
+            </div>
+            <div className="small muted">Confira o que ainda está aberto. Toque numa linha para abrir a conta. O que ficar aberto continua no próximo dia.</div>
+            {p.comSaldo.length > 0 && (
+              <section className="cx-pend">
+                <h3>Contas com saldo ({p.comSaldo.length})</h3>
+                <div className="small muted">Ainda devem. Receba, ou marque como pendente (cliente saiu sem pagar).</div>
+                {p.comSaldo.map((a) => linhaConta(a))}
+              </section>
+            )}
+            {p.pagas.length > 0 && (
+              <section className="cx-pend">
+                <div className="row between wrap"><h3>Pagas, ainda não encerradas ({p.pagas.length})</h3>
+                  <button className="btn go" disabled={busy} onClick={() => emLote('/api/day/encerrar-pagas', (r) => `${r.encerradas} conta(s) paga(s) encerrada(s).`)}>Encerrar todas as pagas</button></div>
+                {p.pagas.map((a) => linhaConta(a, 'paga'))}
+              </section>
+            )}
+            {p.vazias.length > 0 && (
+              <section className="cx-pend">
+                <div className="row between wrap"><h3>Contas vazias ({p.vazias.length})</h3>
+                  <button className="btn danger" disabled={busy} onClick={() => emLote('/api/day/cancelar-vazias', (r) => `${r.canceladas} conta(s) vazia(s) cancelada(s).`)}>Cancelar vazias</button></div>
+                <div className="small muted">Sem nenhum item e sem pagamento. Motivo registrado: “Conta vazia no fechamento”.</div>
+                {p.vazias.map((a) => linhaConta(a, 'vazia'))}
+              </section>
+            )}
+            {(p.naCozinha.length > 0 || p.aguardando.length > 0) && (
+              <section className="cx-pend">
+                <h3>Pedidos sem entrega ({p.naCozinha.length + p.aguardando.length})</h3>
+                {p.aguardando.map((o) => linhaPedido(o, STATUS_COZINHA[o.status] ?? o.status))}
+                {p.naCozinha.map((o) => linhaPedido(o, STATUS_COZINHA[o.status] ?? o.status))}
+              </section>
+            )}
+            {p.problemas.length > 0 && (
+              <section className="cx-pend problema">
+                <h3>⚠ Problemas da cozinha em aberto ({p.problemas.length})</h3>
+                {p.problemas.map((o) => linhaPedido(o, `“${o.problemNote}”`))}
+              </section>
+            )}
+          </div>
+        )}
+      </Modal>
+    );
+  }
+
   return (
-    <Modal title="Encerrar o dia" onClose={onClose} footer={<>
-      <button className="btn" onClick={onClose}>Voltar</button>
+    <Modal title={recontar ? 'Encerrar o dia · conte de novo' : 'Encerrar o dia · contagem'} onClose={onClose} footer={<>
+      <button className="btn" onClick={() => (recontar ? onClose() : setEtapa('pendencias'))}>Voltar</button>
       {!confirm
         ? <button className="btn primary lg" disabled={counted == null} onClick={() => setConfirm(true)}>Continuar</button>
-        : <button className="btn primary lg" disabled={busy || counted == null} onClick={async () => {
-          let r: CloseResult | undefined;
-          if (await run(async () => { r = await api.post<CloseResult>('/api/day/close', { countedCashCents: counted, note: note.trim() || null }, true); })) {
-            qc.invalidateQueries(); onClosed(r!);
-          }
-        }}>Confirmar e encerrar o dia</button>}
+        : <button className="btn primary lg" disabled={busy || counted == null} onClick={fechar}>{recontar ? 'Confirmar a recontagem e encerrar' : 'Confirmar e encerrar o dia'}</button>}
     </>}>
       <div className="col gap-lg">
-        {s.openAccountsNow > 0 && (
-          <div className="problem-box">Ainda há {s.openAccountsNow} conta(s) aberta(s). Elas continuam abertas e os pagamentos futuros entram no próximo dia.</div>
+        {recontar && (
+          <div className="problem-box" role="alert">
+            <b>Conte de novo.</b> Conte o dinheiro da gaveta mais uma vez, com calma (notas e moedas), e digite o valor. Esta segunda contagem encerra o dia.
+          </div>
+        )}
+        {!recontar && comSaldo > 0 && (
+          <div className="info-box small">{comSaldo} conta(s) com saldo continuam abertas e os pagamentos futuros entram no próximo dia.</div>
         )}
         <div className="small muted">Conte o dinheiro da gaveta e digite o valor. {blind ? 'Fechamento às cegas: o sistema guarda a sua contagem e o responsável confere.' : ''}</div>
-        <label className="field"><span>Dinheiro contado na gaveta</span><MoneyInput value={counted} onChange={(v) => { setCounted(v); setConfirm(false); }} autoFocus /></label>
+        <label className="field"><span>{recontar ? 'Dinheiro contado na gaveta (2ª contagem)' : 'Dinheiro contado na gaveta'}</span><MoneyInput key={recontar ? 'c2' : 'c1'} value={counted} onChange={(v) => { setCounted(v); setConfirm(false); }} autoFocus /></label>
         {diff != null && (
           <div className="kv total"><span>Diferença</span><span className="v" style={{ color: diff === 0 ? 'var(--ok)' : 'var(--danger)' }}>{signed(diff)}</span></div>
         )}
+        {!blind && s.primeiraContagemCents != null && <div className="small muted">1ª contagem do caixa: {brl(s.primeiraContagemCents)}</div>}
         <label className="field"><span>Observação (opcional)</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: faltou troco de R$ 10" /></label>
         {confirm && <div className="info-box small">Ao encerrar: o caixa fecha, o estabelecimento fica <b>FECHADO</b> (sem novos pedidos). Tudo fica salvo e entra na cópia de segurança diária.</div>}
       </div>

@@ -78,12 +78,18 @@ export async function accountRoutes(app: FastifyInstance) {
     const live = await listAccountsWithTotals(db, sql`a.status IN ('OPEN','PARTIALLY_PAID','PAID')
       AND (a.origin = 'CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id = a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`, 2000);
     // (antes: só as 200 mais recentes — numa casa cheia, a conta esquecida mais antiga sumia do painel)
+    // prontos com os itens resumidos ("2× Jantinha, 1× Coca"); problema de dia anterior não volta para a barra
+    // (aparece no "Encerrar o dia")
+    const reg0 = await currentRegister(db);
+    const desde = reg0 ? sql`${reg0.openedAt}::timestamptz` : sql`date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`;
     const ready = await db.execute(sql`
       SELECT o.id AS "orderId", o.number AS "orderNumber", o.sequence, o.ready_at AS "readyAt", o.problem_note AS "problemNote",
              o.status, o.consumption_type AS "consumptionType", a.id AS "accountId", a.number AS "accountNumber",
-             a.customer_name AS "customerName", a.note, a.table_label AS "tableLabel"
+             a.customer_name AS "customerName", a.note, a.table_label AS "tableLabel",
+             (SELECT string_agg(quantity || '× ' || product_name, ', ' ORDER BY id) FROM order_items WHERE order_id = o.id AND status = 'ACTIVE') AS "itemsText",
+             (o.created_at < ${desde}) AS "anterior"
       FROM orders o JOIN accounts a ON a.id = o.account_id
-      WHERE o.status = 'READY' OR (o.problem_note IS NOT NULL AND o.status IN ('CONFIRMED','IN_PREPARATION','READY'))
+      WHERE o.status = 'READY' OR (o.problem_note IS NOT NULL AND o.status IN ('CONFIRMED','IN_PREPARATION','READY') AND o.created_at >= ${desde})
       ORDER BY o.ready_at NULLS LAST, o.id`);
     const awaiting = await db.execute(sql`
       SELECT o.id AS "orderId", o.number AS "orderNumber", o.note, o.created_at AS "createdAt",
@@ -91,8 +97,7 @@ export async function accountRoutes(app: FastifyInstance) {
              COALESCE((SELECT SUM(unit_price_cents*quantity) FROM order_items WHERE order_id = o.id AND status='ACTIVE'),0) AS "totalCents"
       FROM orders o JOIN accounts a ON a.id = o.account_id
       WHERE o.status = 'AWAITING_CONFIRMATION' ORDER BY o.id`);
-    const reg = await currentRegister(db);
-    return { accounts: live, ready: ready.rows, awaiting: awaiting.rows, register: reg ? { id: reg.id, openedAt: reg.openedAt } : null };
+    return { accounts: live, ready: ready.rows, awaiting: awaiting.rows, register: reg0 ? { id: reg0.id, openedAt: reg0.openedAt } : null };
   });
 
   // Pedidos do dia (desde a abertura do caixa atual; sem caixa aberto: desde a meia-noite)

@@ -17,6 +17,14 @@ export function useMenu() {
 
 let keySeq = 1;
 const TOP = -1;
+/** "Mais vendidos" só aparece (e só é a aba padrão) com 8 ou mais produtos vendidos nos últimos 30 dias. */
+const MIN_MAIS_VENDIDOS = 8;
+const CHAVE_ABA = 'cx-aba-cardapio';
+type Aba = number | 'all';
+function lerAba(): Aba | null {
+  try { const v = localStorage.getItem(CHAVE_ABA); if (!v) return null; return v === 'all' ? 'all' : Number.isFinite(Number(v)) ? Number(v) : null; } catch { return null; }
+}
+function gravarAba(a: Aba) { try { localStorage.setItem(CHAVE_ABA, String(a)); } catch { /* sem memória do aparelho: tudo bem */ } }
 
 function stockInfo(p: Product) {
   if (!p.trackStock) return null;
@@ -26,17 +34,25 @@ function stockInfo(p: Product) {
   return null;
 }
 
-export default function OrderComposer({ header, submitLabel, busy, onSubmit, defaultConsumption = 'LOCAL' }: {
+export default function OrderComposer({ header, submitLabel, busy, onSubmit, defaultConsumption = 'LOCAL', initialLines, onLinesChange }: {
   header?: ReactNode; submitLabel: string; busy: boolean; defaultConsumption?: Consumption;
   onSubmit: (lines: CartLine[], note: string, consumption: Consumption) => Promise<boolean>;
+  /** itens já escolhidos (ex.: "Adicionar nela" vindo da Nova conta) */
+  initialLines?: CartLine[];
+  /** avisa quem usa o compositor quando o carrinho muda */
+  onLinesChange?: (lines: CartLine[]) => void;
 }) {
   const { data: menu, isLoading } = useMenu();
   const cats = useMemo(() => (menu ?? []).filter((c) => c.products.length), [menu]);
   const allProducts = useMemo(() => cats.flatMap((c) => c.products), [cats]);
-  const top = useMemo(() => [...allProducts].filter((p) => (p.sold30 ?? 0) > 0).sort((a, b) => (b.sold30 ?? 0) - (a.sold30 ?? 0)).slice(0, 12), [allProducts]);
-  const [catId, setCatId] = useState<number | 'all' | null>(null);
+  const vendidos = useMemo(() => [...allProducts].filter((p) => (p.sold30 ?? 0) > 0).sort((a, b) => (b.sold30 ?? 0) - (a.sold30 ?? 0)), [allProducts]);
+  const top = useMemo(() => (vendidos.length >= MIN_MAIS_VENDIDOS ? vendidos.slice(0, 12) : []), [vendidos]);
+  const [catId, setCatIdRaw] = useState<Aba | null>(lerAba);
+  const setCatId = (a: Aba) => { setCatIdRaw(a); gravarAba(a); };
   const [search, setSearch] = useState('');
-  const [lines, setLines] = useState<CartLine[]>([]);
+  const [lines, setLines] = useState<CartLine[]>(() => (initialLines ?? []).map((l) => ({ ...l, key: keySeq++ })));
+  const avisa = useRef(onLinesChange); avisa.current = onLinesChange;
+  useEffect(() => { avisa.current?.(lines); }, [lines]);
   const [picking, setPicking] = useState<Product | null>(null);
   const [editNote, setEditNote] = useState<CartLine | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
@@ -44,7 +60,9 @@ export default function OrderComposer({ header, submitLabel, busy, onSubmit, def
   const [consumption, setConsumption] = useState<Consumption>(defaultConsumption);
   const [showCart, setShowCart] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-  const activeCat = catId ?? (top.length ? TOP : 'all');
+  // aba lembrada no aparelho; se não existir mais (categoria apagada, mais vendidos sumiu), volta ao padrão
+  const lembradaOk = catId != null && (catId === 'all' || (catId === TOP ? top.length > 0 : cats.some((c) => c.id === catId)));
+  const activeCat = lembradaOk ? catId! : (top.length ? TOP : 'all');
 
   const products = useMemo(() => {
     const s = norm(search);

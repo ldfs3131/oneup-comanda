@@ -3,24 +3,58 @@ import { useQuery } from '@tanstack/react-query';
 import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { addDaysISO, brl, todayISO } from '../../format';
 import type { AccountDetail, Board, OrderItem, PaymentMethod } from '../../types';
-import { Modal, MoneyInput, useAction } from '../../components/ui';
+import { ConfirmModal, Modal, MoneyInput, useAction } from '../../components/ui';
 import { useMesaLabel } from '../../components/brand';
 
 const chavesPagamento = new Map<number, ChaveEnvio>();
 
 type Part = { methodId: number; amountCents: number; tenderedCents: number | null };
 
+/**
+ * Divisão por pessoas lembrada por conta (memória do aparelho) enquanto a conta estiver aberta:
+ * em quantas pessoas a conta foi dividida e quantas já pagaram a sua parte.
+ */
+type Divisao = { n: number; pagas: number; em: number };
+const chaveDivisao = (id: number) => `cx-divisao-${id}`;
+function lerDivisao(id: number): Divisao | null {
+  try {
+    const d = JSON.parse(localStorage.getItem(chaveDivisao(id)) ?? 'null') as Divisao | null;
+    if (!d || !(d.n >= 2) || Date.now() - d.em > 24 * 3600_000) return null;
+    const n = Math.min(20, Math.floor(d.n));
+    return { n, pagas: Math.max(0, Math.min(n - 1, Math.floor(d.pagas))), em: d.em };
+  } catch { return null; }
+}
+function gravarDivisao(id: number, d: Divisao | null) {
+  try { if (d && d.n >= 2) localStorage.setItem(chaveDivisao(id), JSON.stringify(d)); else localStorage.removeItem(chaveDivisao(id)); } catch { /* sem memória do aparelho */ }
+}
+/** Conta encerrada/cancelada: esquece a divisão. */
+export function esquecerDivisao(id: number) { gravarDivisao(id, null); }
+
 export function PaymentModal({ account, onClose, onDone }: { account: AccountDetail; onClose: () => void; onDone: () => void }) {
   const { data: methods = [] } = useQuery({ queryKey: ['methods'], queryFn: () => api.get<PaymentMethod[]>('/api/payment-methods'), staleTime: 300_000 });
   const balance = account.totals.balance;
+  const [lembrada] = useState(() => lerDivisao(account.id));
+  const [split, setSplitRaw] = useState(lembrada?.n ?? 1);
+  const [pagas, setPagas] = useState(lembrada?.pagas ?? 0);
+  // faltam X de N pessoas; a parte de cada uma = saldo ÷ pessoas que faltam (arredondada para cima)
+  const faltam = Math.max(1, split - pagas);
+  const parte = split > 1 ? Math.ceil(balance / faltam) : balance;
   const [parts, setParts] = useState<Part[]>([]);
   const used = parts.reduce((s, p) => s + p.amountCents, 0);
   const remaining = balance - used;
   const [methodId, setMethodId] = useState<number | null>(null);
-  const [amount, setAmount] = useState<number | null>(balance);
+  const [amount, setAmount] = useState<number | null>(split > 1 ? parte : balance);
   const [tendered, setTendered] = useState<number | null>(null);
-  const [split, setSplit] = useState(1);
+  const [confirmar, setConfirmar] = useState<null | boolean>(null);
   const { busy, run } = useAction();
+
+  const setSplit = (n: number) => {
+    const nn = Math.max(1, Math.min(20, n));
+    const np = Math.min(pagas, Math.max(0, nn - 1));
+    setSplitRaw(nn); setPagas(np);
+    gravarDivisao(account.id, nn > 1 ? { n: nn, pagas: np, em: Date.now() } : null);
+    setAmount(Math.min(remaining, nn > 1 ? Math.ceil(balance / Math.max(1, nn - np)) : remaining));
+  };
 
   const method = methods.find((m) => m.id === methodId);
   const curAmount = amount ?? 0;
@@ -39,13 +73,30 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
     setMethodId(null); setAmount(remaining - curAmount); setTendered(null);
   };
 
-  const submit = async (close: boolean) => {
+  const escolher = (m: PaymentMethod) => {
+    setMethodId(m.id);
+    if (!m.isCash) setTendered(null);
+    // "Valor" já vem com a parte da pessoa (dividindo) ou com o que falta
+    if (amount == null || amount <= 0 || amount > remaining) setAmount(split > 1 ? Math.min(remaining, parte) : remaining);
+  };
+
+  const submit = async (close: boolean, conferido = false) => {
+    // dividindo: valor diferente da parte da pessoa pede confirmação ("Cobrar R$ 50 desta pessoa? A parte é R$ 30")
+    if (split > 1 && !conferido && total !== parte && total !== balance) { setConfirmar(close); return; }
     // a chave fica guardada por conta: fechar e reabrir a janela depois de uma falha de internet não paga duas vezes
     const ref = chavesPagamento.get(account.id) ?? chavesPagamento.set(account.id, { current: null }).get(account.id)!;
     const corpo = { payments: all, close };
     const ok = await run(() => api.post(`/api/accounts/${account.id}/payments`, corpo, chaveDoEnvio(ref, { conta: account.id, saldo: balance, ...corpo })),
       close && full ? `Conta #${account.number} paga e encerrada.` : 'Pagamento registrado.');
-    if (ok) { ref.current = null; onDone(); onClose(); }
+    if (ok) {
+      ref.current = null;
+      if (split > 1 && !full) {
+        // quantas partes esta cobrança cobriu (1 pessoa, ou mais se pagou pelas outras)
+        const pessoas = Math.max(1, Math.min(faltam - 1, Math.round(total / Math.max(1, parte))));
+        gravarDivisao(account.id, { n: split, pagas: pagas + pessoas, em: Date.now() });
+      } else gravarDivisao(account.id, null);
+      onDone(); onClose();
+    }
   };
 
   const name = (id: number) => methods.find((m) => m.id === id)?.name ?? '';
@@ -68,17 +119,21 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
       <div className="split-row">
         <span className="small muted">Dividir em</span>
         <div className="stepper">
-          <button onClick={() => setSplit((n) => Math.max(1, n - 1))} aria-label="Menos pessoas">−</button>
+          <button onClick={() => setSplit(split - 1)} aria-label="Menos pessoas">−</button>
           <span className="num">{split}</span>
-          <button onClick={() => setSplit((n) => Math.min(20, n + 1))} aria-label="Mais pessoas">+</button>
+          <button onClick={() => setSplit(split + 1)} aria-label="Mais pessoas">+</button>
         </div>
         <span className="small muted">{split === 1 ? 'pessoa' : 'pessoas'}</span>
-        {split > 1 && <>
-          <b className="num">{brl(Math.ceil(balance / split))}</b><span className="small muted">cada</span>
-          <button className="btn sm" onClick={() => setAmount(Math.min(remaining, Math.ceil(balance / split)))}>Usar 1 parte</button>
-        </>}
+        {split > 1 && <button className="btn sm" onClick={() => setAmount(Math.min(remaining, parte))}>Usar 1 parte</button>}
       </div>
-      {split > 1 && balance % split !== 0 && <div className="small faint" style={{ marginTop: -6, marginBottom: 8 }}>Valor arredondado para cima; a última parte fica um pouco menor ({brl(balance - Math.ceil(balance / split) * (split - 1))}).</div>}
+      {split > 1 && (
+        <div className="cx-divisao" role="status">
+          <span className="cx-divisao-principal">Faltam <b className="num">{faltam} de {split}</b> pessoas — <b className="num">{brl(parte)}</b> cada</span>
+          {pagas > 0 && <span className="small muted">{pagas} já {pagas === 1 ? 'pagou' : 'pagaram'} a sua parte.</span>}
+          {faltam > 1 && balance % faltam !== 0 && <span className="small faint">Arredondado para cima; a última parte fica um pouco menor.</span>}
+          {pagas > 0 && <button className="btn sm ghost" onClick={() => { setPagas(0); gravarDivisao(account.id, { n: split, pagas: 0, em: Date.now() }); setAmount(Math.min(remaining, Math.ceil(balance / split))); }}>Recomeçar a divisão</button>}
+        </div>
+      )}
 
       {parts.length > 0 && (
         <div className="card tight" style={{ marginBottom: 12 }}>
@@ -97,7 +152,7 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
         <div className="col gap-lg">
           <div className="method-grid">
             {methods.map((m) => (
-              <button key={m.id} className={`method-btn${methodId === m.id ? ' on' : ''}`} onClick={() => { setMethodId(m.id); if (!m.isCash) setTendered(null); }}>
+              <button key={m.id} className={`method-btn${methodId === m.id ? ' on' : ''}`} onClick={() => escolher(m)}>
                 <span className="method-ico">{m.code === 'PIX' ? '⚡' : m.code === 'DINHEIRO' ? '💵' : m.code === 'CARTAO' ? '💳' : '•'}</span>
                 {m.name}
               </button>
@@ -105,14 +160,15 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
           </div>
           {method && <>
             <label className="field">
-              <span>Valor em {method.name}</span>
-              <MoneyInput value={amount} onChange={setAmount} autoFocus />
+              <span>Valor em {method.name}{split > 1 ? ' (parte desta pessoa)' : ''}</span>
+              {/* dinheiro: o valor já vem preenchido e o cursor vai para "valor recebido" */}
+              <MoneyInput key={`v${method.id}`} value={amount} onChange={setAmount} autoFocus={!method.isCash} />
             </label>
             {curAmount > remaining && <div className="cancel-text small">O valor passa do saldo ({brl(remaining)}). Para dinheiro, use “valor recebido” para calcular o troco.</div>}
             {method.isCash && (
               <label className="field">
                 <span>Valor recebido do cliente (para calcular o troco)</span>
-                <MoneyInput value={tendered} onChange={setTendered} placeholder="opcional" />
+                <MoneyInput key={`t${method.id}`} value={tendered} onChange={setTendered} placeholder="opcional" autoFocus />
               </label>
             )}
             {change != null && change >= 0 && <div className="change-box">Troco: <b className="num">{brl(change)}</b></div>}
@@ -122,6 +178,12 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
             )}
           </>}
         </div>
+      )}
+      {confirmar != null && (
+        <ConfirmModal title="Confirmar o valor" confirmLabel={`Cobrar ${brl(total)}`} onClose={() => setConfirmar(null)}
+          onConfirm={() => { const c = confirmar; setConfirmar(null); void submit(c, true); }}>
+          Cobrar <b>{brl(total)}</b> desta pessoa? A parte é <b>{brl(parte)}</b>.
+        </ConfirmModal>
       )}
     </Modal>
   );

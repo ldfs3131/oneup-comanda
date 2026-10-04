@@ -306,7 +306,9 @@ async function empresa(slug: string, idx: number) {
   for (const a of board2?.accounts ?? []) await pagar(cx0, a.id);
   const atual = (await donos[0].get('/api/register/current')).data;
   const esperado = atual?.summary?.expectedCashCents ?? 0;
-  const fech = await cx0.post('/api/register/close', { countedCashCents: esperado });
+  let fech = await cx0.post('/api/register/close', { countedCashCents: esperado });
+  // fechamento às cegas com UMA recontagem: se a 1ª contagem passou da tolerância, conta de novo
+  if (fech.status === 200 && fech.data?.recontar) fech = await cx0.post('/api/register/close', { countedCashCents: esperado });
   for (const p of [...caixas, ...cozinhas, ...donos]) p.sock?.close();
   return { slug, pedidosQr, recusadosQr, fechamento: fech.status === 200 ? fech.data : { erro: fech.data }, registerId: fech.data?.id };
 }

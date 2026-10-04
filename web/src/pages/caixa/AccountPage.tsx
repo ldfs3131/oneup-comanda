@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { useAuth } from '../../auth';
@@ -8,8 +8,10 @@ import type { AccountDetail, Consumption, Order, OrderItem, StockDecision } from
 import { AccountBadge, Badge, OrderBadge, ReasonModal, Spinner, useAction } from '../../components/ui';
 import { useStockGuard } from '../../components/stock';
 import { OrderDetailModal } from '../../components/OrderDetail';
-import OrderComposer, { linesToItems, useMenu } from './OrderComposer';
-import { CancelItemModal, DiscountModal, EditAccountModal, PaymentModal, PendingModal, PickAccountModal } from './AccountModals';
+import OrderComposer, { linesToItems, useMenu, type CartLine } from './OrderComposer';
+import { CancelItemModal, DiscountModal, EditAccountModal, PaymentModal, PendingModal, PickAccountModal, esquecerDivisao } from './AccountModals';
+import { PreContaModal } from './PreConta';
+import '../../styles/caixa.css';
 import { useBase } from './Receivables';
 import { useMesaLabel } from '../../components/brand';
 
@@ -32,13 +34,22 @@ export default function AccountPage() {
   const { busy, run } = useAction();
   const { guard, modal: stockModal, busy: sending } = useStockGuard();
   const envio: ChaveEnvio = useRef(null);
-  const [modal, setModal] = useState<null | 'add' | 'pay' | 'discount' | 'pending' | 'edit' | 'cancel' | 'reopen' | 'merge'>(null);
+  // "Adicionar nela" (mesa já aberta na Nova conta): abre o "novo pedido" com os itens que já estavam escolhidos
+  const location = useLocation();
+  const vindo = (location.state as { adicionar?: CartLine[] } | null)?.adicionar;
+  const [linhasIniciais] = useState<CartLine[] | undefined>(vindo);
+  const [modal, setModal] = useState<null | 'add' | 'pay' | 'discount' | 'pending' | 'edit' | 'cancel' | 'reopen' | 'merge' | 'preconta'>(vindo ? 'add' : null);
+  useEffect(() => { if (vindo) nav(location.pathname, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const maisUm = useMaisUmComDesfazer();
   const [cancelItem, setCancelItem] = useState<{ item: OrderItem; delivered: boolean } | null>(null);
   const [cancelOrder, setCancelOrder] = useState<Order | null>(null);
   const [transfer, setTransfer] = useState<Order | null>(null);
   const [detail, setDetail] = useState<number | null>(null);
   const [reverse, setReverse] = useState<number | null>(null);
   const [returnStock, setReturnStock] = useState(true);
+
+  // conta que saiu de "aberta" não precisa mais lembrar a divisão por pessoas
+  useEffect(() => { if (acc && !LIVE.includes(acc.status)) esquecerDivisao(acc.id); }, [acc?.id, acc?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <Spinner />;
   if (error || !acc) return <div className="empty">{(error as Error)?.message ?? 'Conta não encontrada.'} <button className="btn" onClick={() => nav(-1)}>Voltar</button></div>;
@@ -60,15 +71,22 @@ export default function AccountPage() {
     return !!r;
   };
 
-  /** "+1 / repetir": cria um novo lote SÓ com a diferença (a cozinha recebe só isso). */
+  /**
+   * "+1 / repetir": cria um novo lote SÓ com a diferença (a cozinha recebe só isso).
+   * Item que vai para a cozinha espera 5 s com "Desfazer" antes de enviar (toques seguidos somam: +2, +3…).
+   */
   const repeat = (i: OrderItem, o: Order) => {
-    if (i.isCustom) {
-      return sendOrder([{ custom: { description: i.productName, priceCents: i.unitPriceCents, goesToKitchen: i.goesToKitchen }, quantity: 1 }], '', o.consumptionType, `+1 ${i.productName} lançado.`);
-    }
-    const p = menu?.flatMap((c) => c.products).find((x) => x.id === i.productId);
-    if (!p || !p.available) { run(async () => { throw new Error(`${i.productName} não está disponível agora.`); }); return; }
-    const optionIds = i.optionsSnapshot.map((s) => p.groups.find((g) => g.name === s.group)?.options.find((op) => op.name === s.name)?.id).filter((x): x is number => !!x);
-    return sendOrder([{ productId: p.id, quantity: 1, optionIds, note: i.note }], '', o.consumptionType, `+1 ${i.productName} lançado${i.goesToKitchen ? ' (cozinha recebe só este)' : ''}.`);
+    const envia = (qtd: number) => {
+      if (i.isCustom) {
+        return sendOrder([{ custom: { description: i.productName, priceCents: i.unitPriceCents, goesToKitchen: i.goesToKitchen }, quantity: qtd }], '', o.consumptionType, `+${qtd} ${i.productName} lançado.`);
+      }
+      const p = menu?.flatMap((c) => c.products).find((x) => x.id === i.productId);
+      if (!p || !p.available) { run(async () => { throw new Error(`${i.productName} não está disponível agora.`); }); return Promise.resolve(false); }
+      const optionIds = i.optionsSnapshot.map((s) => p.groups.find((g) => g.name === s.group)?.options.find((op) => op.name === s.name)?.id).filter((x): x is number => !!x);
+      return sendOrder([{ productId: p.id, quantity: qtd, optionIds, note: i.note }], '', o.consumptionType, `+${qtd} ${i.productName} lançado${i.goesToKitchen ? ' (cozinha recebe só este)' : ''}.`);
+    };
+    if (!i.goesToKitchen) return envia(1);
+    maisUm.agendar(`${i.id}`, i.productName, envia);
   };
 
   return (
@@ -141,11 +159,15 @@ export default function AccountPage() {
                           )}
                         </div>
                         <span className="num">{brl(i.unitPriceCents * i.quantity)}</span>
-                        {live && i.status === 'ACTIVE' && o.status !== 'CANCELLED' && o.status !== 'AWAITING_CONFIRMATION' && (
-                          <button className="btn sm ghost" title="Lançar mais 1 (novo lote)" disabled={sending} onClick={() => repeat(i, o)}>+1</button>
-                        )}
-                        {editable && i.status === 'ACTIVE' && (
-                          <button className="btn sm ghost icon" title="Cancelar / reduzir quantidade" onClick={() => setCancelItem({ item: i, delivered: o.status === 'DELIVERED' })}>✕</button>
+                        {((live && i.status === 'ACTIVE' && o.status !== 'CANCELLED' && o.status !== 'AWAITING_CONFIRMATION') || (editable && i.status === 'ACTIVE')) && (
+                          <div className="cx-item-acoes">
+                            {live && i.status === 'ACTIVE' && o.status !== 'CANCELLED' && o.status !== 'AWAITING_CONFIRMATION' && (
+                              <button className="btn cx-mais1" title="Lançar mais 1 (novo lote)" aria-label={`Mais 1 ${i.productName}`} disabled={sending} onClick={() => repeat(i, o)}>+1</button>
+                            )}
+                            {editable && i.status === 'ACTIVE' && (
+                              <button className="btn ghost cx-cancelar-item" title="Cancelar / reduzir quantidade" aria-label={`Cancelar ${i.productName}`} onClick={() => setCancelItem({ item: i, delivered: o.status === 'DELIVERED' })}>✕</button>
+                            )}
+                          </div>
                         )}
                       </div>
                     ))}
@@ -214,6 +236,7 @@ export default function AccountPage() {
             {editable && t.balance === 0 && t.total > 0 && acc.status !== 'CLOSED' && (
               <button className="btn go xl block" disabled={busy} onClick={() => act(() => api.post(`/api/accounts/${acc.id}/close`), `Conta #${acc.number} encerrada.`)}>Encerrar conta</button>
             )}
+            {t.subtotal > 0 && acc.status !== 'CANCELLED' && acc.status !== 'MERGED' && <button className="btn block" onClick={() => setModal('preconta')}>🧾 Pré-conta (imprimir / WhatsApp)</button>}
             {editable && t.balance > 0 && <button className="btn block" onClick={() => setModal('discount')}>Desconto / ajuste</button>}
             {['OPEN', 'PARTIALLY_PAID'].includes(acc.status) && t.balance > 0 && (
               <button className="btn block" onClick={() => setModal('pending')}>Cliente saiu sem pagar → Pendente</button>
@@ -233,7 +256,7 @@ export default function AccountPage() {
             </div>
             <div className="sheet-body">
               <div className="info-box small" style={{ marginBottom: 10 }}>A cozinha recebe <b>somente os itens deste novo pedido</b>. O que já foi feito aparece para ela só como referência.</div>
-              <OrderComposer busy={sending} submitLabel="Enviar pedido" onSubmit={async (lines, note, consumption) => {
+              <OrderComposer busy={sending} submitLabel="Enviar pedido" initialLines={linhasIniciais} onSubmit={async (lines, note, consumption) => {
                 const ok = await sendOrder(linesToItems(lines), note, consumption);
                 if (ok) setModal(null);
                 return ok;
@@ -242,6 +265,7 @@ export default function AccountPage() {
           </div>
         )}
         {modal === 'pay' && <PaymentModal account={acc} onClose={() => setModal(null)} onDone={refresh} />}
+        {modal === 'preconta' && <PreContaModal account={acc} onClose={() => setModal(null)} />}
         {modal === 'discount' && <DiscountModal account={acc} onClose={() => setModal(null)} onDone={refresh} />}
         {modal === 'pending' && <PendingModal account={acc} onClose={() => setModal(null)} onDone={refresh} />}
         {modal === 'edit' && <EditAccountModal account={acc} onClose={() => setModal(null)} onDone={refresh} />}
@@ -291,7 +315,60 @@ export default function AccountPage() {
         )}
         {detail && <OrderDetailModal orderId={detail} onClose={() => setDetail(null)} />}
         {stockModal}
+        {maisUm.aviso}
       </div>
     </div>
   );
+}
+
+const ESPERA_MS = 5000;
+
+/**
+ * "+1" de item da cozinha com 5 s para desfazer. Toques seguidos no mesmo item somam e reiniciam a contagem.
+ * Desfazer = nada é lançado. Saiu da tela antes dos 5 s: envia na hora (o caixa não desfez).
+ */
+function useMaisUmComDesfazer() {
+  type Pendente = { chave: string; nome: string; qtd: number; ate: number; envia: (qtd: number) => unknown; timer: number };
+  const [lista, setLista] = useState<Pendente[]>([]);
+  const ref = useRef<Pendente[]>([]);
+  ref.current = lista;
+  const [, tick] = useState(0);
+  useEffect(() => { if (!lista.length) return; const t = setInterval(() => tick((x) => x + 1), 250); return () => clearInterval(t); }, [lista.length]);
+  const disparar = (chave: string) => {
+    const p = ref.current.find((x) => x.chave === chave);
+    if (!p) return;
+    setLista((l) => l.filter((x) => x.chave !== chave));
+    p.envia(p.qtd);
+  };
+  useEffect(() => () => { for (const p of ref.current) { clearTimeout(p.timer); p.envia(p.qtd); } }, []);
+  const agendar = (chave: string, nome: string, envia: (qtd: number) => unknown) => {
+    const atual = ref.current.find((x) => x.chave === chave);
+    if (atual) clearTimeout(atual.timer);
+    const timer = window.setTimeout(() => disparar(chave), ESPERA_MS);
+    const novo: Pendente = { chave, nome, qtd: (atual?.qtd ?? 0) + 1, ate: Date.now() + ESPERA_MS, envia, timer };
+    setLista((l) => [...l.filter((x) => x.chave !== chave), novo]);
+    ref.current = [...ref.current.filter((x) => x.chave !== chave), novo];
+  };
+  const desfazer = (chave: string) => {
+    const p = ref.current.find((x) => x.chave === chave);
+    if (p) clearTimeout(p.timer);
+    setLista((l) => l.filter((x) => x.chave !== chave));
+    ref.current = ref.current.filter((x) => x.chave !== chave);
+  };
+  const aviso = lista.length ? (
+    <div className="cx-desfazer" role="status" aria-live="polite">
+      {lista.map((p) => {
+        const s = Math.max(0, Math.ceil((p.ate - Date.now()) / 1000));
+        return (
+          <div key={p.chave} className="cx-desfazer-item">
+            <span className="grow">+{p.qtd} <b>{p.nome}</b> vai para a cozinha em {s} s</span>
+            <button className="btn" onClick={() => desfazer(p.chave)}>Desfazer</button>
+            <button className="btn go" onClick={() => { clearTimeout(p.timer); disparar(p.chave); }}>Enviar já</button>
+            <span className="cx-desfazer-barra" style={{ animationDuration: `${ESPERA_MS}ms` }} key={p.ate} />
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
+  return { agendar, aviso };
 }

@@ -9,10 +9,10 @@ export const COOKIE = 'oneup_sessao';
 const sha = (t) => createHash('sha256').update(t).digest('hex');
 export const hashPassword = (p) => bcrypt.hash(p, 10);
 export const checkPassword = (p, h) => bcrypt.compare(p, h);
-export async function createSession(userId, remember = true) {
+export async function createSession(userId, remember = true, aparelhoId = null) {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + (remember ? config.sessionDays * 86400_000 : 14 * 3600_000));
-    await db.insert(sessions).values({ tokenHash: sha(token), userId, expiresAt });
+    await db.insert(sessions).values({ tokenHash: sha(token), userId, expiresAt, aparelhoId });
     // limpeza oportunista de sessões vencidas
     await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
     return { token, expiresAt };
@@ -30,7 +30,11 @@ export async function destroySession(token) {
  */
 const cacheSessao = new Map();
 const chaveCache = (hash) => `${currentContext()?.empresaId ?? 0}:${hash}`;
+/** Avisados quando as sessões de alguém são esquecidas (o tempo real desconecta os aparelhos dessa pessoa). */
+export const aoEsquecerUsuario = [];
 export function esquecerSessoesDoUsuario(userId) {
+    for (const f of aoEsquecerUsuario)
+        f(currentContext()?.empresaId ?? 0, userId);
     const e = `${currentContext()?.empresaId ?? 0}:`;
     for (const [k, v] of cacheSessao)
         if (k.startsWith(e) && v.user.id === userId)
@@ -108,6 +112,16 @@ export function requireOneup() {
             throw new HttpError(404, 'Recurso não disponível.');
     };
 }
+export async function vincularSessaoAoAparelho(token, aparelhoId) {
+    await db.update(sessions).set({ aparelhoId }).where(eq(sessions.tokenHash, sha(token)));
+}
+/** Tirar o acesso de um aparelho: quem já está logado nele sai na hora. */
+export async function derrubarSessoesDoAparelho(aparelhoId) {
+    const r = await db.delete(sessions).where(eq(sessions.aparelhoId, aparelhoId)).returning({ userId: sessions.userId });
+    for (const u of new Set(r.map((x) => x.userId)))
+        esquecerSessoesDoUsuario(u);
+    return r.length;
+}
 /*
  * Tentativas de senha errada. Conta só os ERROS, separado por pessoa e por aparelho (IP):
  * a cozinha errando a senha não trava o login do caixa nem do dono.
@@ -121,6 +135,10 @@ const LIMITES = [
     { k: (e, ip) => `i:${e}:${ip}`, max: 40, janela: 5 * 60_000 },
     { k: (e, _ip, u) => `u:${e}:${u}`, max: 50, janela: 15 * 60_000 },
 ];
+/**
+ * Reserva a tentativa ANTES de conferir a senha (o bcrypt demora ~90 ms): uma rajada de requisições simultâneas
+ * não passa toda pela checagem antes de o primeiro erro ser contado. Senha certa devolve a reserva.
+ */
 export function checkLoginRate(empresaId, ip, username) {
     const now = Date.now();
     for (const l of LIMITES) {
@@ -128,9 +146,6 @@ export function checkLoginRate(empresaId, ip, username) {
         if (a && a.until > now && a.n >= l.max)
             throw new HttpError(429, 'Muitas tentativas com senha errada. Aguarde alguns minutos.');
     }
-}
-export function registerLoginFailure(empresaId, ip, username) {
-    const now = Date.now();
     if (attempts.size > 100_000)
         attempts.clear();
     for (const l of LIMITES) {
@@ -142,7 +157,39 @@ export function registerLoginFailure(empresaId, ip, username) {
             a.n++;
     }
 }
-export const clearLoginRate = (empresaId, ip, username) => attempts.delete(`iu:${empresaId}:${ip}:${username}`);
+/** Erro de senha: a tentativa já foi contada na reserva (mantido para deixar claro no fluxo). */
+export function registerLoginFailure(_empresaId, _ip, _username) { }
+/** Senha certa: zera o par aparelho+usuário e devolve a reserva dos outros contadores. */
+export function clearLoginRate(empresaId, ip, username) {
+    attempts.delete(`iu:${empresaId}:${ip}:${username}`);
+    for (const l of LIMITES.slice(1)) {
+        const a = attempts.get(l.k(empresaId, ip, username));
+        if (a && a.n > 0)
+            a.n--;
+    }
+}
+/*
+ * No máximo 4 conferências de senha/PIN ao mesmo tempo, com fila curta. Quem chega com a fila cheia recebe 429
+ * na hora, sem segurar conexão do banco: uma rajada no login não trava os outros restaurantes.
+ */
+const BCRYPT_MAX = 4, FILA_MAX = 24;
+let bcryptAtivos = 0;
+const filaBcrypt = [];
+export async function comVagaDeLogin(fn) {
+    if (bcryptAtivos >= BCRYPT_MAX) {
+        if (filaBcrypt.length >= FILA_MAX)
+            throw new HttpError(429, 'Muitas tentativas de entrar agora. Aguarde alguns segundos e tente de novo.');
+        await new Promise((r) => filaBcrypt.push(r));
+    }
+    bcryptAtivos++;
+    try {
+        return await fn();
+    }
+    finally {
+        bcryptAtivos--;
+        filaBcrypt.shift()?.();
+    }
+}
 // para igualar o tempo de resposta quando o usuário não existe (não revela quais logins existem)
 export const HASH_FALSO = bcrypt.hashSync('senha-que-nao-existe-' + randomBytes(8).toString('hex'), 10);
 setInterval(() => { const now = Date.now(); for (const [k, a] of attempts)
@@ -165,13 +212,14 @@ export async function lembrarAparelho(req, reply, userId) {
     const atual = await aparelhoValido(req.cookies[COOKIE_APARELHO]);
     if (atual) {
         await db.update(aparelhos).set({ ultimoUso: new Date() }).where(eq(aparelhos.id, atual.id));
-        return;
+        return atual.id;
     }
     const token = randomBytes(32).toString('hex');
     const ua = String(req.headers['user-agent'] ?? '');
     const nome = /iphone/i.test(ua) ? 'iPhone' : /ipad/i.test(ua) ? 'iPad' : /android/i.test(ua) ? (/mobile/i.test(ua) ? 'Celular Android' : 'Tablet Android') : /windows/i.test(ua) ? 'Computador Windows' : /mac os/i.test(ua) ? 'Mac' : 'Navegador';
-    await db.insert(aparelhos).values({ tokenHash: sha(token), nome, criadoPor: userId, ultimoUso: new Date() });
+    const [novo] = await db.insert(aparelhos).values({ tokenHash: sha(token), nome, criadoPor: userId, ultimoUso: new Date() }).returning({ id: aparelhos.id });
     reply.setCookie(COOKIE_APARELHO, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, maxAge: DIAS_APARELHO * 86400 });
+    return novo.id;
 }
 export const PIN_MAX_ERROS = 5;
 export const PIN_BLOQUEIO_MIN = 5;

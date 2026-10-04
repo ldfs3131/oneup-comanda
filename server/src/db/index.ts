@@ -37,11 +37,14 @@ export type DbContext = {
 
 const als = new AsyncLocalStorage<DbContext>();
 
-export const systemPool = new pg.Pool({ connectionString: config.databaseUrl, max: 5 });
+// jit=off: com RLS o planejador superestima as linhas e o PostgreSQL gastava centenas de ms compilando cada consulta
+// do Financeiro (medido: 1,5 s → 0,25 s). Tempos-limite: nenhuma consulta presa trava os outros restaurantes.
+export const systemPool = new pg.Pool({ connectionString: config.databaseUrl, max: 5, options: '-c jit=off' });
 export const appPool = new pg.Pool({
   connectionString: config.appDatabaseUrl ?? config.databaseUrl,
   max: config.dbPoolSize,
-  options: `-c role=${config.appDbRole}`,
+  connectionTimeoutMillis: 10_000,
+  options: `-c role=${config.appDbRole} -c jit=off -c statement_timeout=20000 -c idle_in_transaction_session_timeout=60000`,
 });
 // Queda momentânea do PostgreSQL não derruba o servidor: a conexão é refeita na próxima consulta
 for (const p of [systemPool, appPool]) p.on('error', (e) => console.error('[banco] conexão perdida:', e.message));

@@ -34,8 +34,8 @@ export default function NewAccount() {
   const closed = settings && !settings.restaurant.isOpen;
 
   // Toda conta precisa ser identificável: pelo menos um entre nome, telefone, mesa ou observação (2+ letras/números)
-  const real = (t: string) => t.replace(/[^\p{L}\p{N}]/gu, '').length >= 2;
-  const identificado = !!customerId || [customerName, phone, tableLabel, note].some(real);
+  const real = (t: string, min: number) => t.replace(/[^\p{L}\p{N}]/gu, '').length >= min;
+  const identificado = !!customerId || real(tableLabel, 1) || real(phone, 1) || real(customerName, 2) || real(note, 2);
   const create = async (items: ReturnType<typeof linesToItems>, orderNote = '', consumptionType = 'LOCAL') => {
     if (!identificado) { toast('Preencha pelo menos um: nome, telefone, mesa ou observação.', 'danger'); return false; }
     const r = await guard<Created>((stockDecisions?: StockDecision[]) => {

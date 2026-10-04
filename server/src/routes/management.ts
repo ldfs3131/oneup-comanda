@@ -6,6 +6,7 @@ import { cashMovements, expenseCategories, expenses, orders, orderTimeCorrection
 import { me, requireOneup, requireRole } from '../auth.js';
 import { bad, brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
+import { idempotent } from '../lib/idempotency.js';
 import { notify } from '../realtime.js';
 import { currentRegister, requireOpenRegister } from '../services/accounts.js';
 import { rangeOf, todayLocal } from './admin.js';
@@ -48,7 +49,7 @@ export async function managementRoutes(app: FastifyInstance) {
              COALESCE(SUM(oi.unit_cost_cents*oi.quantity) FILTER (WHERE oi.unit_cost_cents IS NOT NULL),0) AS cost,
              COALESCE(SUM(oi.unit_price_cents*oi.quantity) FILTER (WHERE oi.unit_cost_cents IS NOT NULL),0) AS gross_with_cost
       FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE ${inRange('o.created_at', r)} AND ${live}`);
-    const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents FROM discounts WHERE ${inRange('created_at', r)}`);
+    const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents FROM discounts WHERE ${inRange('created_at', r)} AND NOT EXISTS (SELECT 1 FROM accounts ca WHERE ca.id = discounts.account_id AND ca.status = 'CANCELLED')`);
     const received = await q(sql`
       SELECT pm.name, pm.code, COALESCE(SUM(p.amount_cents),0) AS cents,
              COALESCE(ROUND(SUM(p.amount_cents::bigint * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees, pm.taxa_bp AS "taxaBp"
@@ -143,7 +144,7 @@ export async function managementRoutes(app: FastifyInstance) {
         COALESCE(SUM(oi.unit_cost_cents*oi.quantity) FILTER (WHERE oi.unit_cost_cents IS NOT NULL),0) AS cost
       FROM orders o JOIN order_items oi ON oi.order_id = o.id
       WHERE ${inRange('o.created_at', rr)} AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED') AND oi.status = 'ACTIVE' GROUP BY 1`);
-    const descontos = await q(sql`SELECT ${mesDe('created_at')} AS mes, SUM(amount_cents) AS cents FROM discounts WHERE ${inRange('created_at', rr)} GROUP BY 1`);
+    const descontos = await q(sql`SELECT ${mesDe('created_at')} AS mes, SUM(amount_cents) AS cents FROM discounts WHERE ${inRange('created_at', rr)} AND NOT EXISTS (SELECT 1 FROM accounts ca WHERE ca.id = discounts.account_id AND ca.status = 'CANCELLED') GROUP BY 1`);
     const taxas = await q(sql`SELECT ${mesDe('p.created_at')} AS mes, ROUND(SUM(p.amount_cents::bigint * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)) AS cents
       FROM payments p JOIN payment_methods pm ON pm.id = p.method_id WHERE p.reversed_at IS NULL AND ${inRange('p.created_at', rr)} GROUP BY 1`);
     const desp = await q(sql`SELECT to_char(date, 'YYYY-MM') AS mes, SUM(amount_cents) AS cents FROM expenses
@@ -207,7 +208,7 @@ export async function managementRoutes(app: FastifyInstance) {
     const user = me(req);
     if (user.role !== 'ADMIN' && !b.paidFromRegister) throw bad('O caixa só lança despesas pagas com o dinheiro da gaveta.');
     const date = user.role === 'ADMIN' ? (b.date ?? todayLocal()) : todayLocal();
-    const res = await db.transaction(async (tx) => {
+    const res = await idempotent(req, 'expense.create', () => db.transaction(async (tx) => {
       const [cat] = await tx.select().from(expenseCategories).where(eq(expenseCategories.id, b.categoryId));
       if (!cat || !cat.active) throw bad('Categoria de despesa inválida.');
       let movementId: number | null = null;
@@ -227,7 +228,7 @@ export async function managementRoutes(app: FastifyInstance) {
         message: `${user.name} lançou despesa "${b.description}" (${cat.name}) de ${brl(b.amountCents)}${b.paidFromRegister ? ' paga com o dinheiro do caixa (sangria automática)' : ''}.`,
       });
       return e;
-    });
+    }));
     if (b.paidFromRegister) notify.registerChanged();
     return res;
   });

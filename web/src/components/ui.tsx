@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ACCOUNT_STATUS, ORDER_STATUS, centsToInput, parseMoney } from '../format';
+import { useQueryClient } from '@tanstack/react-query';
 
 // ---------- Modal ----------
 export function Modal({ title, onClose, children, footer, wide }: {
@@ -74,7 +75,24 @@ export function OrderBadge({ status }: { status: string }) {
   const s = ORDER_STATUS[status] ?? { label: status, tone: 'muted' };
   return <Badge tone={s.tone}>{s.label}</Badge>;
 }
-export function Spinner() { return <div className="loading"><div className="spinner" /></div>; }
+/**
+ * Carregando. Se passar de 8 s (servidor fora, internet caiu, erro), troca por uma explicação e "Tentar de novo"
+ * — nunca um círculo girando para sempre (vale para todas as telas, inclusive o cardápio do cliente).
+ */
+export function Spinner() {
+  const qc = useQueryClient();
+  const [demorou, setDemorou] = useState(false);
+  const [tentando, setTentando] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setDemorou(true), 8000); return () => clearTimeout(t); }, [tentando]);
+  if (demorou) return (
+    <div className="loading col" role="alert" style={{ gap: 12, textAlign: 'center', padding: 24 }}>
+      <div style={{ fontWeight: 700 }}>Não conseguimos carregar agora.</div>
+      <div className="small muted">Confira a internet. Se continuar, o sistema pode estar reiniciando — tente de novo em alguns segundos.</div>
+      <button className="btn primary" onClick={() => { setDemorou(false); setTentando((x) => !x); qc.refetchQueries({ type: 'active' }); }}>Tentar de novo</button>
+    </div>
+  );
+  return <div className="loading" role="status" aria-label="Carregando"><div className="spinner" /></div>;
+}
 
 export function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: string }) {
   return <button type="button" className={`toggle${on ? ' on' : ''}`} aria-pressed={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} />;

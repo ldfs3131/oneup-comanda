@@ -21,7 +21,7 @@ export default function AppPage() {
       <div className="app-page-cards">
         <section className="card col gap-lg">
           <div className="row" style={{ gap: 12 }}><img src={icone} alt="" className="app-mini-icone" /><div><b>Para clientes</b><div className="small muted">Cardápio, pedido pelo celular e acompanhamento do pedido.</div></div></div>
-          <Link className="btn go lg block" to="/cardapio?instalar=1">📲 Baixar o app de clientes</Link>
+          <a className="btn go lg block" href="/cardapio?instalar=1">📲 Baixar o app de clientes</a>
         </section>
         <section className="card col gap-lg">
           <div className="row" style={{ gap: 12 }}><img src={icone} alt="" className="app-mini-icone" /><div><b>Para a equipe</b><div className="small muted">Caixa, cozinha e painel do Dono. Entra com usuário e senha (ou PIN).</div></div></div>

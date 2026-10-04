@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../api';
+import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { brl, dateTime, signed } from '../../format';
 import type { RegisterSummary } from '../../types';
 import { Modal, MoneyInput, Spinner, useAction } from '../../components/ui';
@@ -29,7 +29,7 @@ export default function RegisterPage() {
     <div className="page narrow" style={{ maxWidth: 520 }}>
       <div className="card col gap-lg">
         <h1>{closed.cego ? 'Contagem registrada ✔' : 'Dia encerrado ✔'}</h1>
-        <div className="muted small">O dia foi encerrado, o estabelecimento ficou <b>FECHADO</b> e um backup automático foi iniciado.</div>
+        <div className="muted small">O dia foi encerrado, o estabelecimento ficou <b>FECHADO</b>. Tudo fica salvo no servidor e entra na cópia de segurança diária.</div>
         {closed.cego ? <>
           <div className="kv"><span>Dinheiro que você contou</span><span className="v">{brl(closed.countedCashCents)}</span></div>
           {closed.conferir
@@ -163,6 +163,7 @@ function ResumoCego({ s }: { s: RegisterSummary }) {
 function MovementModal({ type, onClose }: { type: 'SANGRIA' | 'SUPRIMENTO'; onClose: () => void }) {
   const [amount, setAmount] = useState<number | null>(null);
   const [reason, setReason] = useState('');
+  const envioMov: ChaveEnvio = useRef(null);
   const { busy, run } = useAction();
   const qc = useQueryClient();
   const label = type === 'SANGRIA' ? 'Sangria (retirar dinheiro da gaveta)' : 'Suprimento (colocar dinheiro na gaveta)';
@@ -170,7 +171,8 @@ function MovementModal({ type, onClose }: { type: 'SANGRIA' | 'SUPRIMENTO'; onCl
     <Modal title={label} onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Voltar</button>
       <button className="btn primary" disabled={busy || !amount || reason.trim().length < 3} onClick={async () => {
-        if (await run(() => api.post('/api/register/movements', { type, amountCents: amount, reason: reason.trim() }), 'Registrado.')) {
+        const corpo = { type, amountCents: amount, reason: reason.trim() };
+        if (await run(() => api.post('/api/register/movements', corpo, chaveDoEnvio(envioMov, corpo)), 'Registrado.')) {
           qc.invalidateQueries({ queryKey: ['register'] }); onClose();
         }
       }}>Registrar</button>
@@ -189,6 +191,7 @@ function DrawerExpenseModal({ onClose }: { onClose: () => void }) {
   const [cat, setCat] = useState<number | null>(null);
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState<number | null>(null);
+  const envioDesp: ChaveEnvio = useRef(null);
   const { busy, run } = useAction();
   const qc = useQueryClient();
   const ok = !!cat && desc.trim().length >= 2 && !!amount;
@@ -196,7 +199,8 @@ function DrawerExpenseModal({ onClose }: { onClose: () => void }) {
     <Modal title="Despesa paga com o dinheiro da gaveta" onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Voltar</button>
       <button className="btn primary" disabled={!ok || busy} onClick={async () => {
-        if (await run(() => api.post('/api/expenses', { description: desc.trim(), categoryId: cat, amountCents: amount, paidFromRegister: true }, true), 'Despesa lançada (saiu da gaveta).')) {
+        const corpo = { description: desc.trim(), categoryId: cat, amountCents: amount, paidFromRegister: true };
+        if (await run(() => api.post('/api/expenses', corpo, chaveDoEnvio(envioDesp, corpo)), 'Despesa lançada (saiu da gaveta).')) {
           qc.invalidateQueries({ queryKey: ['register'] }); onClose();
         }
       }}>Lançar {amount ? brl(amount) : ''}</button>
@@ -245,7 +249,7 @@ function CloseModal({ s, blind, onClose, onClosed }: { s: RegisterSummary; blind
           <div className="kv total"><span>Diferença</span><span className="v" style={{ color: diff === 0 ? 'var(--ok)' : 'var(--danger)' }}>{signed(diff)}</span></div>
         )}
         <label className="field"><span>Observação (opcional)</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: faltou troco de R$ 10" /></label>
-        {confirm && <div className="info-box small">Ao encerrar: o caixa fecha, o estabelecimento fica <b>FECHADO</b> (sem novos pedidos) e o backup automático roda.</div>}
+        {confirm && <div className="info-box small">Ao encerrar: o caixa fecha, o estabelecimento fica <b>FECHADO</b> (sem novos pedidos). Tudo fica salvo e entra na cópia de segurança diária.</div>}
       </div>
     </Modal>
   );

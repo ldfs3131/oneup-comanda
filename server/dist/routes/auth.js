@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { aparelhos, roles, users, restaurantSettings } from '../db/schema.js';
-import { COOKIE, COOKIE_APARELHO, HASH_FALSO, PIN_BLOQUEIO_MIN, PIN_MAX_ERROS, aparelhoValido, conferirPin, hashPin, lembrarAparelho, checkLoginRate, checkPassword, clearLoginRate, createSession, derrubarSessoes, destroySession, esquecerSessoesDoUsuario, hashPassword, me, registerLoginFailure, requireRole, userFromToken, } from '../auth.js';
+import { COOKIE, COOKIE_APARELHO, HASH_FALSO, PIN_BLOQUEIO_MIN, PIN_MAX_ERROS, aparelhoValido, conferirPin, hashPin, lembrarAparelho, checkLoginRate, checkPassword, clearLoginRate, comVagaDeLogin, derrubarSessoesDoAparelho, vincularSessaoAoAparelho, createSession, derrubarSessoes, destroySession, esquecerSessoesDoUsuario, hashPassword, me, registerLoginFailure, requireRole, userFromToken, } from '../auth.js';
 import { HttpError, bad, conflict, idParam, notFound, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { config } from '../config.js';
@@ -13,7 +13,7 @@ export async function authRoutes(app) {
         const pub = await configuracoesPublicas();
         return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null, tema: pub.tema ?? 'escuro', nomeApp: pub.nome_app || null, icone: pub.icone_app || null };
     });
-    app.post('/api/auth/login', async (req, reply) => {
+    app.post('/api/auth/login', async (req, reply) => comVagaDeLogin(async () => {
         const body = parse(z.object({ username: z.string().trim().toLowerCase().min(1).max(60), password: z.string().min(1).max(200), remember: z.boolean().default(true) }), req.body);
         const empId = req.empresa?.id ?? 0;
         checkLoginRate(empId, req.ip, body.username);
@@ -31,10 +31,12 @@ export async function authRoutes(app) {
         reply.setCookie(COOKIE, s.token, {
             path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, ...(body.remember ? { expires: s.expiresAt } : {}),
         });
-        await lembrarAparelho(req, reply, row.u.id);
+        // a sessão fica ligada ao aparelho: tirar o acesso do aparelho derruba quem está logado nele
+        const apId = await lembrarAparelho(req, reply, row.u.id);
+        await vincularSessaoAoAparelho(s.token, apId);
         await audit(db, { userId: row.u.id, action: 'auth.login', entityType: 'user', entityId: row.u.id, message: `${row.u.name} entrou no sistema.` });
         return { user: { id: row.u.id, name: row.u.name, username: row.u.username, role: row.role, oneup: row.u.oneup } };
-    });
+    }));
     // ---------- Entrar com PIN (só em aparelho da equipe) ----------
     app.get('/api/auth/pin/pessoas', async (req) => {
         const ap = await aparelhoValido(req.cookies[COOKIE_APARELHO]);
@@ -44,40 +46,48 @@ export async function authRoutes(app) {
             .where(and(eq(users.active, true), eq(users.oneup, false), isNotNull(users.pinHash), inArray(roles.code, ['CAIXA', 'COZINHA']))).orderBy(asc(users.name));
         return { aparelho: true, pessoas };
     });
-    app.post('/api/auth/pin', async (req, reply) => {
+    app.post('/api/auth/pin', async (req, reply) => comVagaDeLogin(async () => {
         const b = parse(z.object({ userId: z.number().int().positive(), pin: z.string().regex(/^\d{4}$/, 'o PIN tem 4 números') }), req.body);
         const ap = await aparelhoValido(req.cookies[COOKIE_APARELHO]);
         if (!ap)
             throw new HttpError(403, 'Este aparelho ainda não é da equipe: entre uma vez com usuário e senha.', 'APARELHO_DESCONHECIDO');
         const empId = req.empresa?.id ?? 0;
         checkLoginRate(empId, req.ip, `pin:${b.userId}`);
-        const [row] = await db.select({ u: users, role: roles.code }).from(users).innerJoin(roles, eq(roles.id, users.roleId)).where(eq(users.id, b.userId));
-        const permitido = row && row.u.active && !row.u.oneup && row.u.pinHash && ['CAIXA', 'COZINHA'].includes(row.role);
-        if (permitido && row.u.pinBloqueadoAte && row.u.pinBloqueadoAte > new Date()) {
-            const min = Math.ceil((row.u.pinBloqueadoAte.getTime() - Date.now()) / 60_000);
-            throw new HttpError(429, `PIN bloqueado por erros seguidos. Tente de novo em ${min} min ou entre com usuário e senha.`, 'PIN_BLOQUEADO');
-        }
-        const ok = await conferirPin(b.pin, (permitido && row.u.pinHash) || HASH_FALSO);
-        if (!permitido || !ok) {
-            registerLoginFailure(empId, req.ip, `pin:${b.userId}`);
-            if (permitido) {
-                const falhas = row.u.pinFalhas + 1;
-                await db.update(users).set(falhas >= PIN_MAX_ERROS
-                    ? { pinFalhas: 0, pinBloqueadoAte: new Date(Date.now() + PIN_BLOQUEIO_MIN * 60_000) }
-                    : { pinFalhas: falhas }).where(eq(users.id, row.u.id));
-                if (falhas >= PIN_MAX_ERROS)
-                    await audit(db, { userId: row.u.id, action: 'auth.pin_bloqueado', entityType: 'user', entityId: row.u.id, message: `PIN de ${row.u.name} bloqueado por ${PIN_BLOQUEIO_MIN} min depois de ${PIN_MAX_ERROS} erros (aparelho: ${ap.nome ?? '—'}).` });
+        // Tudo numa transação com a pessoa travada: tentativas simultâneas contam uma a uma e o bloqueio não é furado
+        const res = await db.transaction(async (tx) => {
+            const [row] = await tx.select({ u: users, role: roles.code }).from(users).innerJoin(roles, eq(roles.id, users.roleId)).where(eq(users.id, b.userId)).for('update', { of: users });
+            const permitido = row && row.u.active && !row.u.oneup && row.u.pinHash && ['CAIXA', 'COZINHA'].includes(row.role);
+            if (permitido && row.u.pinBloqueadoAte && row.u.pinBloqueadoAte > new Date()) {
+                const min = Math.ceil((row.u.pinBloqueadoAte.getTime() - Date.now()) / 60_000);
+                return { erro: new HttpError(429, `PIN bloqueado por erros seguidos. Tente de novo em ${min} min ou entre com usuário e senha.`, 'PIN_BLOQUEADO') };
             }
-            throw bad('PIN incorreto.');
+            const ok = await conferirPin(b.pin, (permitido && row.u.pinHash) || HASH_FALSO);
+            if (!permitido || !ok) {
+                if (permitido) {
+                    const falhas = row.u.pinFalhas + 1;
+                    await tx.update(users).set(falhas >= PIN_MAX_ERROS
+                        ? { pinFalhas: 0, pinBloqueadoAte: new Date(Date.now() + PIN_BLOQUEIO_MIN * 60_000) }
+                        : { pinFalhas: falhas }).where(eq(users.id, row.u.id));
+                    if (falhas >= PIN_MAX_ERROS)
+                        await audit(tx, { userId: row.u.id, action: 'auth.pin_bloqueado', entityType: 'user', entityId: row.u.id, message: `PIN de ${row.u.name} bloqueado por ${PIN_BLOQUEIO_MIN} min depois de ${PIN_MAX_ERROS} erros (aparelho: ${ap.nome ?? '—'}).` });
+                }
+                return { erro: bad('PIN incorreto.') };
+            }
+            await tx.update(users).set({ pinFalhas: 0, pinBloqueadoAte: null }).where(eq(users.id, row.u.id));
+            return { row };
+        });
+        if ('erro' in res) {
+            registerLoginFailure(empId, req.ip, `pin:${b.userId}`);
+            throw res.erro;
         }
+        const row = res.row;
         clearLoginRate(empId, req.ip, `pin:${b.userId}`);
-        await db.update(users).set({ pinFalhas: 0, pinBloqueadoAte: null }).where(eq(users.id, row.u.id));
         await db.update(aparelhos).set({ ultimoUso: new Date() }).where(eq(aparelhos.id, ap.id));
-        const s = await createSession(row.u.id, true);
+        const s = await createSession(row.u.id, true, ap.id);
         reply.setCookie(COOKIE, s.token, { path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, expires: s.expiresAt });
         await audit(db, { userId: row.u.id, action: 'auth.login', entityType: 'user', entityId: row.u.id, message: `${row.u.name} entrou com PIN (${ap.nome ?? 'aparelho da equipe'}).` });
         return { user: { id: row.u.id, name: row.u.name, username: row.u.username, role: row.role, oneup: false } };
-    });
+    }));
     // Aparelhos da equipe (Dono vê e tira o acesso de um aparelho perdido)
     app.get('/api/aparelhos', { preHandler: requireRole('ADMIN') }, async () => db.select({ id: aparelhos.id, nome: aparelhos.nome, createdAt: aparelhos.createdAt, ultimoUso: aparelhos.ultimoUso, criadoPor: users.name })
         .from(aparelhos).leftJoin(users, eq(users.id, aparelhos.criadoPor)).where(isNull(aparelhos.revogadoEm)).orderBy(desc(aparelhos.ultimoUso)));
@@ -86,7 +96,8 @@ export async function authRoutes(app) {
         const [a] = await db.update(aparelhos).set({ revogadoEm: new Date() }).where(and(eq(aparelhos.id, id), isNull(aparelhos.revogadoEm))).returning();
         if (!a)
             throw notFound('Aparelho não encontrado.');
-        await audit(db, { userId: me(req).id, action: 'aparelho.revogar', entityType: 'aparelho', entityId: id, message: `${me(req).name} tirou o acesso por PIN do aparelho "${a.nome ?? id}".` });
+        const saiu = await derrubarSessoesDoAparelho(id);
+        await audit(db, { userId: me(req).id, action: 'aparelho.revogar', entityType: 'aparelho', entityId: id, message: `${me(req).name} tirou o acesso do aparelho "${a.nome ?? id}"${saiu ? ` (${saiu} sessão(ões) encerrada(s))` : ''}.` });
         return { ok: true };
     });
     app.post('/api/auth/logout', async (req, reply) => {

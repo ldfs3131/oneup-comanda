@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, qs } from '../../api';
+import { api, qs, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { addDaysISO, brl, dateOnly, fmtDay, pct, todayISO } from '../../format';
 import { Badge, Modal, MoneyInput, ReasonModal, Spinner, useAction } from '../../components/ui';
 import RitmoMes from './RitmoMes';
@@ -288,6 +288,7 @@ function ExpenseModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState('');
   const [drawer, setDrawer] = useState(false);
+  const envio: ChaveEnvio = useRef(null); // a mesma chave num novo toque: rede lenta não lança a despesa duas vezes
   const [newCat, setNewCat] = useState('');
   const { busy, run } = useAction();
   const qc = useQueryClient();
@@ -296,7 +297,8 @@ function ExpenseModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
     <Modal title="Nova despesa" onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Voltar</button>
       <button className="btn primary" disabled={!ok || busy} onClick={async () => {
-        if (await run(() => api.post('/api/expenses', { description: desc.trim(), categoryId: cat, amountCents: amount, date, note: note.trim() || null, paidFromRegister: drawer }, true), 'Despesa lançada.')) { onDone(); onClose(); }
+        const corpo = { description: desc.trim(), categoryId: cat, amountCents: amount, date, note: note.trim() || null, paidFromRegister: drawer };
+        if (await run(() => api.post('/api/expenses', corpo, chaveDoEnvio(envio, corpo)), 'Despesa lançada.')) { onDone(); onClose(); }
       }}>Lançar {amount ? brl(amount) : ''}</button>
     </>}>
       <div className="col gap-lg">

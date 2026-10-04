@@ -67,7 +67,10 @@ case "${1:-ajuda}" in
     carregar_env; systemctl --no-pager --lines=0 status oneup "${ONEUP_WEB:-caddy}" postgresql | grep -E '●|Active' ; echo
     saude 3 && verde "Sistema respondendo." || vermelho "Sistema NÃO está respondendo."
     carregar_env; echo "Endereço base: $BASE_DOMAIN · servidor web: ${ONEUP_WEB:-caddy} · porta interna: $PORT · versão: $(node -p "require('$APP/server/package.json').version")"
-    echo "Última cópia: $(ls -1t $BKP/oneup-*.dump 2>/dev/null | head -1 || echo nenhuma)"
+    pg_isready -q && verde "Banco de dados respondendo." || vermelho "Banco de dados NÃO responde (sudo systemctl restart postgresql)."
+    ult=$(ls -1t $BKP/oneup-*.dump 2>/dev/null | head -1)
+    if [ -n "$ult" ]; then h=$(( ( $(date +%s) - $(stat -c %Y "$ult") ) / 3600 )); [ "$h" -le 26 ] && echo "Última cópia: $(basename "$ult") (há ${h} h)" || vermelho "Última cópia há ${h} h: o backup diário NÃO está rodando."; else vermelho "Nenhuma cópia de segurança encontrada."; fi
+    du -sh "$BKP" 2>/dev/null | awk '{print "Pasta de cópias: "$1}'
     df -h / | tail -1 | awk '{print "Disco: "$3" usados de "$2" ("$5")"}'
     ;;
   logs) journalctl -u oneup -n "${2:-100}" --no-pager ;;

@@ -264,13 +264,26 @@ export async function voltarAoPadrao(chaves, user) {
     }
     return aplicarConfiguracoes(valores, user, 'PADRAO');
 }
-export async function historico(chave) {
+/** Chaves que a pessoa pode ver (a seção da ONE UP e as internas nunca saem para o Dono, Caixa ou Cozinha). */
+export function chaveVisivel(chave, user) {
+    const d = defDe(chave);
+    if (!d)
+        return !!user?.oneup; // chaves de formas de pagamento etc. no histórico
+    if (OCULTAS.has(d.secao))
+        return !!user?.oneup;
+    return !!user?.oneup || !SO_ONEUP.has(d.secao);
+}
+export async function configuracoesVisiveis(user) {
+    const all = await lerConfiguracoes();
+    return Object.fromEntries(Object.entries(all).filter(([k]) => chaveVisivel(k, user)));
+}
+export async function historico(chave, user) {
     const rows = await db.select({
         id: configHistorico.id, chave: configHistorico.chave, antes: configHistorico.antes, depois: configHistorico.depois,
         origem: configHistorico.origem, criadoEm: configHistorico.createdAt, usuario: users.name,
     }).from(configHistorico).leftJoin(users, eq(users.id, configHistorico.userId))
         .where(chave ? eq(configHistorico.chave, chave) : undefined).orderBy(desc(configHistorico.id)).limit(200);
-    return rows.map((r) => ({ ...r, rotulo: defDe(r.chave)?.rotulo ?? r.chave }));
+    return rows.filter((r) => !defDe(r.chave) || chaveVisivel(r.chave, user)).map((r) => ({ ...r, rotulo: defDe(r.chave)?.rotulo ?? r.chave }));
 }
 export const schemaPatch = z.object({ valores: z.record(z.string(), z.unknown()) });
 export const schemaPadrao = z.object({ chaves: z.array(z.string()).min(1).max(100) });

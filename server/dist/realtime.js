@@ -1,5 +1,5 @@
 import { Server } from 'socket.io';
-import { tokenFromCookieHeader, userFromToken } from './auth.js';
+import { aoEsquecerUsuario, tokenFromCookieHeader, userFromToken } from './auth.js';
 import { bumpDataVersion, bumpMenuVersion, estoqueMudou } from './lib/cache.js';
 import { currentContext, runAsEmpresa } from './db/index.js';
 import { empresaPorSlug, slugDaRequisicao } from './lib/empresa.js';
@@ -14,6 +14,16 @@ export function initRealtime(server) {
     io.use(async (socket, next) => {
         try {
             const h = socket.handshake.headers;
+            // só a página do próprio endereço abre o tempo real (outro site com o cookie da pessoa é recusado)
+            if (h.origin) {
+                try {
+                    if (new URL(h.origin).host !== h.host)
+                        return next(new Error('origem'));
+                }
+                catch {
+                    return next(new Error('origem'));
+                }
+            }
             const emp = await empresaPorSlug(slugDaRequisicao(h.host, h['x-empresa']));
             if (!emp)
                 return next(new Error('empresa'));
@@ -37,8 +47,18 @@ export function initRealtime(server) {
             socket.join(`${e}:cashier`);
         if (role === 'ADMIN')
             socket.join(`${e}:admin`);
+        socket.join(`${e}:user:${socket.data.user.id}`);
     });
+    // pessoa desativada, rebaixada, que trocou a senha ou saiu: os aparelhos dela param de receber na hora
+    aoEsquecerUsuario.push((e, userId) => { io?.in(`${e}:user:${userId}`).disconnectSockets(true); });
     return io;
+}
+/** Desligamento: fecha os sockets para o servidor sair rápido (tablets reconectam sozinhos no novo processo). */
+export async function fecharRealtime() {
+    if (!io)
+        return;
+    io.disconnectSockets(true);
+    await new Promise((r) => io.close(() => r()));
 }
 export function emit(rooms, event, payload = {}) {
     if (!io)

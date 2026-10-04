@@ -6,6 +6,7 @@ import { cashMovements, cashRegisters, restaurantSettings, users } from '../db/s
 import { me, requireRole } from '../auth.js';
 import { brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
+import { idempotent } from '../lib/idempotency.js';
 import { notify } from '../realtime.js';
 import { currentRegister, requireOpenRegister } from '../services/accounts.js';
 import { registerSummary, resumoCego } from '../services/register.js';
@@ -64,11 +65,12 @@ export async function registerRoutes(app) {
     app.post('/api/register/movements', ops, async (req) => {
         const b = parse(z.object({ type: z.enum(['SANGRIA', 'SUPRIMENTO']), amountCents: centsSchema, reason: reasonSchema }), req.body);
         const user = me(req);
-        await db.transaction(async (tx) => {
+        await idempotent(req, 'register.movement', () => db.transaction(async (tx) => {
             const reg = await requireOpenRegister(tx);
             await tx.insert(cashMovements).values({ cashRegisterId: reg.id, type: b.type, amountCents: b.amountCents, reason: b.reason, userId: user.id });
             await audit(tx, { userId: user.id, action: 'register.movement', entityType: 'cash_register', entityId: reg.id, message: `${user.name} registrou ${b.type === 'SANGRIA' ? 'sangria (retirada)' : 'suprimento (reforço)'} de ${brl(b.amountCents)}. Motivo: ${b.reason}` });
-        });
+            return { ok: true };
+        }));
         notify.registerChanged();
         return { ok: true };
     });

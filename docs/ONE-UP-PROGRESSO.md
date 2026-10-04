@@ -7,11 +7,22 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 | 0. Auditoria e prompt mestre | ✅ 01/10 | `docs/ONE-UP-AUDITORIA.md`, `docs/PROMPT-MESTRE-ONE-UP.md` |
 | 1. ONE Base multi-empresa | ✅ 01/10 | 124 e2e + 30 insights + demo + **145 de vazamento** |
 | 2. Personalização pelo Dono | ✅ 01/10 | **54 de personalização** + telas no navegador (computador, tablet e celular) |
-| 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ✅ 04/10 (3.2.0) | **67 da Leva 1** + às cegas no e2e |
+| 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ✅ 04/10 (3.2.0) · falta o interruptor "Permitir suporte" (ONE UP só vê dados de clientes com o Dono liberando) | **67 da Leva 1** + às cegas no e2e |
 | 4. Ficha 5.3–5.10 (R3 Leva 1 restante) | ✅ 04/10 (3.2.0) | suíte `leva1` |
 | 5. Command Center fase 1 + Financeiro ONE UP + modo suporte | pendente | |
 | 6. Migração do Happy Alpha (paralelo e virada) | pendente | |
 | 7. Inteligência, Raio-X, Recuperador | pendente | |
+
+## Versão 3.2.1 (04/10) — correções da auditoria do comitê
+
+Relatório completo: `docs/AUDITORIA-COMITE-2026-10-04.md`. Corrigido (com a suíte `auditoria`, 17 verificações, e `migracoes`, 7):
+migração da 3.2 que seria pulada ao atualizar; rajada no login (reserva antes do bcrypt, fila curta, limite no Nginx);
+bloqueio do PIN atômico; revogar aparelho derruba a sessão; tempo real desconecta quem foi desativado e recusa outra origem;
+POST de outra origem recusado; desconto de conta cancelada fora dos números; cortesia de 100% encerra; caixa não perdoa
+fiado nem cancela conta com comida pronta (com a trava); despesa/sangria/desconto sem duplicar; mesa de 1 dígito;
+/api/settings, histórico e menu sem vazar chaves da ONE UP e custo; tempo de cozinha só ONE UP; saúde confere o banco;
+desligamento em ~1 s; JIT desligado e tempos-limite no banco; índices das telas ao vivo; instalador não muda o fuso;
+"Tentar de novo" em vez de carregamento infinito; erro do pedido visível ao cliente; link do app de clientes certo.
 
 ## Versão 3.2.0 (04/10) — aplicativo do restaurante + Leva 1 completa
 

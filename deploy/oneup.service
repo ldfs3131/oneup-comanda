@@ -14,6 +14,9 @@ EnvironmentFile=/opt/oneup/.env
 ExecStart=/opt/oneup/node/bin/node server/dist/index.js
 Restart=always
 RestartSec=3
+# desligamento rápido (o processo fecha os tablets e sai em segundos; nunca 90 s fora do ar)
+TimeoutStopSec=15
+KillMode=mixed
 # segurança: o processo só escreve na pasta de imagens enviadas
 NoNewPrivileges=true
 ProtectSystem=strict

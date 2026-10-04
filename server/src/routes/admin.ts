@@ -8,7 +8,7 @@ import { deliverySettings, excludedDays, referenciasExternas, restaurantSettings
 import { me, requireOneup, requireRole } from '../auth.js';
 import { bad, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
-import { aplicarConfiguracoes, lerConfiguracoes } from '../services/configuracoes.js';
+import { aplicarConfiguracoes, configuracoesVisiveis, lerConfiguracoes } from '../services/configuracoes.js';
 import { notify } from '../realtime.js';
 import { runBackupAndRecord } from '../services/backup.js';
 import { setEstablishmentOpen } from '../services/day.js';
@@ -61,7 +61,7 @@ export async function adminRoutes(app: FastifyInstance) {
              COUNT(DISTINCT o.id) AS orders, COUNT(DISTINCT o.account_id) AS accounts
       FROM orders o JOIN order_items oi ON oi.order_id = o.id
       WHERE ${inRange('o.created_at', r)} AND oi.status='ACTIVE' AND ${liveOrders}`);
-    const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count FROM discounts WHERE ${inRange('created_at', r)}`);
+    const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count FROM discounts WHERE ${inRange('created_at', r)} AND NOT EXISTS (SELECT 1 FROM accounts ca WHERE ca.id = discounts.account_id AND ca.status = 'CANCELLED')`);
     const discByUser = await q(sql`
       SELECT u.name, SUM(d.amount_cents) AS cents, COUNT(*) AS count FROM discounts d JOIN users u ON u.id=d.user_id
       WHERE ${inRange('d.created_at', r)} GROUP BY u.name ORDER BY cents DESC`);
@@ -117,7 +117,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const ano = { from: `${r.to.slice(0, 4)}-01-01`, to: `${r.to.slice(0, 4)}-12-31` };
     const [year] = s.meiEnabled ? await q(sql`
       SELECT COALESCE(SUM(oi.unit_price_cents*oi.quantity),0)
-             - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE ${inRange('created_at', ano)}),0) AS cents
+             - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE ${inRange('created_at', ano)} AND NOT EXISTS (SELECT 1 FROM accounts ca WHERE ca.id = discounts.account_id AND ca.status = 'CANCELLED')),0) AS cents
       FROM orders o JOIN order_items oi ON oi.order_id=o.id
       WHERE oi.status='ACTIVE' AND ${liveOrders} AND ${inRange('o.created_at', ano)}`) : [{ cents: 0 }];
 
@@ -140,7 +140,8 @@ export async function adminRoutes(app: FastifyInstance) {
       topProducts: topProducts.map((t) => ({ name: t.name, qty: n(t.qty), cents: n(t.cents) })),
       byCategory: byCategory.map((c) => ({ name: c.name, cents: n(c.cents), qty: n(c.qty) })),
       byHour: byHour.map((h) => ({ hour: n(h.h), orders: n(h.orders) })),
-      kitchenMedianMin: times?.kitchen == null ? null : Math.round(Number(times.kitchen)), kitchenSamples: n(times?.n),
+      // tempo de cozinha é leitura da ONE UP (mapa de demora): o Dono não recebe
+      kitchenMedianMin: !me(req).oneup || times?.kitchen == null ? null : Math.round(Number(times.kitchen)), kitchenSamples: me(req).oneup ? n(times?.n) : 0,
       lowStock: lowStock.map((l) => ({ id: l.id, name: l.name, qty: n(l.qty), lim: n(l.lim) })),
       semEstoque: semEstoque.map((x) => ({ id: x.id, name: x.name, faltou: n(x.faltou), vezes: n(x.vezes) })),
       // instalação própria mostra o aviso de backup; online o backup é da plataforma (sem aviso para o restaurante)
@@ -271,7 +272,7 @@ export async function adminRoutes(app: FastifyInstance) {
       },
       delivery: { isOpen: d.isOpen },
       // valores efetivos do catálogo de personalização (o que muda o comportamento das telas)
-      config: await lerConfiguracoes(),
+      config: await configuracoesVisiveis(me(req)),
       // detalhes do servidor só em instalação própria (online, cada empresa não precisa nem deve ver)
       backupDirs: config.baseDomain ? [] : config.backupDirs, demoMode: config.demoMode, lanUrls: config.baseDomain ? [] : lanUrls(),
       publicPort: config.baseDomain ? null : config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled || me(req).oneup,

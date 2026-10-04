@@ -2,14 +2,16 @@ export function brl(cents: number | null | undefined): string {
   const c = Number(cents ?? 0);
   const neg = c < 0;
   const [int, dec] = (Math.abs(c) / 100).toFixed(2).split('.');
-  return `${neg ? '-' : ''}R$ ${int.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${dec}`;
+  // espaço que não quebra: "R$" nunca fica numa linha e o valor na outra
+  return `${neg ? '-' : ''}R$\u00a0${int.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${dec}`;
 }
 
 /** "25,50" / "25.5" / "25" → 2550. Retorna null se inválido. */
 export function parseMoney(s: string): number | null {
   const t = s.trim().replace(/\s|R\$/g, '');
   if (!t) return null;
-  const norm = t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t;
+  // "1.500" e "2.000" (ponto de milhar sem centavos) = mil e quinhentos, dois mil
+  const norm = t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : /^\d{1,3}(\.\d{3})+$/.test(t) ? t.replace(/\./g, '') : t;
   if (!/^\d+(\.\d{0,2})?$/.test(norm)) return null;
   return Math.round(Number(norm) * 100);
 }

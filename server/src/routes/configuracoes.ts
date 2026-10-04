@@ -39,7 +39,7 @@ export async function configuracoesRoutes(app: FastifyInstance) {
 
   app.get('/api/configuracoes/historico', dono, async (req) => {
     const { chave } = parse(z.object({ chave: z.string().max(60).optional() }), req.query);
-    return historico(chave);
+    return historico(chave, me(req));
   });
 
   /** Logotipo: gravado na pasta da própria empresa. */

@@ -130,7 +130,11 @@ export async function menuRoutes(app) {
     const admin = { preHandler: requireRole('ADMIN') };
     const ops = { preHandler: requireRole('CAIXA') };
     app.get('/api/menu', { preHandler: [requireRole(), respostaCompartilhada('menu', 'menu', 30000)] }, async (req) => {
-        return loadMenu(db, { includeInactive: me(req).role === 'ADMIN' && req.query.all === '1' });
+        const menu = await loadMenu(db, { includeInactive: me(req).role === 'ADMIN' && req.query.all === '1' });
+        if (me(req).role === 'ADMIN')
+            return menu;
+        // custo (margem do restaurante) é só do Dono
+        return menu.map((c) => ({ ...c, products: c.products.map(({ costCents: _c, ...p }) => p) }));
     });
     // ----- Categorias -----
     app.post('/api/categories', admin, async (req) => {

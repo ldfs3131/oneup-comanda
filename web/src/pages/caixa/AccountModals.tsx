@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { addDaysISO, brl, todayISO } from '../../format';
@@ -130,17 +130,19 @@ export function PaymentModal({ account, onClose, onDone }: { account: AccountDet
 export function DiscountModal({ account, onClose, onDone }: { account: AccountDetail; onClose: () => void; onDone: () => void }) {
   const [amount, setAmount] = useState<number | null>(null);
   const [reason, setReason] = useState('');
+  const envioDesc: ChaveEnvio = useRef(null);
   const { busy, run } = useAction();
   const ok = amount != null && amount > 0 && amount <= account.totals.balance && reason.trim().length >= 3;
   return (
     <Modal title={`Desconto / ajuste · Conta #${account.number}`} onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Voltar</button>
       <button className="btn primary" disabled={!ok || busy} onClick={async () => {
-        if (await run(() => api.post(`/api/accounts/${account.id}/discounts`, { amountCents: amount, reason: reason.trim() }), 'Desconto registrado.')) { onDone(); onClose(); }
+        const corpo = { amountCents: amount, reason: reason.trim() };
+        if (await run(() => api.post(`/api/accounts/${account.id}/discounts`, corpo, chaveDoEnvio(envioDesc, corpo)), 'Desconto registrado.')) { onDone(); onClose(); }
       }}>Aplicar {amount ? brl(amount) : ''}</button>
     </>}>
       <div className="col gap-lg">
-        <div className="muted small">Saldo atual: <b>{brl(account.totals.balance)}</b>. Sem limite de valor, mas o motivo é obrigatório. Fica registrado com seu nome, horário, total antes e depois.</div>
+        <div className="muted small">Saldo atual: <b>{brl(account.totals.balance)}</b>. O motivo é obrigatório; o Dono pode definir um limite para o caixa em Configurações. Fica registrado com seu nome, horário, total antes e depois.</div>
         {amount != null && amount > 0 && <div className="kv"><span>Total da conta</span><span className="v">{brl(account.totals.total)} → {brl(account.totals.total - amount)}</span></div>}
         <label className="field"><span>Valor do desconto</span><MoneyInput value={amount} onChange={setAmount} autoFocus /></label>
         <label className="field"><span>Motivo (obrigatório)</span>

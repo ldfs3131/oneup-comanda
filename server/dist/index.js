@@ -10,7 +10,7 @@ import { appPool, bindContext, db, ensureEmpresaBase, ensurePlatformData, releas
 import { empresas, restaurantSettings } from './db/schema.js';
 import { empresaPorSlug, slugDaRequisicao } from './lib/empresa.js';
 import { errorHandler } from './lib/http.js';
-import { initRealtime } from './realtime.js';
+import { fecharRealtime, initRealtime } from './realtime.js';
 import { authRoutes } from './routes/auth.js';
 import { menuRoutes } from './routes/menu.js';
 import { accountRoutes } from './routes/accounts.js';
@@ -53,12 +53,14 @@ function empresaPorRequisicao(app) {
 export async function buildApp() {
     const app = Fastify({
         logger: { level: process.env.LOG_LEVEL ?? 'warn' },
+        forceCloseConnections: true,
         bodyLimit: 1024 * 1024,
         // atrás do proxy (Coolify/Cloudflare) o IP real vem do cabeçalho; sem isso todos parecem o mesmo aparelho
         trustProxy: config.trustProxy,
     });
     app.setErrorHandler(errorHandler);
     securityHeaders(app);
+    mesmaOrigem(app);
     empresaPorRequisicao(app);
     registrarRespostaCompartilhada(app);
     await app.register(cookie);
@@ -77,7 +79,17 @@ export async function buildApp() {
     await app.register(configuracoesRoutes);
     await app.register(pendenciasRoutes);
     await app.register(importacaoRoutes);
-    app.get('/api/health', async () => ({ ok: true, time: new Date().toISOString() }));
+    // Saúde de verdade: confere o banco (com o Postgres parado responde 503, não "ok")
+    app.get('/api/health', async (_req, reply) => {
+        try {
+            await Promise.race([systemPool.query('SELECT 1'), new Promise((_, r) => setTimeout(() => r(new Error('tempo')), 2000))]);
+            return { ok: true, versao: config.version, time: new Date().toISOString() };
+        }
+        catch {
+            return reply.code(503).send({ ok: false, erro: 'banco de dados indisponível' });
+        }
+    });
+    app.get('/api/health/vivo', async () => ({ ok: true }));
     // App instalável (tablet da cozinha, celular do caixa): nome do restaurante no ícone da tela inicial (ícone ONE UP Comanda)
     // Dois aplicativos instaláveis com o nome e o ícone do restaurante: CLIENTES (abre o cardápio) e EQUIPE (abre o sistema)
     // Corta no fim de uma palavra (nome do ícone não fica "Restaurante do Teste Equ")
@@ -146,6 +158,31 @@ export async function buildApp() {
         });
     }
     return app;
+}
+/**
+ * Mudanças (POST/PUT/PATCH/DELETE) só da própria página: se o navegador informa a origem, ela tem de ser o mesmo
+ * endereço. Barra formulário forjado vindo de outro subdomínio do mesmo site (SameSite=Lax não protege isso).
+ */
+function mesmaOrigem(app) {
+    app.addHook('onRequest', async (req, reply) => {
+        if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS' || !req.url.startsWith('/api/'))
+            return;
+        const origin = req.headers.origin;
+        const site = req.headers['sec-fetch-site'];
+        let ok = true;
+        if (origin) {
+            try {
+                ok = new URL(origin).host === req.headers.host;
+            }
+            catch {
+                ok = false;
+            }
+        }
+        else if (site && site !== 'same-origin' && site !== 'none')
+            ok = false;
+        if (!ok)
+            return reply.code(403).send({ error: 'Origem não permitida.', code: 'ORIGEM' });
+    });
 }
 function securityHeaders(app) {
     app.addHook('onSend', async (req, reply, payload) => {
@@ -225,7 +262,19 @@ async function main() {
         console.log(`  Cardápio público:  http://localhost:${config.publicPort}/cardapio (somente cardápio)`);
     }
     console.log('');
-    const stop = async () => { await app.close(); await appPool.end(); await systemPool.end(); process.exit(0); };
+    // Desligar rápido: fecha os sockets dos tablets antes (senão o processo espera até o systemd matar, ~90 s fora do ar)
+    let parando = false;
+    const stop = async () => {
+        if (parando)
+            return;
+        parando = true;
+        setTimeout(() => process.exit(0), 8000).unref();
+        await fecharRealtime().catch(() => undefined);
+        await app.close().catch(() => undefined);
+        await appPool.end().catch(() => undefined);
+        await systemPool.end().catch(() => undefined);
+        process.exit(0);
+    };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
 }

@@ -68,6 +68,7 @@ export const sessions = pgTable('sessions', {
     userId: integer('user_id').notNull().references(() => users.id),
     expiresAt: ts('expires_at').notNull(),
     createdAt: createdAt(),
+    aparelhoId: integer('aparelho_id'),
 });
 // ---------- Cardápio ----------
 export const categories = pgTable('categories', {

@@ -62,6 +62,12 @@ function Home() {
   return <Navigate to={user ? homeFor(user.role) : '/login'} replace />;
 }
 
+/** Telas de leitura da ONE UP: para o Dono, o endereço simplesmente leva ao painel. */
+function SoOneUp({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  return user?.oneup ? <>{children}</> : <Navigate to="/admin" replace />;
+}
+
 export default function App() {
   return (
     <>
@@ -96,9 +102,9 @@ export default function App() {
         <Route path="configuracoes" element={<SettingsPage />} />
         <Route path="insights" element={<InsightsPage />} />
         <Route path="financeiro" element={<FinancePage />} />
-        <Route path="tempo" element={<TimingPage />} />
+        <Route path="tempo" element={<SoOneUp><TimingPage /></SoOneUp>} />
         <Route path="pedidos" element={<OrdersHistory />} />
-        <Route path="oneup/base" element={<BaseComparacao />} />
+        <Route path="oneup/base" element={<SoOneUp><BaseComparacao /></SoOneUp>} />
         <Route path="estoque" element={<StockPage />} />
         <Route path="pendencias" element={<Pendencias />} />
       </Route>

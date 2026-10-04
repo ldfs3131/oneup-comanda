@@ -59,7 +59,9 @@ fi
 
 # -------------------------------------------------------------------------------------
 passo "1/9 Pacotes do sistema (servidor web: $WEB)"
-timedatectl set-timezone America/Sao_Paulo 2>/dev/null || true
+# Não mexe no fuso do servidor (o Lava Jato e outros sistemas dependem dele): o ONE UP já usa America/Sao_Paulo
+# internamente e o backup diário roda às 03:30 de Brasília pelo próprio timer.
+export NEEDRESTART_MODE=l   # o apt não reinicia serviços de outros sistemas sozinho
 apt-get update -qq
 apt-get install -y -qq curl ca-certificates gnupg git xz-utils ufw postgresql postgresql-contrib dnsutils >/dev/null
 # memória extra de segurança (VPS pequena): 2 GB de swap, só se ainda não houver

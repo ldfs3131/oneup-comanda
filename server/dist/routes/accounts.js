@@ -257,8 +257,9 @@ export async function accountRoutes(app) {
         if (falta.length)
             throw bad(`Preencha: ${falta.join(', ')}.`);
         // Toda conta precisa ser identificável: pelo menos um entre nome, telefone, casa, mesa ou observação (2+ letras/números)
-        const real = (t) => (t ?? '').replace(/[^\p{L}\p{N}]/gu, '').length >= 2;
-        if (!b.customerId && ![b.customerName, b.phone, b.contact, b.tableLabel, b.note].some(real)) {
+        // mesa e telefone: 1 caractere já identifica ("Mesa 5"); nome, casa e observação: 2 ou mais
+        const real = (t, min) => (t ?? '').replace(/[^\p{L}\p{N}]/gu, '').length >= min;
+        if (!b.customerId && !(real(b.tableLabel, 1) || real(b.phone, 1) || real(b.customerName, 2) || real(b.contact, 2) || real(b.note, 2))) {
             throw bad('Para abrir o pedido, preencha pelo menos um: nome, telefone, mesa ou observação.');
         }
         if (b.customerId) {
@@ -452,13 +453,16 @@ export async function accountRoutes(app) {
         const { id } = parse(idParam, req.params);
         const b = parse(z.object({ amountCents: centsSchema, reason: reasonSchema }), req.body);
         const user = me(req);
-        await db.transaction(async (tx) => {
+        await idempotent(req, 'account.discount', () => db.transaction(async (tx) => {
             const acc = await getAccount(tx, id, true);
             await assertAccountInScope(tx, user, acc);
             assertAccountEditable(acc.status);
             const t = await accountTotals(tx, id);
             if (b.amountCents > t.balance)
                 throw bad(`O desconto não pode ser maior que o saldo em aberto (${brl(t.balance)}).`);
+            // perdoar fiado é decisão do Dono: o caixa não "ajusta" conta a receber (o dinheiro sumiria sem diferença no caixa)
+            if (user.role !== 'ADMIN' && acc.status === 'PENDING')
+                throw new HttpError(403, 'Conta a receber: só o Dono pode dar desconto. Para quitar, use Receber.', 'DESCONTO_FIADO_SO_DONO');
             if (user.role !== 'ADMIN') {
                 const limite = await lerConfig('desconto_max_caixa', tx);
                 if (limite != null && t.subtotal > 0) {
@@ -479,7 +483,8 @@ export async function accountRoutes(app) {
                 message: `${user.name} concedeu ${kind === 'DISCOUNT' ? 'desconto' : 'ajuste'} de ${brl(b.amountCents)} na ${label(acc)} (total ${brl(t.total)} → ${brl(t.total - b.amountCents)}). Motivo: ${b.reason}`,
             });
             await recomputeStatus(tx, id);
-        });
+            return { ok: true };
+        }));
         notify.accountsChanged(id);
         notify.registerChanged();
         return { ok: true };
@@ -526,7 +531,7 @@ export async function accountRoutes(app) {
             await assertAccountInScope(tx, user, acc);
             assertAccountEditable(acc.status);
             const t = await accountTotals(tx, id);
-            if (t.total <= 0)
+            if (t.subtotal <= 0)
                 throw conflict('Conta sem valor. Se nada foi consumido, cancele a conta.');
             if (t.balance !== 0)
                 throw conflict(`Ainda há saldo de ${brl(t.balance)}. Receba o pagamento ou marque como pendente.`);
@@ -563,6 +568,8 @@ export async function accountRoutes(app) {
             if (t.paid > 0)
                 throw conflict('Esta conta já tem pagamentos. Peça ao Dono para estornar antes de cancelar.');
             const ords = await tx.select().from(orders).where(eq(orders.accountId, id));
+            // a mesma trava do cancelamento de pedido: comida que já saiu da cozinha não some cancelando a conta inteira
+            await exigirDonoSeProntoNaCozinha(tx, user, ords.some((o) => o.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status)));
             const reg = await currentRegister(tx);
             let lost = false;
             let stockBack = false;

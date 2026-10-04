@@ -118,8 +118,8 @@ async function main() {
     const p1 = prods.find((p) => p.active && p.priceCents > 0);
     check('Sem nome, telefone, mesa nem obs → recusado', (await caixa.post('/api/accounts', { items: [{ productId: p1.id, quantity: 1 }] })).status === 400);
     check('Obs de 1 letra não vale', (await caixa.post('/api/accounts', { note: 'a', items: [{ productId: p1.id, quantity: 1 }] })).status === 400);
-    const soMesa = await caixa.post('/api/accounts', { tableLabel: '12', items: [{ productId: p1.id, quantity: 1 }] });
-    check('Só a mesa basta', soMesa.status === 200, soMesa.data);
+    const soMesa = await caixa.post('/api/accounts', { tableLabel: '5', items: [{ productId: p1.id, quantity: 1 }] });
+    check('Só a mesa basta, mesmo com um dígito ("5")', soMesa.status === 200, soMesa.data);
     console.log('\n[M4] A receber: data combinada, etiquetas por urgência e cobrança desligada por padrão');
     const mk = async (nome, data) => {
         const a = await caixa.post('/api/accounts', { customerName: nome, items: [{ productId: p1.id, quantity: 1 }] });

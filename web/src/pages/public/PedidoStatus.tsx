@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '../../api';
 import { brl, time } from '../../format';
@@ -29,7 +29,7 @@ export default function PedidoStatus() {
       <div className="card center col gap-lg" style={{ margin: 16 }}>
         <h2>Pedido não encontrado</h2>
         <p className="muted">{(error as ApiError)?.status === 404 ? 'Confira se o link está completo.' : 'Sem conexão agora. A tela tenta de novo sozinha.'}</p>
-        <Link className="btn primary block" to="/cardapio">Ver o cardápio</Link>
+        <a className="btn primary block" href="/cardapio">Ver o cardápio</a>
       </div>
     </div>
   );
@@ -80,7 +80,7 @@ export default function PedidoStatus() {
           </div>
           <div className="small faint">Esta tela atualiza sozinha. O pagamento é feito no balcão.</div>
         </div>
-        <Link className="btn block lg" to="/cardapio" style={{ marginTop: 16 }}>Voltar ao cardápio</Link>
+        <a className="btn block lg" href="/cardapio" style={{ marginTop: 16 }}>Voltar ao cardápio</a>
       </main>
     </div>
   );

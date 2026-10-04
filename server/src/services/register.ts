@@ -24,10 +24,10 @@ export async function registerSummary(tx: Executor, registerId: number) {
     SELECT COALESCE(SUM(p.amount_cents), 0) AS cents, COUNT(DISTINCT p.account_id) AS accounts
     FROM payments p JOIN accounts a ON a.id = p.account_id
     WHERE p.cash_register_id = ${registerId} AND p.reversed_at IS NULL AND a.status IN ('PARTIALLY_PAID','PENDING')`);
-  const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count FROM discounts WHERE cash_register_id = ${registerId}`);
+  const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count FROM discounts WHERE cash_register_id = ${registerId} AND NOT EXISTS (SELECT 1 FROM accounts ca WHERE ca.id = discounts.account_id AND ca.status = 'CANCELLED')`);
   const discByUser = await q(sql`
     SELECT u.name, COALESCE(SUM(d.amount_cents),0) AS cents, COUNT(*) AS count
-    FROM discounts d JOIN users u ON u.id = d.user_id WHERE d.cash_register_id = ${registerId} GROUP BY u.name ORDER BY cents DESC`);
+    FROM discounts d JOIN users u ON u.id = d.user_id WHERE d.cash_register_id = ${registerId} AND NOT EXISTS (SELECT 1 FROM accounts ca WHERE ca.id = d.account_id AND ca.status = 'CANCELLED') GROUP BY u.name ORDER BY cents DESC`);
   const [canc] = await q(sql`
     SELECT COALESCE(SUM(amount_cents),0) AS cents, COUNT(*) AS count,
            COALESCE(SUM(amount_cents) FILTER (WHERE was_in_preparation),0) AS loss_cents

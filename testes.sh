@@ -14,6 +14,7 @@ DATABASE_URL=$PG/of_e2e node dist/scripts/setup.js --admin-name=Administrador --
 DATABASE_URL=$PG/of_e2e PORT=3100 INSIGHTS_ENABLED=true DEFAULT_EMPRESA=empresa-1 node dist/index.js > /tmp/srv-3100.log 2>&1 & S1=$!
 espera 3100
 roda e2e env DATABASE_URL=$PG/of_e2e BASE_URL=http://localhost:3100 node dist/scripts/e2e.js
+roda migracoes env DATABASE_URL=$PG/of_e2e node dist/scripts/migracoes-test.js
 roda insights env DATABASE_URL=$PG/of_insights node dist/scripts/insights-test.js
 kill $S1 2>/dev/null; wait $S1 2>/dev/null
 
@@ -29,6 +30,7 @@ roda comite env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist
 roda oneup env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/oneup-test.js
 roda ritmo env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/ritmo-test.js
 roda leva1 env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/leva1-test.js
+roda auditoria env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/auditoria-test.js
 kill $S2 2>/dev/null; wait $S2 2>/dev/null
 
 echo; [ $falhas -eq 0 ] && echo "TUDO OK" || echo "$falhas suíte(s) falharam"

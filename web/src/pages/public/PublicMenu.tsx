@@ -203,7 +203,7 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
       envio.current = null;
       gravarLocal('oneup:cliente-nome', name.trim()); gravarLocal('oneup:cliente-zap', zap.replace(/\D/g, ''));
       onDone(r);
-    } catch (e) { setErr((e as Error).message); setRevisar(false); } finally { setBusy(false); }
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
 
   if (revisar) return (
@@ -225,6 +225,7 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
           {ofertas && <div>✓ Aceito receber ofertas pelo WhatsApp</div>}
         </div>
         <div className="small muted">O caixa confirma o pedido e o pagamento é feito no balcão. Depois de enviar, você acompanha o andamento nesta tela.</div>
+        {err && <div className="problem-box" role="alert">Não foi possível enviar: {err}</div>}
       </div>
     </Modal>
   );
@@ -246,7 +247,7 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
           {tentou && !nomeOk && <div className="small cancel-text">Informe o seu nome.</div>}</label>
         <label className="field"><span>Seu WhatsApp *</span><input className="input" inputMode="tel" autoComplete="tel-national" value={zap} onChange={(e) => setZap(mascaraZap(e.target.value))} placeholder="(11) 91234-5678" />
           {tentou && !zapOk && <div className="small cancel-text">Informe o WhatsApp com DDD, por exemplo (11) 91234-5678.</div>}
-          <div className="small faint">Usado só para falar com você sobre este pedido.</div></label>
+          <div className="small faint">Usado para este pedido e para o restaurante reconhecer você nos próximos. Sem ofertas, a não ser que você marque abaixo.</div></label>
         <div className="seg">{modes.map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)}>{MODO_LABEL[m]}</button>)}</div>
         <label className="field"><span>{mode === 'ENTREGA' ? 'Endereço / casa *' : 'Onde você está? (opcional)'}</span>
           <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={mode === 'ENTREGA' ? 'Ex.: casa 123' : 'Ex.: perto da piscina'} maxLength={120} />
@@ -254,7 +255,7 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
         <label className="field"><span>Observação</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: sem cebola" maxLength={200} /></label>
         <label className="check small"><input type="checkbox" checked={ofertas} onChange={(e) => setOfertas(e.target.checked)} />
           Aceito receber ofertas e novidades do {restaurante} pelo WhatsApp. Posso pedir para parar quando quiser. (opcional)</label>
-        {err && <div className="cancel-text">{err}</div>}
+        {err && <div className="cancel-text" role="alert">{err}</div>}
       </div>
     </Modal>
   );

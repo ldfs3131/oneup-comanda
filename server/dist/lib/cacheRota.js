@@ -4,7 +4,7 @@ const guardadas = new Map();
 export function respostaCompartilhada(nome, tipo, ttlMs) {
     return async (req, reply) => {
         const versao = tipo === 'menu' ? menuVersion() : dataVersion();
-        const chave = `${currentContext()?.empresaId ?? 0}:${nome}:${req.user?.role ?? '-'}:${req.url}`;
+        const chave = `${currentContext()?.empresaId ?? 0}:${nome}:${req.user?.role ?? '-'}${req.user?.oneup ? '+oneup' : ''}:${req.url}`;
         const e = guardadas.get(chave);
         if (e && e.versao === versao) {
             if (e.payload !== undefined && e.ate > Date.now())

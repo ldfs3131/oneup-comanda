@@ -80,8 +80,9 @@ export async function recomputeStatus(tx: Executor, accountId: number) {
   if (acc.status === 'CLOSED' || acc.status === 'CANCELLED' || acc.status === 'MERGED') return acc.status;
   const t = await accountTotals(tx, accountId);
   let status: AccountStatus;
-  if (acc.status === 'PENDING') status = t.balance <= 0 && t.total > 0 ? 'PAID' : 'PENDING';
-  else if (t.total > 0 && t.balance <= 0) status = 'PAID';
+  // "teve consumo e não deve nada" = PAGA, mesmo com cortesia de 100% (total 0) ou fiado perdoado
+  if (acc.status === 'PENDING') status = t.balance <= 0 && t.subtotal > 0 ? 'PAID' : 'PENDING';
+  else if (t.subtotal > 0 && t.balance <= 0) status = 'PAID';
   else if (t.paid > 0) status = 'PARTIALLY_PAID';
   else status = 'OPEN';
   if (status !== acc.status) await tx.update(accounts).set({ status }).where(eq(accounts.id, accountId));

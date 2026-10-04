@@ -159,22 +159,17 @@ export async function buildApp() {
     // Site (React compilado) + rotas do SPA
     if (existsSync(config.webDist)) {
         await app.register(fastifyStatic, {
-            root: config.webDist, prefix: '/',
+            root: config.webDist, prefix: '/', index: false, allowedPath: (p) => p !== '/' && p !== '/index.html',
             setHeaders: (res, path) => {
                 res.header('Cache-Control', path.includes('assets') ? 'public, max-age=31536000, immutable' : 'no-cache');
             },
         });
         // o cardápio é instalado como o app dos CLIENTES (manifesto próprio); o resto, como o app da EQUIPE
-        let htmlCardapio = null;
-        app.setNotFoundHandler((req, reply) => {
+        app.setNotFoundHandler(async (req, reply) => {
             if (req.url.startsWith('/api/') || req.url.startsWith('/uploads/')) {
                 return reply.status(404).send({ error: 'Rota não encontrada.' });
             }
-            if (req.url === '/cardapio' || req.url.startsWith('/cardapio?') || req.url.startsWith('/cardapio/')) {
-                htmlCardapio ??= readFileSync(join(config.webDist, 'index.html'), 'utf8').replace('href="/manifest.webmanifest"', 'href="/cardapio.webmanifest"');
-                return reply.type('text/html').header('Cache-Control', 'no-cache').send(htmlCardapio);
-            }
-            return reply.type('text/html').sendFile('index.html');
+            return reply.type('text/html').header('Cache-Control', 'no-cache').send(await paginaDaEmpresa(req));
         });
     }
     return app;
@@ -235,14 +230,14 @@ async function buildPublicApp() {
     await app.register(privacidadeRoutes);
     app.get('/api/meta', async () => ({ demoMode: config.demoMode, public: true }));
     if (existsSync(config.webDist)) {
-        await app.register(fastifyStatic, { root: config.webDist, prefix: '/', index: false, serve: true });
+        await app.register(fastifyStatic, { root: config.webDist, prefix: '/', index: false, allowedPath: (p) => p !== '/' && p !== '/index.html', serve: true });
         app.get('/', async (_req, reply) => reply.redirect('/cardapio'));
-        app.setNotFoundHandler((req, reply) => {
+        app.setNotFoundHandler(async (req, reply) => {
             if (req.url.startsWith('/api/'))
                 return reply.status(404).send({ error: 'Rota não encontrada.' });
             if (!req.url.startsWith('/cardapio') && !req.url.startsWith('/privacidade'))
                 return reply.redirect('/cardapio');
-            return reply.type('text/html').sendFile('index.html');
+            return reply.type('text/html').header('Cache-Control', 'no-cache').send(await paginaDaEmpresa(req));
         });
     }
     return app;
@@ -306,3 +301,47 @@ main().catch((e) => {
     console.error('Falha ao iniciar o servidor:', e);
     process.exit(1);
 });
+/**
+ * Página do site com o nome do restaurante no <title> e nas etiquetas de pré-visualização (WhatsApp, Instagram,
+ * Facebook): quem compartilha o link do cardápio vê o nome, a descrição e o ícone do restaurante, não "ONE UP Comanda".
+ * Robôs de pré-visualização não rodam JavaScript, então isso precisa vir pronto do servidor.
+ */
+let modeloHtml = null;
+const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+async function paginaDaEmpresa(req) {
+    modeloHtml ??= readFileSync(join(config.webDist, 'index.html'), 'utf8');
+    let html = modeloHtml;
+    const url = req.url.split('?')[0];
+    const cardapio = url === '/cardapio' || url.startsWith('/cardapio/');
+    if (cardapio)
+        html = html.replace('href="/manifest.webmanifest"', 'href="/cardapio.webmanifest"');
+    const emp = await empresaPorSlug(slugDaRequisicao(req.headers.host, req.headers['x-empresa'])).catch(() => null);
+    if (!emp)
+        return html;
+    const r = await runAsEmpresa(emp.id, async () => {
+        const [st] = await db.select({ name: restaurantSettings.name }).from(restaurantSettings).limit(1);
+        return { nome: st?.name || emp.nome, pub: await configuracoesPublicas() };
+    }).catch(() => null);
+    if (!r)
+        return html;
+    const nome = String(r.pub.nome_app || r.nome);
+    const imagem = r.pub.icone_app || r.pub.logo || '/comanda-icon-512.png';
+    const host = /^[a-z0-9.-]+(:\d+)?$/i.test(req.headers.host ?? '') ? req.headers.host : '';
+    const base = host ? `${config.cookieSecure ? 'https' : 'http'}://${host}` : '';
+    const titulo = cardapio ? `${nome} — Cardápio` : nome;
+    const descricao = cardapio ? `Veja o cardápio de ${nome} e faça seu pedido pelo celular.` : `${nome} — acesso da equipe.`;
+    html = html
+        .replace(/<title>[^<]*<\/title>/, `<title>${esc(titulo)}</title>`)
+        .replace(/<meta name="description" content="[^"]*"/, `<meta name="description" content="${esc(descricao)}"`)
+        .replace(/<meta name="application-name" content="[^"]*"/, `<meta name="application-name" content="${esc(nome)}"`)
+        .replace(/<meta name="apple-mobile-web-app-title" content="[^"]*"/, `<meta name="apple-mobile-web-app-title" content="${esc(nome)}"`);
+    if (r.pub.icone_app) {
+        html = html.replace(/<link rel="apple-touch-icon" href="[^"]*"/, `<link rel="apple-touch-icon" href="${esc(String(r.pub.icone_app))}"`)
+            .replace(/<link rel="icon" type="image\/png" sizes="192x192" href="[^"]*"/, `<link rel="icon" type="image/png" sizes="192x192" href="${esc(String(r.pub.icone_app))}"`);
+    }
+    const og = [
+        ['og:type', 'website'], ['og:site_name', nome], ['og:title', titulo], ['og:description', descricao],
+        ['og:image', base + imagem], ['og:url', base + url], ['og:locale', 'pt_BR'],
+    ].map(([k, v]) => `<meta property="${k}" content="${esc(v)}" />`).join('\n    ');
+    return html.replace('</head>', `    ${og}\n    <meta name="twitter:card" content="summary" />\n  </head>`);
+}

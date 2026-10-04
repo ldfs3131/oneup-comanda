@@ -50,7 +50,7 @@ async function main() {
 
   // ---------- empresa "ritmo" ----------
   const pgc = new pg.Client({ connectionString: DB_URL }); await pgc.connect();
-  execFileSync('node', ['dist/scripts/setup.js', '--empresa=ritmo', '--nome=Ritmo', '--admin-pass=ritmo-admin', '--caixa-pass=ritmo-caixa', '--cozinha-pass=ritmo-coz', '--cardapio=exemplo'],
+  execFileSync('node', ['dist/scripts/setup.js', '--empresa=ritmo', '--nome=Ritmo', '--admin-pass=ritmo-admin', '--caixa-pass=ritmo-caixa', '--cozinha-pass=ritmo-coz', '--cardapio=piloto'],
     { cwd: SERVER, env: { ...process.env, DATABASE_URL: DB_URL }, stdio: 'ignore' });
   const [{ id: EMP }] = (await pgc.query(`SELECT id FROM empresas WHERE slug='ritmo'`)).rows;
   const ja = (await pgc.query(`SELECT count(*)::int n FROM payments WHERE empresa_id=$1`, [EMP])).rows[0].n;

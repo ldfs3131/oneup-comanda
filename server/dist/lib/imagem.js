@@ -8,7 +8,7 @@ import { empresaAtual } from '../db/index.js';
 import { bad } from './http.js';
 import { empresaPorSlug, slugDaRequisicao } from './empresa.js';
 /** Tipo REAL da imagem pelos primeiros bytes (não pelo nome do arquivo). */
-function tipoReal(b) {
+export function tipoReal(b) {
     if (b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a)
         return 'png';
     if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff)

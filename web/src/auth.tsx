@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from './api';
 import type { User } from './types';
 
-export type Meta = { demoMode: boolean; restaurantName: string; tagline: string; version: string; product?: string; empresa?: string | null; logo?: string | null; accent?: string | null; tema?: 'escuro' | 'claro' | 'auto'; nomeApp?: string | null; icone?: string | null };
+export type Meta = { demoMode: boolean; restaurantName: string; tagline: string; version: string; product?: string; empresa?: string | null; logo?: string | null; accent?: string | null; tema?: 'escuro' | 'claro' | 'auto'; nomeApp?: string | null; icone?: string | null; acessoSuspenso?: boolean };
 type AuthCtx = {
   user: User | null; loading: boolean; offline: boolean; meta: Meta | null;
   login: (u: string, p: string, remember?: boolean) => Promise<User>; loginPin: (userId: number, pin: string) => Promise<User>; logout: () => Promise<void>;

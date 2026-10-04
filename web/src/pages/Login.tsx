@@ -46,6 +46,7 @@ export default function Login() {
 
   return (
     <div className="login-split">
+      {meta?.acessoSuspenso && <div className="banner licenca bloqueio login-demo" role="alert">⛔ <b>Acesso suspenso — fale com a ONE UP.</b></div>}
       {meta?.demoMode && <div className="banner demo login-demo">MODO DEMONSTRAÇÃO — logins admin / caixa / cozinha, senha 1234</div>}
       <section className="login-brand">
         {meta?.logo && <BrandLogo className="login-brand-logo" height={120} />}

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Banners, EstablishmentChip, Logo, SoundToggle, UserMenu, useSettings } from '../../components/layout';
 import { useAuth } from '../../auth';
 import { api } from '../../api';
-import { dateOnly } from '../../format';
+import { dateOnly, fmtDay } from '../../format';
 import { useAction } from '../../components/ui';
 
 export default function AdminLayout() {
@@ -17,6 +17,7 @@ export default function AdminLayout() {
   return (
     <div className="app">
       <Banners />
+      <AvisoLicenca />
       {user?.oneup && <LembreteBackup />}
       <header className="topbar">
         <Logo to="/admin" />
@@ -48,8 +49,9 @@ export default function AdminLayout() {
           {user?.oneup && <>
             <div className="nav-sec">ONE UP</div>
             <NavLink to="/admin/oneup/analise">📊 Central de Análise</NavLink>
-            <NavLink to="/admin/oneup/base">📈 Base de comparação</NavLink>
             <NavLink to="/admin/oneup/recuperacao">💸 Recuperação de vendas</NavLink>
+            <NavLink to="/admin/oneup/plataforma">🏢 Plataforma</NavLink>
+            <NavLink to="/admin/oneup/base">📈 Base de comparação</NavLink>
             <NavLink to="/admin/tempo">⏱ Tempo de preparo</NavLink>
           </>}
           <div className="sep" />
@@ -75,5 +77,31 @@ function LembreteBackup() {
       <button className="btn sm primary" disabled={busy} onClick={() => responder('feito')}>Já fiz</button>
       <button className="btn sm" disabled={busy} onClick={() => responder('amanha')}>Lembrar amanhã</button>
     </div>
+  );
+}
+
+/**
+ * Aviso de licença no topo do painel do Dono: só a partir de 5 dias antes do vencimento, e sempre que estiver
+ * em "só consulta" ou suspensa. Sem valores (a mensalidade não aparece aqui).
+ */
+function AvisoLicenca() {
+  const { data } = useSettings();
+  const { user } = useAuth();
+  const l = data?.licenca;
+  if (!l || !l.avisar) return null;
+  if (l.status === 'SUSPENSO') return (
+    <div className="banner licenca bloqueio" role="alert">⛔ <b>Acesso suspenso</b><span>A equipe do restaurante não consegue entrar. {user?.oneup ? '(Você vê porque é o acesso ONE UP.)' : 'Fale com a ONE UP.'}</span></div>
+  );
+  if (l.status === 'SO_CONSULTA') {
+    if (l.diaAberto) return (
+      <div className="banner licenca aviso" role="status">⚠ <b>{l.vencida ? `A licença venceu${l.venceEm ? ` em ${fmtDay(l.venceEm)}` : ''}.` : 'A ONE UP colocou o sistema em só consulta.'}</b><span>O dia de hoje segue normal até encerrar. No próximo “abrir o dia”, o sistema entra em só consulta — fale com a ONE UP.</span></div>
+    );
+    return (
+      <div className="banner licenca bloqueio" role="alert">🔒 <b>Sistema em só consulta</b><span>Dá para ver o histórico, receber contas abertas e exportar. Abrir o dia e pedidos novos estão bloqueados{l.vencida && l.venceEm ? ` (licença vencida em ${fmtDay(l.venceEm)})` : ''}. Fale com a ONE UP para regularizar.</span></div>
+    );
+  }
+  const d = l.diasParaVencer ?? 0;
+  return (
+    <div className="banner licenca aviso" role="status">📅 <b>{d === 0 ? 'A mensalidade do sistema vence hoje' : `A mensalidade do sistema vence em ${d} dia${d > 1 ? 's' : ''}`}{l.venceEm ? ` (${fmtDay(l.venceEm)})` : ''}.</b><span>Depois do vencimento, o sistema entra em só consulta no próximo “abrir o dia”.</span></div>
   );
 }

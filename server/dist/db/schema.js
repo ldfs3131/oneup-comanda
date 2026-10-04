@@ -10,6 +10,26 @@ export const empresas = pgTable('empresas', {
     produto: text('produto').notNull().default('restaurante'),
     status: text('status').notNull().default('ATIVA'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Licença online (0015): ATIVO | SO_CONSULTA | SUSPENSO, definida pela ONE UP. Vencimento nulo = sem vencimento.
+    licencaStatus: text('licenca_status').notNull().default('ATIVO'),
+    licencaVenceEm: date('licenca_vence_em', { mode: 'string' }),
+    mensalidadeCents: integer('mensalidade_cents').notNull().default(0),
+    plano: text('plano'),
+    donoNome: text('dono_nome'),
+    donoWhatsapp: text('dono_whatsapp'),
+    cobrancaEnviadaEm: timestamp('cobranca_enviada_em', { withTimezone: true }),
+    observacao: text('observacao'),
+});
+/** Histórico de licença e cobrança (só a plataforma lê e grava; sem RLS). */
+export const plataformaHistorico = pgTable('plataforma_historico', {
+    id: serial('id').primaryKey(),
+    empresaId: integer('empresa_id').notNull().references(() => empresas.id),
+    tipo: text('tipo').notNull(),
+    antes: jsonb('antes'),
+    depois: jsonb('depois'),
+    mensagem: text('mensagem').notNull(),
+    usuario: text('usuario'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 // ---------- Enums ----------
 export const roleCode = pgEnum('role_code', ['ADMIN', 'CAIXA', 'COZINHA']);
@@ -139,6 +159,8 @@ export const cashRegisters = pgTable('cash_registers', {
     closingNote: text('closing_note'),
     summary: jsonb('summary'),
     primeiraContagemCents: integer('primeira_contagem_cents'),
+    /** aberto em "só consulta" apenas para receber contas abertas (0015) */
+    somenteReceber: boolean('somente_receber').notNull().default(false),
 });
 export const cashMovements = pgTable('cash_movements', {
     empresaId: empresaRef(),
@@ -514,6 +536,28 @@ export const crmCobrancas = pgTable('crm_cobrancas', {
     encerradoEm: ts('encerrado_em'),
     naoCobrarMotivo: text('nao_cobrar_motivo'),
     updatedAt: ts('updated_at').notNull().defaultNow(),
+    // 0014_crm
+    entradaDia: date('entrada_dia'),
+    ultimoContatoEm: ts('ultimo_contato_em'),
+    ultimoContatoDia: date('ultimo_contato_dia'),
+    contatosNoDia: integer('contatos_no_dia').notNull().default(0),
+    semRespostaSeguidas: integer('sem_resposta_seguidas').notNull().default(0),
+    pagoInformadoDia: date('pago_informado_dia'),
+    pausadoMotivo: text('pausado_motivo'),
+    contatoErrado: text('contato_errado'),
+});
+/** Comprovante de pagamento da recuperação (só ONE UP; arquivo fora da pasta pública). */
+export const crmComprovantes = pgTable('crm_comprovantes', {
+    id: serial('id').primaryKey(),
+    empresaId: empresaRef(),
+    cobrancaId: integer('cobranca_id').notNull().references(() => crmCobrancas.id),
+    arquivo: text('arquivo').notNull(),
+    tipo: text('tipo').notNull(),
+    tamanho: integer('tamanho').notNull(),
+    userId: integer('user_id').references(() => users.id),
+    createdAt: createdAt(),
+    apagadoEm: ts('apagado_em'),
+    apagadoPor: integer('apagado_por').references(() => users.id),
 });
 export const crmEventos = pgTable('crm_eventos', {
     id: serial('id').primaryKey(),

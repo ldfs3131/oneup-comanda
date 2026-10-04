@@ -14,6 +14,7 @@ import { runBackupAndRecord } from '../services/backup.js';
 import { setEstablishmentOpen } from '../services/day.js';
 import { computeInsights } from '../services/insights.js';
 import { config } from '../config.js';
+import { licencaAtual, resumoLicenca } from '../lib/licenca.js';
 
 const n = (v: unknown) => Number(v ?? 0);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -278,6 +279,15 @@ export async function adminRoutes(app: FastifyInstance) {
       backupDirs: config.baseDomain ? [] : config.backupDirs, demoMode: config.demoMode, lanUrls: config.baseDomain ? [] : lanUrls(),
       publicPort: config.baseDomain ? null : config.publicPort, version: config.version, insightsEnabled: config.insightsEnabled || me(req).oneup,
       product: config.productName,
+      // licença online: o Dono vê status, vencimento e dias restantes (aviso a partir de 5 dias antes);
+      // Caixa e Cozinha só o status. Valor da mensalidade e plano nunca saem daqui (só na Central da ONE UP).
+      licenca: await (async () => {
+        const l = await licencaAtual();
+        const dono = me(req).role === 'ADMIN';
+        const diaAberto = dono && l.efetivo !== 'ATIVO'
+          ? !!(await db.execute(sql`SELECT 1 FROM cash_registers WHERE status = 'OPEN' AND NOT somente_receber LIMIT 1`)).rows.length : false;
+        return resumoLicenca(l, dono, diaAberto);
+      })(),
     };
   });
 

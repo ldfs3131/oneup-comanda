@@ -7,11 +7,14 @@ import { HttpError, bad, conflict, idParam, notFound, parse } from '../lib/http.
 import { audit } from '../lib/audit.js';
 import { config } from '../config.js';
 import { configuracoesPublicas } from '../services/configuracoes.js';
+import { erroSuspenso } from '../lib/licenca.js';
 export async function authRoutes(app) {
     app.get('/api/meta', async (req) => {
         const [s] = await db.select().from(restaurantSettings).limit(1);
         const pub = await configuracoesPublicas();
-        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null, tema: pub.tema ?? 'escuro', nomeApp: pub.nome_app || null, icone: pub.icone_app || null };
+        return { demoMode: config.demoMode, restaurantName: s?.name ?? 'Meu restaurante', tagline: s?.tagline ?? '', product: config.productName, empresa: req.empresa?.slug ?? null, logo: pub.logo ?? null, accent: pub.cor_destaque ?? null, tema: pub.tema ?? 'escuro', nomeApp: pub.nome_app || null, icone: pub.icone_app || null,
+            // tela de entrada mostra "Acesso suspenso" (sem datas nem valores: esta consulta é pública)
+            acessoSuspenso: req.empresa?.licencaStatus === 'SUSPENSO' };
     });
     app.post('/api/auth/login', async (req, reply) => comVagaDeLogin(async () => {
         const body = parse(z.object({ username: z.string().trim().toLowerCase().min(1).max(60), password: z.string().min(1).max(200), remember: z.boolean().default(true) }), req.body);
@@ -27,6 +30,8 @@ export async function authRoutes(app) {
             throw bad('Usuário ou senha incorretos.');
         }
         clearLoginRate(empId, req.ip, body.username);
+        if (!row.u.oneup && req.empresa?.licencaStatus === 'SUSPENSO')
+            throw erroSuspenso();
         const s = await createSession(row.u.id, body.remember);
         reply.setCookie(COOKIE, s.token, {
             path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, ...(body.remember ? { expires: s.expiresAt } : {}),
@@ -82,6 +87,8 @@ export async function authRoutes(app) {
         }
         const row = res.row;
         clearLoginRate(empId, req.ip, `pin:${b.userId}`);
+        if (req.empresa?.licencaStatus === 'SUSPENSO')
+            throw erroSuspenso();
         await db.update(aparelhos).set({ ultimoUso: new Date() }).where(eq(aparelhos.id, ap.id));
         const s = await createSession(row.u.id, true, ap.id);
         reply.setCookie(COOKIE, s.token, { path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, expires: s.expiresAt });

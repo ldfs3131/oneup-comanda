@@ -211,7 +211,7 @@ async function main() {
     const man = await new C('alfa').get('/manifest.webmanifest');
     const [{ name: nomeAlfa }] = (await db.query(`SELECT name FROM restaurant_settings WHERE empresa_id=$1`, [ALFA])).rows;
     check('Manifesto do app traz o nome do restaurante', man.status === 200 && man.data.name === `${nomeAlfa} — Equipe` && !/\bEqu$/.test(man.data.short_name) && man.data.display === 'standalone', man.data);
-    check('Manifesto com ícones', man.data?.icons?.length === 2);
+    check('Manifesto com ícones (comum e "maskable" separados)', man.data?.icons?.length >= 2 && man.data.icons.some((i) => i.purpose === 'maskable') && !man.data.icons.some((i) => /any maskable/.test(i.purpose)), man.data?.icons);
     const manCli = await new C('alfa').get('/cardapio.webmanifest');
     check('App dos clientes abre no cardápio, com o nome do restaurante', manCli.status === 200 && manCli.data.name === nomeAlfa && manCli.data.start_url.startsWith('/cardapio') && manCli.data.scope === '/cardapio', manCli.data);
     const tlsOk = await fetch(`${BASE}/api/health/tls?domain=alfa.localhost`);

@@ -23,6 +23,8 @@ export function initRealtime(server: HttpServer) {
       if (!emp) return next(new Error('empresa'));
       const user = await runAsEmpresa(emp.id, () => userFromToken(tokenFromCookieHeader(h.cookie)));
       if (!user) return next(new Error('unauthorized'));
+      // licença SUSPENSA: a equipe do restaurante não conecta (a ONE UP sim)
+      if (!user.oneup && emp.licencaStatus === 'SUSPENSO') return next(new Error('suspenso'));
       socket.data.user = user;
       socket.data.empresaId = emp.id;
       next();
@@ -41,6 +43,14 @@ export function initRealtime(server: HttpServer) {
   // pessoa desativada, rebaixada, que trocou a senha ou saiu: os aparelhos dela param de receber na hora
   aoEsquecerUsuario.push((e, userId) => { io?.in(`${e}:user:${userId}`).disconnectSockets(true); });
   return io;
+}
+
+/** Restaurante suspenso pela ONE UP: os aparelhos da equipe saem do tempo real na hora (a ONE UP continua). */
+export async function desconectarEquipe(empresaId: number) {
+  if (!io) return;
+  for (const s of await io.fetchSockets()) {
+    if (s.data.empresaId === empresaId && !s.data.user?.oneup) s.disconnect(true);
+  }
 }
 
 /** Desligamento: fecha os sockets para o servidor sair rápido (tablets reconectam sozinhos no novo processo). */

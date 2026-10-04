@@ -11,6 +11,21 @@ import { notify } from '../realtime.js';
 import { currentRegister, insertOrder, upsertCustomer } from '../services/accounts.js';
 import { loadMenu } from './menu.js';
 import { configuracoesPublicas, lerConfig } from '../services/configuracoes.js';
+import { licencaAtual } from '../lib/licenca.js';
+/**
+ * Cardápio online no ar? Licença ATIVA: sim. SUSPENSA: não. SÓ CONSULTA: só enquanto durar um dia que já estava
+ * aberto (nunca trava no meio do serviço); encerrado o dia, sai do ar.
+ */
+async function cardapioOnlineNoAr() {
+    const lic = await licencaAtual();
+    if (lic.efetivo === 'ATIVO')
+        return true;
+    if (lic.efetivo === 'SUSPENSO')
+        return false;
+    const reg = await currentRegister(db);
+    return !!reg && !reg.somenteReceber;
+}
+const MSG_FORA_DO_AR = 'O cardápio online deste restaurante está fora do ar no momento. Peça direto no balcão.';
 /*
  * Limites do canal público (sem login). Todos os clientes no Wi-Fi do restaurante saem pelo MESMO IP,
  * então o limite principal é por APARELHO (identificador aleatório guardado no navegador do cliente):
@@ -57,6 +72,8 @@ export async function publicRoutes(app) {
     app.get('/api/public/menu', { preHandler: respostaCompartilhada('cardapio-publico', 'menu', 30000) }, async () => {
         const { r, d } = await settings();
         const cfg = await configuracoesPublicas();
+        if (!(await cardapioOnlineNoAr()))
+            return { enabled: false, foraDoAr: true, motivo: MSG_FORA_DO_AR, name: r.name, whatsappNumber: null, config: cfg };
         if (!r.qrEnabled)
             return { enabled: false, name: r.name, whatsappNumber: r.whatsappNumber, config: cfg };
         const menu = await loadMenu(db, { includeInactive: false, onlyAvailable: true, semMaisVendidos: true });
@@ -90,6 +107,8 @@ export async function publicRoutes(app) {
     });
     async function criarPedidoPublico(req) {
         const { r, d } = await settings();
+        if (!(await cardapioOnlineNoAr()))
+            throw new HttpError(403, MSG_FORA_DO_AR, 'CARDAPIO_FORA_DO_AR');
         if (!r.qrEnabled)
             throw new HttpError(403, 'Pedidos pelo QR Code não estão disponíveis.');
         if (!r.isOpen)

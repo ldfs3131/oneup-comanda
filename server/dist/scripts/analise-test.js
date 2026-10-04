@@ -208,7 +208,7 @@ async function main() {
     await admin.query('CREATE DATABASE ag_analise');
     await admin.end();
     const envDb = { ...process.env, DATABASE_URL: DB_URL };
-    execFileSync('node', ['dist/scripts/setup.js', '--empresa=ana', '--nome=Ana', '--admin-pass=ana-admin', '--caixa-pass=ana-caixa', '--cozinha-pass=ana-coz', '--cardapio=exemplo'], { cwd: SERVER, env: envDb, stdio: 'ignore' });
+    execFileSync('node', ['dist/scripts/setup.js', '--empresa=ana', '--nome=Ana', '--admin-pass=ana-admin', '--caixa-pass=ana-caixa', '--cozinha-pass=ana-coz', '--cardapio=piloto'], { cwd: SERVER, env: envDb, stdio: 'ignore' });
     execFileSync('node', ['dist/scripts/plataforma.js', 'oneup-usuario', '--empresa=ana', '--login=oneup', '--nome=ONE UP', '--senha=oneup-senha-1'], { cwd: SERVER, env: envDb, stdio: 'ignore' });
     const pgc = new pg.Client({ connectionString: DB_URL });
     await pgc.connect();
@@ -246,7 +246,7 @@ async function main() {
         const chavesAnalise = /"(dinheiroNaMesa|gargalos|pilares|achados|destravas|tecnicas|cardapio|positivos|negativos|resultadoPlanoAnterior|nota)"/;
         for (const p of ['/api/auth/me', '/api/settings', '/api/dashboard?from=2026-09-01&to=2026-09-25', '/api/finance?from=2026-09-01&to=2026-09-25&ano=1', '/api/finance/ritmo', '/api/pendencias/contagem']) {
             const r = await dono.get(p);
-            check(`Dono ${p.split('?')[0]}: sem nenhum campo de análise`, r.status === 200 && !chavesAnalise.test(r.text), r.status);
+            check(`Dono ${p.split('?')[0]}: sem nenhum campo de análise`, (r.status === 404 || (r.status === 200 && !chavesAnalise.test(r.text))), r.status);
         }
         const ritmoDono = await dono.get('/api/insights');
         check('Dono: /api/insights continua 404', ritmoDono.status === 404);

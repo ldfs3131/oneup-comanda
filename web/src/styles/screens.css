@@ -613,3 +613,21 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
   .table th, .table td { border-color: #ccc !important; color: #111 !important; }
   .crm-relatorio .tiles { grid-template-columns: repeat(4, 1fr); }
 }
+/* ---------- Plataforma ONE UP (Central de comando) e aviso de licença ---------- */
+.plat-tile { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.plat-tile:hover { border-color: var(--border-strong, var(--muted)); }
+.plat-cards { display: none; }
+.plat-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.plat-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.plat-hist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.plat-hist li { padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 0.9rem; }
+.plat-form .check { min-height: 32px; }
+@media (max-width: 720px) {
+  .plat-cards.show-mobile-block { display: flex; flex-direction: column; gap: 10px; }
+  .plataforma .seg { width: 100%; }
+  .plataforma .input { max-width: none !important; }
+}
+.banner.licenca { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; align-items: center; font-weight: 600; }
+.banner.licenca.aviso { background: color-mix(in srgb, var(--warn) 18%, var(--surface)); color: var(--text); border-bottom: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
+.banner.licenca.bloqueio { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--text); border-bottom: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); }
+.banner.licenca b { color: var(--text); }

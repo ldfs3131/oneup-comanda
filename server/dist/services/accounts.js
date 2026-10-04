@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, nextNumber } from '../db/index.js';
 import { accounts, cancellations, cashRegisters, customers, discounts, optionGroups, options, orderItems, orders, paymentMethods, payments, products, restaurantSettings, users, } from '../db/schema.js';
 import { HttpError, bad, conflict, notFound } from '../lib/http.js';
+import { MSG_SO_RECEBER, erroSoConsulta, licencaAtual } from '../lib/licenca.js';
 import { applyStockForSale } from './stock.js';
 export const LIVE_ACCOUNT = ['OPEN', 'PARTIALLY_PAID', 'PAID'];
 export const DEFAULT_PREP = 15;
@@ -17,13 +18,19 @@ export async function currentRegister(tx, modo = 'auto') {
 }
 export async function requireOpenRegister(tx, modo = 'auto') {
     const r = await currentRegister(tx, modo);
-    if (!r)
+    if (!r) {
+        // sem dia aberto e licença fora do ar: explica o motivo (o botão "Abrir o dia" também está bloqueado)
+        if ((await licencaAtual()).efetivo !== 'ATIVO')
+            throw erroSoConsulta();
         throw conflict('O dia ainda não foi aberto. Clique em "Abrir o dia" (caixa) antes de continuar.');
+    }
     return r;
 }
 /** Pedidos novos só com o dia aberto: caixa aberto + estabelecimento ABERTO. */
 export async function requireTakingOrders(tx) {
     const reg = await requireOpenRegister(tx);
+    if (reg.somenteReceber)
+        throw conflict(MSG_SO_RECEBER);
     const [s] = await tx.select({ isOpen: restaurantSettings.isOpen }).from(restaurantSettings).limit(1);
     if (!s?.isOpen)
         throw conflict('Estabelecimento FECHADO: não é possível lançar pedidos. Reabra os pedidos para continuar.');

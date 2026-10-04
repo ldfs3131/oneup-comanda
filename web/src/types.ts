@@ -85,6 +85,13 @@ export type Settings = {
   product?: string;
   /** valores efetivos do catálogo de personalização */
   config: Record<string, any>;
+  /** licença online (Dono: com vencimento e aviso; Caixa/Cozinha: só o status) */
+  licenca?: Licenca;
+};
+
+export type LicencaStatus = 'ATIVO' | 'SO_CONSULTA' | 'SUSPENSO';
+export type Licenca = {
+  status: LicencaStatus; definido?: LicencaStatus; venceEm?: string | null; diasParaVencer?: number | null; vencida?: boolean; avisar?: boolean; diaAberto?: boolean;
 };
 
 export type StockShortage = { productId: number; name: string; stock: number; requested: number };

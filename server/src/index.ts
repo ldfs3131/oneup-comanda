@@ -26,6 +26,7 @@ import { importacaoRoutes } from './routes/importacao.js';
 import { analiseRoutes } from './routes/analise.js';
 import { crmRoutes } from './routes/crm.js';
 import { iniciarSincronizacaoCrm } from './services/crm.js';
+import { plataformaRoutes } from './routes/plataforma.js';
 import { cleanupIdempotency } from './lib/idempotency.js';
 import { registrarRespostaCompartilhada } from './lib/cacheRota.js';
 import { dimensoesDe, rotaUploads } from './lib/imagem.js';
@@ -88,6 +89,7 @@ export async function buildApp() {
   await app.register(importacaoRoutes);
   await app.register(analiseRoutes);
   await app.register(crmRoutes);
+  await app.register(plataformaRoutes);
   // Saúde de verdade: confere o banco (com o Postgres parado responde 503, não "ok")
   app.get('/api/health', async (_req, reply) => {
     try {

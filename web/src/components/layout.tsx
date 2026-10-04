@@ -16,9 +16,13 @@ export function Logo({ to = '/' }: { to?: string }) {
 
 export function Banners() {
   const { connected } = useRealtime();
-  const { meta } = useAuth();
+  const { meta, user } = useAuth();
+  const { data: settings } = useSettings();
+  // Caixa e Cozinha: aviso curto de "só consulta" (o Dono tem o aviso completo no topo do painel)
+  const soConsulta = !!user && user.role !== 'ADMIN' && settings?.licenca?.status === 'SO_CONSULTA';
   return <>
     {!connected && <div className="banner offline">⚠ Sem conexão com o servidor — reconectando… Se demorar, use o papel.</div>}
+    {soConsulta && <div className="banner licenca bloqueio" role="alert">🔒 <b>Sistema em só consulta</b><span>Pedidos novos bloqueados; dá para consultar e receber contas abertas. O dia que já estava aberto segue até encerrar.</span></div>}
     {meta?.demoMode && <div className="banner demo">MODO DEMONSTRAÇÃO — dados de teste, nada aqui é real</div>}
   </>;
 }

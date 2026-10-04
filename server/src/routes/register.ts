@@ -14,6 +14,7 @@ import { registerSummary, resumoCego } from '../services/register.js';
 import { lerConfig } from '../services/configuracoes.js';
 import { runBackupAndRecord } from '../services/backup.js';
 import { setEstablishmentOpen } from '../services/day.js';
+import { MSG_SO_RECEBER, erroSoConsulta, erroSuspenso, licencaAtual } from '../lib/licenca.js';
 
 export async function registerRoutes(app: FastifyInstance) {
   const ops = { preHandler: requireRole('CAIXA') };
@@ -35,15 +36,23 @@ export async function registerRoutes(app: FastifyInstance) {
     };
   });
 
-  // Abrir o dia = abrir o caixa (dinheiro inicial) + estabelecimento ABERTO
+  // Abrir o dia = abrir o caixa (dinheiro inicial) + estabelecimento ABERTO.
+  // A licença é conferida AQUI (e só aqui): vencida ou "só consulta" não abre o dia; um dia já aberto segue até encerrar.
+  // Em "só consulta" dá para abrir o caixa SÓ PARA RECEBER contas abertas (sem pedido novo e com o estabelecimento fechado).
   const openDay = async (req: any) => {
-    const b = parse(z.object({ openingCashCents: z.number().int().min(0).max(100_000_00) }), req.body);
+    const b = parse(z.object({ openingCashCents: z.number().int().min(0).max(100_000_00), somenteReceber: z.boolean().default(false) }), req.body);
     const user = me(req);
+    const lic = await licencaAtual();
+    if (lic.efetivo === 'SUSPENSO') throw erroSuspenso();
+    const soReceber = lic.efetivo === 'SO_CONSULTA';
+    if (soReceber && !b.somenteReceber) throw erroSoConsulta();
     const reg = await db.transaction(async (tx) => {
       if (await currentRegister(tx)) throw conflict('O dia já está aberto.');
-      const [reg] = await tx.insert(cashRegisters).values({ openedBy: user.id, openingCashCents: b.openingCashCents }).returning();
-      await audit(tx, { userId: user.id, action: 'register.open', entityType: 'cash_register', entityId: reg.id, message: `${user.name} abriu o dia/caixa com ${brl(b.openingCashCents)} em dinheiro.` });
-      await setEstablishmentOpen(tx, user, true, 'abertura do dia');
+      const [reg] = await tx.insert(cashRegisters).values({ openedBy: user.id, openingCashCents: b.openingCashCents, somenteReceber: soReceber }).returning();
+      await audit(tx, { userId: user.id, action: 'register.open', entityType: 'cash_register', entityId: reg.id, message: soReceber
+        ? `${user.name} abriu o caixa SÓ PARA RECEBER contas (sistema em só consulta) com ${brl(b.openingCashCents)} em dinheiro.`
+        : `${user.name} abriu o dia/caixa com ${brl(b.openingCashCents)} em dinheiro.` });
+      if (!soReceber) await setEstablishmentOpen(tx, user, true, 'abertura do dia');
       return reg;
     });
     notify.registerChanged(); notify.settingsChanged();
@@ -57,7 +66,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const { isOpen } = parse(z.object({ isOpen: z.boolean() }), req.body);
     const user = me(req);
     await db.transaction(async (tx) => {
-      if (isOpen) await requireOpenRegister(tx);
+      if (isOpen) { const reg = await requireOpenRegister(tx); if (reg.somenteReceber) throw conflict(MSG_SO_RECEBER); }
       await setEstablishmentOpen(tx, user, isOpen, isOpen ? 'pedidos reabertos' : 'pedidos pausados');
     });
     notify.settingsChanged();

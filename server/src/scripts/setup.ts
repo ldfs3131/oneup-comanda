@@ -1,11 +1,11 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { eq, sql } from 'drizzle-orm';
-import { closePools, db, ensureEmpresaBase, ensurePlatformData, runAsEmpresa, runAsSystem, runMigrations, waitForDatabase } from '../db/index.js';
-import { empresas, restaurantSettings, roles, users } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
+import { closePools, db, ensureEmpresaBase, ensurePlatformData, runAsEmpresa, runMigrations, waitForDatabase } from '../db/index.js';
+import { restaurantSettings, roles, users } from '../db/schema.js';
 import { hashPassword } from '../auth.js';
 import { audit } from '../lib/audit.js';
-import { seedMenu } from '../seed/menu.js';
+import { obterOuCriarEmpresa, semearCardapioInicial, type TipoCardapio } from '../services/plataforma.js';
 import { config } from '../config.js';
 import { slugValido } from '../lib/empresa.js';
 
@@ -13,7 +13,8 @@ import { slugValido } from '../lib/empresa.js';
  * Configura UMA empresa (cria se não existir) — pode rodar de novo sem duplicar nada.
  *   node dist/scripts/setup.js --empresa=<slug> --nome="Nome do restaurante"
  *     --admin-name=... --admin-pass=... --caixa-pass=... --cozinha-pass=...
- *     [--cardapio=exemplo|vazio]  (padrão: exemplo na empresa nº 1 / instalação única; vazio nas demais)
+ *     [--cardapio=exemplo|vazio|piloto]  (padrão: exemplo na empresa nº 1 / instalação única; vazio nas demais)
+ *     exemplo = cardápio genérico de restaurante fictício · piloto = cardápio do restaurante piloto (só testes/demonstração)
  * Sem as senhas na linha de comando, pergunta no terminal.
  */
 async function main() {
@@ -26,22 +27,7 @@ async function main() {
   await ensurePlatformData();
 
   // 1) Empresa (plataforma)
-  const emp = await runAsSystem(async () => {
-    const [found] = await db.select().from(empresas).where(eq(empresas.slug, slug));
-    if (found) {
-      if (args.nome) await db.update(empresas).set({ nome: args.nome }).where(eq(empresas.id, found.id));
-      return found;
-    }
-    // banco novo: a empresa nº 1 criada pela migração ainda sem ninguém vira esta empresa
-    const [vazia] = (await db.execute(sql`SELECT e.id FROM empresas e WHERE e.id = 1 AND e.slug = 'empresa-1'
-      AND NOT EXISTS (SELECT 1 FROM users u WHERE u.empresa_id = 1)`)).rows as { id: number }[];
-    if (vazia) {
-      const [u] = await db.update(empresas).set({ slug, nome: args.nome || 'Meu restaurante' }).where(eq(empresas.id, 1)).returning();
-      return u;
-    }
-    const [created] = await db.insert(empresas).values({ slug, nome: args.nome || 'Meu restaurante' }).returning();
-    return created;
-  });
+  const emp = await obterOuCriarEmpresa(slug, args.nome || undefined);
   console.log(`\n=== ${config.productName} — empresa "${emp.slug}" (nº ${emp.id}) ===\n`);
 
   // 2) Dados da empresa (RLS ligado: tudo cai nesta empresa)
@@ -78,9 +64,11 @@ async function main() {
     rl?.close();
 
     const cardapio = args.cardapio || (emp.id === 1 ? 'exemplo' : 'vazio');
-    if (cardapio === 'exemplo') {
-      const seeded = await seedMenu();
-      console.log(seeded ? `\n✔ Cardápio de exemplo cadastrado (${seeded} produto(s)).` : '\n- Cardápio já estava completo, mantido.');
+    if (!['exemplo', 'vazio', 'piloto'].includes(cardapio)) throw new Error('--cardapio deve ser exemplo, vazio ou piloto.');
+    if (cardapio !== 'vazio') {
+      const seeded = await semearCardapioInicial(cardapio as TipoCardapio);
+      const qual = cardapio === 'exemplo' ? 'de exemplo (genérico)' : 'do restaurante piloto (testes)';
+      console.log(seeded ? `\n✔ Cardápio ${qual} cadastrado (${seeded} produto(s)).` : '\n- Cardápio já estava completo, mantido.');
     } else {
       console.log('\n- Cardápio em branco: cadastre em Cardápio ou importe por planilha.');
     }

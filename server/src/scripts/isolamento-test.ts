@@ -4,8 +4,8 @@
  * todas as rotas que recebem identificador, por referência cruzada, pelo tempo real e direto no banco.
  *
  * Preparação (banco novo):
- *   node dist/scripts/setup.js --empresa=alfa --nome="Alfa" --admin-pass=alfa-admin --caixa-pass=alfa-caixa --cozinha-pass=alfa-coz --cardapio=exemplo
- *   node dist/scripts/setup.js --empresa=beta --nome="Beta" --admin-pass=beta-admin --caixa-pass=beta-caixa --cozinha-pass=beta-coz --cardapio=exemplo
+ *   node dist/scripts/setup.js --empresa=alfa --nome="Alfa" --admin-pass=alfa-admin --caixa-pass=alfa-caixa --cozinha-pass=alfa-coz --cardapio=piloto
+ *   node dist/scripts/setup.js --empresa=beta --nome="Beta" --admin-pass=beta-admin --caixa-pass=beta-caixa --cozinha-pass=beta-coz --cardapio=piloto
  *   EMPRESA_HEADER=true PORT=3200 node dist/index.js &
  *   BASE_URL=http://localhost:3200 DATABASE_URL=... node dist/scripts/isolamento-test.js
  */

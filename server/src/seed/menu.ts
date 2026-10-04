@@ -3,9 +3,10 @@ import { db, type Executor, empresaAtual } from '../db/index.js';
 import { categories, optionGroups, options, products, restaurantSettings } from '../db/schema.js';
 
 /**
- * Cardápio oficial informado pelo proprietário (27/09/2026).
- * Preços reais; nada inventado. Monster: sabores vendidos no Brasil, cadastrados INATIVOS
- * até o proprietário ativar os que tem. Custos: não informados (null).
+ * CARDÁPIO DO RESTAURANTE PILOTO (informado pelo proprietário em 27/09/2026) — usado SÓ pelas suítes de teste,
+ * pela demonstração e pela instalação do próprio piloto (`--cardapio=piloto`). Restaurante novo NÃO recebe este
+ * cardápio: o exemplo genérico fica em `cardapio-exemplo.ts` (`--cardapio=exemplo` e tela da Plataforma ONE UP).
+ * Monster: sabores vendidos no Brasil, cadastrados INATIVOS até o proprietário ativar os que tem. Custos: não informados.
  */
 const ESPETOS = ['Contra-filé', 'Frango', 'Medalhão de Frango', 'Coração', 'Lombinho', 'Kafta', 'Queijo Coalho'];
 const MONSTER = [
@@ -13,12 +14,12 @@ const MONSTER = [
   'Ultra Watermelon', 'Ultra Fiesta Mango', 'Ultra Strawberry Dreams', 'Khaotic', 'Mango Loco', 'Rio Punch', 'Pacific Punch', 'Pipeline Punch',
 ];
 
-type OptionSeed = { name: string; delta: number; stockOf?: string };
-type ProductSeed = {
+export type OptionSeed = { name: string; delta: number; stockOf?: string };
+export type ProductSeed = {
   name: string; priceCents: number; description?: string; trackStock?: boolean; active?: boolean; kitchen?: boolean;
   groups?: { name: string; required: boolean; options: OptionSeed[] }[];
 };
-type CategorySeed = { name: string; kitchen: boolean; products: ProductSeed[] };
+export type CategorySeed = { name: string; kitchen: boolean; products: ProductSeed[] };
 
 export const MENU: CategorySeed[] = [
   {
@@ -112,16 +113,19 @@ export const MENU: CategorySeed[] = [
 ];
 
 /**
- * Cadastra o que falta do cardápio (por nome), sem mexer no que o administrador já editou.
- * Usado na instalação e na atualização da V1 → R2.
+ * Cadastra o que falta do cardápio do piloto (por nome), sem mexer no que o administrador já editou.
+ * Usado pelos testes, pela demonstração e na atualização da V1 → R2 do piloto.
  */
-export async function seedMenu(tx: Executor = db) {
+export const seedMenu = (tx: Executor = db) => semearCardapio(MENU, tx);
+
+/** Cadastra o que falta de um cardápio (por nome), sem mexer no que o administrador já editou. */
+export async function semearCardapio(cardapio: CategorySeed[], tx: Executor = db) {
   let added = 0;
   const catsNow = await tx.select().from(categories);
   let maxCatOrder = Math.max(0, ...catsNow.map((c) => c.sortOrder));
   const created = new Map<string, number>();
   const pending: { groupId: number; name: string; delta: number; stockOf: string; sortOrder: number }[] = [];
-  for (const c of MENU) {
+  for (const c of cardapio) {
     let cat = catsNow.find((x) => x.name.toLowerCase() === c.name.toLowerCase());
     if (!cat) {
       [cat] = await tx.insert(categories).values({ name: c.name, sendsToKitchen: c.kitchen, sortOrder: ++maxCatOrder }).returning();

@@ -24,6 +24,9 @@ import { configuracoesRoutes } from './routes/configuracoes.js';
 import { pendenciasRoutes } from './routes/pendencias.js';
 import { importacaoRoutes } from './routes/importacao.js';
 import { analiseRoutes } from './routes/analise.js';
+import { crmRoutes } from './routes/crm.js';
+import { iniciarSincronizacaoCrm } from './services/crm.js';
+import { plataformaRoutes } from './routes/plataforma.js';
 import { cleanupIdempotency } from './lib/idempotency.js';
 import { registrarRespostaCompartilhada } from './lib/cacheRota.js';
 import { dimensoesDe, rotaUploads } from './lib/imagem.js';
@@ -81,6 +84,8 @@ export async function buildApp() {
     await app.register(pendenciasRoutes);
     await app.register(importacaoRoutes);
     await app.register(analiseRoutes);
+    await app.register(crmRoutes);
+    await app.register(plataformaRoutes);
     // Saúde de verdade: confere o banco (com o Postgres parado responde 503, não "ok")
     app.get('/api/health', async (_req, reply) => {
         try {
@@ -123,11 +128,16 @@ export async function buildApp() {
             description: tipo === 'cliente' ? `Cardápio e pedidos de ${nome}` : `${nome}: caixa, cozinha e gestão (${config.productName})`,
             start_url: tipo === 'cliente' ? '/cardapio?origem=app' : '/?origem=app', scope: tipo === 'cliente' ? '/cardapio' : '/',
             display: 'standalone', orientation: 'any', background_color: fundo, theme_color: fundo,
-            icons: icone && dim
-                ? [{ src: icone, sizes: `${dim.w}x${dim.h}`, type: /\.png$/i.test(icone) ? 'image/png' : /\.webp$/i.test(icone) ? 'image/webp' : 'image/jpeg', purpose: 'any' },
-                    { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }]
-                : [{ src: '/comanda-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-                    { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }],
+            // "any" e "maskable" em arquivos SEPARADOS: o maskable tem o desenho a ~70% sobre o fundo azul cheio, para o
+            // Android recortar em círculo/gota sem cortar o desenho (nunca "any maskable" no mesmo arquivo)
+            icons: [
+                ...(icone && dim
+                    ? [{ src: icone, sizes: `${dim.w}x${dim.h}`, type: /\.png$/i.test(icone) ? 'image/png' : /\.webp$/i.test(icone) ? 'image/webp' : 'image/jpeg', purpose: 'any' }]
+                    : [{ src: '/comanda-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+                        { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' }]),
+                { src: '/comanda-icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+                { src: '/comanda-icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+            ],
         };
     };
     app.get('/manifest.webmanifest', manifesto('equipe'));
@@ -252,6 +262,7 @@ async function main() {
     const app = await buildApp();
     await app.ready();
     initRealtime(app.server);
+    iniciarSincronizacaoCrm();
     await app.listen({ port: config.port, host: config.host });
     const ips = lanAddresses();
     console.log(`\n  ${config.productName} ${config.demoMode ? '(DEMONSTRAÇÃO) ' : ''}rodando · ${lista.length} empresa(s)`);

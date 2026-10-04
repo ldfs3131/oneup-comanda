@@ -540,6 +540,29 @@ export const crmCobrancas = pgTable('crm_cobrancas', {
   encerradoEm: ts('encerrado_em'),
   naoCobrarMotivo: text('nao_cobrar_motivo'),
   updatedAt: ts('updated_at').notNull().defaultNow(),
+  // 0014_crm
+  entradaDia: date('entrada_dia'),
+  ultimoContatoEm: ts('ultimo_contato_em'),
+  ultimoContatoDia: date('ultimo_contato_dia'),
+  contatosNoDia: integer('contatos_no_dia').notNull().default(0),
+  semRespostaSeguidas: integer('sem_resposta_seguidas').notNull().default(0),
+  pagoInformadoDia: date('pago_informado_dia'),
+  pausadoMotivo: text('pausado_motivo'),
+  contatoErrado: text('contato_errado'),
+});
+
+/** Comprovante de pagamento da recuperação (só ONE UP; arquivo fora da pasta pública). */
+export const crmComprovantes = pgTable('crm_comprovantes', {
+  id: serial('id').primaryKey(),
+  empresaId: empresaRef(),
+  cobrancaId: integer('cobranca_id').notNull().references(() => crmCobrancas.id),
+  arquivo: text('arquivo').notNull(),
+  tipo: text('tipo').notNull(),
+  tamanho: integer('tamanho').notNull(),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: createdAt(),
+  apagadoEm: ts('apagado_em'),
+  apagadoPor: integer('apagado_por').references(() => users.id),
 });
 
 export const crmEventos = pgTable('crm_eventos', {

@@ -85,6 +85,13 @@
       "when": 1790890000000,
       "tag": "0011_auditoria",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790920000000,
+      "tag": "0014_crm",
+      "breakpoints": true
     }
   ]
 }

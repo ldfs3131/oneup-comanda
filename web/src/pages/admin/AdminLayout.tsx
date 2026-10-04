@@ -49,6 +49,7 @@ export default function AdminLayout() {
             <div className="nav-sec">ONE UP</div>
             {settings?.insightsEnabled && <NavLink to="/admin/insights">💡 Insights</NavLink>}
             <NavLink to="/admin/oneup/base">📈 Base de comparação</NavLink>
+            <NavLink to="/admin/oneup/recuperacao">💸 Recuperação de vendas</NavLink>
             <NavLink to="/admin/tempo">⏱ Tempo de preparo</NavLink>
           </>}
           <div className="sep" />

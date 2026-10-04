@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { gravarImagem } from '../lib/imagem.js';
+import { gravarImagem, validarIcone } from '../lib/imagem.js';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { closePools, db, runAsEmpresa, runAsSystem, waitForDatabase } from '../db/index.js';
 import {
@@ -106,6 +106,8 @@ type Provisao = {
   empresa: string;
   /** imagem do logotipo (caminho relativo ao .json); só aplicada se o restaurante ainda não tiver logotipo */
   logo?: string;
+  /** ícone quadrado do aplicativo (caminho relativo ao .json); só aplicado se ainda não houver */
+  icone?: string;
   /** valores iniciais do catálogo de personalização (só os que ainda estão no padrão) */
   configuracoes?: Record<string, unknown>;
   custos?: { rotulo: string; custo: number; produtos: string[] }[];
@@ -183,6 +185,13 @@ async function provisionar(p: Provisao, pasta: string) {
       const url = await gravarImagem(readFileSync(resolve(pasta, p.logo)), 'logo');
       await aplicarConfiguracoes({ logo: url }, null, 'ONEUP');
       console.log(`  ✔ Logotipo aplicado (${url})`);
+    }
+    if (p.icone && !(await lerConfig<string | null>('icone_app'))) {
+      const buf = readFileSync(resolve(pasta, p.icone));
+      validarIcone(buf);
+      const url = await gravarImagem(buf, 'icone');
+      await aplicarConfiguracoes({ icone_app: url }, null, 'ONEUP');
+      console.log(`  ✔ Ícone do aplicativo aplicado (${url})`);
     }
     const iniciais: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(p.configuracoes ?? {})) {

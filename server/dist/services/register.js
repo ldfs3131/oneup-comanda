@@ -73,3 +73,16 @@ export async function registerSummary(tx, registerId) {
         expectedCashCents: n(reg.opening_cash_cents) + cashIn + suprimentos - sangrias,
     };
 }
+/**
+ * Fechamento às cegas: o que o CAIXA pode ver do próprio dia. Nada de dinheiro esperado, diferença, PIX, cartão
+ * nem total (com eles daria para deduzir o esperado). Fica: abertura da gaveta, o que ele mesmo tirou/colocou,
+ * contagens e as contas que viraram fiado (quem deve).
+ */
+export function resumoCego(s) {
+    return {
+        ...s,
+        salesCents: null, receivedCents: null, byMethod: [], fromPreviousPendingCents: null, partialPaymentsCents: null,
+        discountsCents: null, discountsByUser: [], cancellationsCents: null, lossCents: null, pendingCreatedCents: null,
+        cashReceivedCents: null, expectedCashCents: null, cego: true,
+    };
+}

@@ -355,7 +355,7 @@ async function empresa(slug, idx) {
             }
             if (quando.length && Date.now() >= quando[0] && ps.length) {
                 quando.shift();
-                const r = await cl.post('/api/public/orders', { customerName: `${M} Cliente ${ci}`, mode: pick(['LOCAL', 'BALCAO']), location: `Mesa ${1 + (ci % 40)}`, items: itensAleatorios(ps, 3) }, { 'x-aparelho': aparelho, 'idempotency-key': randomUUID() });
+                const r = await cl.post('/api/public/orders', { customerName: `${M} Cliente ${ci}`, phone: `2198${String(ci).padStart(7, '0')}`, mode: pick(['LOCAL', 'BALCAO']), location: `Mesa ${1 + (ci % 40)}`, items: itensAleatorios(ps, 3) }, { 'x-aparelho': aparelho, 'idempotency-key': randomUUID() });
                 if (r.status === 200)
                     pedidosQr++;
                 else

@@ -116,7 +116,7 @@ async function main() {
 
   console.log('\n[4] Cardápio digital no pico: Wi-Fi compartilhado, duplo toque e casa pausada');
   {
-    const pedido = (i: number) => ({ customerName: `Cliente ${i}`, mode: 'LOCAL', location: `Mesa ${i}`, items: [{ productId: P.id, quantity: 1 }] });
+    const pedido = (i: number) => ({ customerName: `Cliente ${i}`, phone: `1191${String(i).padStart(7, '0')}`, mode: 'LOCAL', location: `Mesa ${i}`, items: [{ productId: P.id, quantity: 1 }] });
     // 25 celulares diferentes no MESMO Wi-Fi (mesmo IP), 1 pedido cada
     const res = await Promise.all(Array.from({ length: 25 }, (_, i) => new C('alfa', { 'x-aparelho': `celular-${i}-${randomUUID().slice(0, 8)}` }).post('/api/public/orders', pedido(i))));
     check('25 clientes no mesmo Wi-Fi conseguem pedir (limite é por aparelho, não por internet)', res.every((r) => r.status === 200), res.filter((r) => r.status !== 200).map((r) => r.data));

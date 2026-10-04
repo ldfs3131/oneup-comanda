@@ -20,6 +20,8 @@ export type AccountListItem = {
   openedByName: string | null; pendingByName: string | null;
   subtotal: number; discounts: number; paid: number; total: number; balance: number;
   inKitchen: number; ready: number; lastOrderAt: string | null; nextReadyAt: string | null;
+  promisedDate?: string | null; ultimaCobrancaEm?: string | null; ultimaCobrancaPor?: string | null;
+  situacao?: 'venceu' | 'hoje' | 'sem_data' | 'em_dia';
 };
 
 export type OrderItem = {

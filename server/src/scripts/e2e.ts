@@ -76,7 +76,7 @@ async function main() {
 
   console.log('\n[3-9] Caixa, conta e total');
   check('3. Caixa faz login', (await caixa.post('/api/auth/login', { username: 'caixa', password: 'caixa123' })).status === 200);
-  check('Caixa fechado bloqueia nova conta', (await caixa.post('/api/accounts', {})).status === 409);
+  check('Caixa fechado bloqueia nova conta', (await caixa.post('/api/accounts', { tableLabel: 'Mesa 1' })).status === 409);
   check('4. Caixa abre o caixa (R$ 200)', (await caixa.post('/api/register/open', { openingCashCents: 20000 })).status === 200);
   check('Kitchen login', (await coz.post('/api/auth/login', { username: 'cozinha', password: 'cozinha123' })).status === 200);
   const kSock = await coz.socket();
@@ -158,7 +158,7 @@ async function main() {
   check('Conta encerrada não recebe pedidos', (await caixa.post(`/api/accounts/${accId}/orders`, { items: [{ productId: batata.id, quantity: 1 }] })).status === 409);
 
   console.log('\n[29] Conta pendente');
-  const acc2 = await caixa.post('/api/accounts', { items: [{ productId: find('Frango à Passarinho').id, quantity: 1 }, { productId: chope.data.id, quantity: 3 }] });
+  const acc2 = await caixa.post('/api/accounts', { tableLabel: 'Mesa 2', items: [{ productId: find('Frango à Passarinho').id, quantity: 1 }, { productId: chope.data.id, quantity: 3 }] });
   const acc2Id = acc2.data.id;
   await caixa.post(`/api/accounts/${acc2Id}/payments`, { payments: [{ methodId: M('PIX'), amountCents: 3000 }] });
   check('Pendente sem nome/contato é recusada', (await caixa.post(`/api/accounts/${acc2Id}/pending`, { customerName: '', contact: '' })).status === 400);
@@ -185,24 +185,29 @@ async function main() {
 
   console.log('\n[Pendência paga depois / fechamento de caixa]');
   const regNow = (await caixa.get('/api/register/current')).data;
-  const pix = regNow.summary.byMethod.find((m: any) => m.code === 'PIX').cents;
-  const din = regNow.summary.byMethod.find((m: any) => m.code === 'DINHEIRO').cents;
-  const car = regNow.summary.byMethod.find((m: any) => m.code === 'CARTAO').cents;
-  check('28. Totais por forma corretos', pix === 14000 && din === 3000 && car === 2699, { pix, din, car });
-  check('Fechamento às cegas: caixa não vê o dinheiro esperado', regNow.summary.expectedCashCents === null && regNow.blind === true);
   const regAdmin = (await admin.get('/api/register/current')).data;
+  const pix = regAdmin.summary.byMethod.find((m: any) => m.code === 'PIX').cents;
+  const din = regAdmin.summary.byMethod.find((m: any) => m.code === 'DINHEIRO').cents;
+  const car = regAdmin.summary.byMethod.find((m: any) => m.code === 'CARTAO').cents;
+  check('28. Totais por forma corretos (admin)', pix === 14000 && din === 3000 && car === 2699, { pix, din, car });
+  check('Fechamento às cegas: caixa não vê esperado, PIX, cartão nem total', regNow.blind === true && regNow.summary.expectedCashCents === null
+    && regNow.summary.byMethod.length === 0 && regNow.summary.salesCents === null && regNow.summary.receivedCents === null, regNow.summary);
   check('Dinheiro esperado (admin) = 200 abertura + 30 recebido', regAdmin.summary.expectedCashCents === 23000, regAdmin.summary.expectedCashCents);
-  check('Resumo mostra pendência criada no caixa', regNow.summary.pendingCreated.length === 1 && regNow.summary.pendingCreatedCents === 4800);
-  check('Resumo mostra desconto por operador', regNow.summary.discountsByUser[0]?.name === 'Caixa' && regNow.summary.discountsCents === 1000);
+  check('Resumo (admin) mostra pendência criada no caixa', regAdmin.summary.pendingCreated.length === 1 && regAdmin.summary.pendingCreatedCents === 4800);
+  check('Resumo (admin) mostra desconto por operador', regAdmin.summary.discountsByUser[0]?.name === 'Caixa' && regAdmin.summary.discountsCents === 1000);
   check('Sangria registrada', (await caixa.post('/api/register/movements', { type: 'SANGRIA', amountCents: 5000, reason: 'Troco para o banco' })).status === 200);
   const close = await caixa.post('/api/register/close', { countedCashCents: 17000 });
-  check('Fechamento: esperado 180, contado 170, diferença -10', close.status === 200 && close.data.expectedCashCents === 18000 && close.data.differenceCents === -1000, close.data);
+  const vazou = ['expectedCashCents', 'differenceCents', 'receivedCents', 'summary'].filter((k) => k in (close.data ?? {}));
+  check('Fechamento do caixa: só "contagem registrada", sem esperado nem diferença', close.status === 200 && close.data.cego === true && vazou.length === 0, close.data);
+  check('Diferença de R$ 10 acima da tolerância (R$ 5): "confira com o responsável"', close.data.conferir === true);
+  const fechado = (await admin.get(`/api/registers/${close.data.id}`)).data;
+  check('Admin vê: esperado 180, contado 170, diferença -10', fechado.register.expectedCashCents === 18000 && fechado.register.differenceCents === -1000, fechado.register);
 
   // Pendência paga no dia seguinte entra no novo caixa
   await caixa.post('/api/register/open', { openingCashCents: 10000 });
   const payLater = await caixa.post(`/api/accounts/${acc2Id}/payments`, { payments: [{ methodId: M('PIX'), amountCents: 4800 }], close: true });
   check('Pendência quitada depois e encerrada', payLater.status === 200 && payLater.data.status === 'CLOSED', payLater.data);
-  const reg2 = (await caixa.get('/api/register/current')).data;
+  const reg2 = (await admin.get('/api/register/current')).data;
   check('Recebimento da pendência entra no caixa do dia em que foi pago', reg2.summary.fromPreviousPendingCents === 4800 && reg2.summary.receivedCents === 4800);
 
   console.log('\n[26-27, 30] Histórico e dashboard');
@@ -234,14 +239,37 @@ async function main() {
   check('Pedido público recusado com QR desligado', (await new Client('x').post('/api/public/orders', { mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] })).status === 403);
   await admin.patch('/api/settings', { qrEnabled: true, isOpen: true });
   const qrEv = waitEvent(cSock, 'qr:new');
-  const qr = await new Client('cliente').post('/api/public/orders', { customerName: 'Visitante', mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] });
+  const db = new pg.Client({ connectionString: DB_URL }); await db.connect();
+  const semZap = await new Client('cliente0').post('/api/public/orders', { customerName: 'Visitante', mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] });
+  check('Cardápio digital exige WhatsApp', semZap.status === 400, semZap.data);
+  const zapRuim = await new Client('cliente0').post('/api/public/orders', { customerName: 'Visitante', phone: '1234', mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] });
+  check('WhatsApp inválido é recusado com explicação', zapRuim.status === 400 && /WhatsApp/.test(zapRuim.data.error), zapRuim.data);
+  const semNome = await new Client('cliente0').post('/api/public/orders', { customerName: ' ', phone: '(11) 91234-5678', mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] });
+  check('Cardápio digital exige nome', semNome.status === 400);
+  const qr = await new Client('cliente').post('/api/public/orders', { customerName: 'Visitante', phone: '+55 (11) 91234-5678', aceitaOfertas: true, mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] });
   check('Com QR ligado, cliente envia pedido', qr.status === 200, qr.data);
+  check('Pedido devolve código aleatório de acompanhamento', typeof qr.data.token === 'string' && qr.data.token.length >= 16);
+  const acomp = await new Client('x').get(`/api/public/pedido/${qr.data.token}`);
+  check('Acompanhamento: "aguardando confirmação", sem nome nem telefone', acomp.status === 200 && acomp.data.etapa === 'aguardando'
+    && !JSON.stringify(acomp.data).includes('Visitante') && !JSON.stringify(acomp.data).includes('91234'), acomp.data);
+  check('Código errado não encontra pedido', (await new Client('x').get('/api/public/pedido/AAAAAAAAAAAAAAAA')).status === 404);
+  const cons = (await db.query(`SELECT phone, aceita_ofertas, aceita_ofertas_em, aceita_ofertas_texto FROM customers WHERE name='Visitante'`)).rows[0];
+  check('Consentimento de ofertas guardado com texto e data/hora; WhatsApp normalizado', cons?.aceita_ofertas === true && !!cons.aceita_ofertas_em && /WhatsApp/.test(cons.aceita_ofertas_texto) && cons.phone === '11912345678', cons);
   check('Caixa é avisado do pedido aguardando confirmação', await qrEv);
   const board = (await caixa.get('/api/cashier/board')).data;
   const aw = board.awaiting.find((o: any) => o.orderNumber === qr.data.orderNumber);
   check('Pedido QR aguarda confirmação e não entra na cozinha', aw && !(await coz.get('/api/kitchen/orders')).data.some((o: any) => o.number === qr.data.orderNumber));
   const kn3 = waitEvent(kSock, 'kitchen:new');
   check('Caixa confirma → cozinha recebe', (await caixa.post(`/api/orders/${aw.orderId}/confirm`)).status === 200 && await kn3);
+  check('Acompanhamento: confirmado', (await new Client('x').get(`/api/public/pedido/${qr.data.token}`)).data.etapa === 'confirmado');
+  const qrRec = await new Client('cliente2').post('/api/public/orders', { customerName: 'Outra Pessoa', phone: '11987654321', mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] });
+  const awRec = (await caixa.get('/api/cashier/board')).data.awaiting.find((o: any) => o.orderNumber === qrRec.data.orderNumber);
+  await caixa.post(`/api/orders/${awRec.orderId}/cancel`, { reason: 'Acabou a batata por hoje', returnStock: false });
+  const rec = (await new Client('x').get(`/api/public/pedido/${qrRec.data.token}`)).data;
+  check('Pedido recusado mostra o motivo ao cliente', rec.etapa === 'recusado' && rec.motivo === 'Acabou a batata por hoje', rec);
+  const semCons = (await db.query(`SELECT aceita_ofertas FROM customers WHERE name='Outra Pessoa'`)).rows[0];
+  check('Sem a caixinha marcada, cliente NÃO aceita ofertas', semCons?.aceita_ofertas === false);
+  await db.end();
   await admin.patch('/api/settings', { qrEnabled: false });
 
   await r2Tests({ admin, caixa, coz, kSock, cSock, find, M: (c: string) => methods.find((m: any) => m.code === c).id });

@@ -29,6 +29,9 @@ import FinancePage from './pages/admin/FinancePage';
 import TimingPage from './pages/admin/TimingPage';
 import OrdersHistory from './pages/admin/OrdersHistory';
 import BaseComparacao from './pages/admin/BaseComparacao';
+import AppPage from './pages/public/AppPage';
+import PedidoStatus from './pages/public/PedidoStatus';
+import Pendencias from './pages/admin/Pendencias';
 import { ThemeApplier } from './components/brand';
 
 /** Carregando; sem internet, avisa que está tentando reconectar (não pede a senha de novo). */
@@ -67,6 +70,8 @@ export default function App() {
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/cardapio" element={<PublicMenu />} />
+      <Route path="/cardapio/pedido/:token" element={<PedidoStatus />} />
+      <Route path="/app" element={<AppPage />} />
       <Route path="/cozinha" element={<Guard roles={['COZINHA']}><Kitchen /></Guard>} />
       <Route path="/caixa" element={<Guard roles={['CAIXA']}><CashierLayout /></Guard>}>
         <Route index element={<Board />} />
@@ -94,6 +99,8 @@ export default function App() {
         <Route path="tempo" element={<TimingPage />} />
         <Route path="pedidos" element={<OrdersHistory />} />
         <Route path="oneup/base" element={<BaseComparacao />} />
+        <Route path="estoque" element={<StockPage />} />
+        <Route path="pendencias" element={<Pendencias />} />
       </Route>
       <Route path="*" element={<Home />} />
     </Routes>

@@ -6,8 +6,11 @@ import { AuthProvider } from './auth';
 import { RealtimeProvider } from './realtime';
 import { ToastProvider } from './components/ui';
 import App from './App';
+import { prepararInstalacao } from './components/instalar';
 import './styles/base.css';
 import './styles/screens.css';
+
+prepararInstalacao();
 
 const qc = new QueryClient({
   defaultOptions: {

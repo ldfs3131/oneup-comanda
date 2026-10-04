@@ -12,13 +12,20 @@ export const SECOES = [
     { id: 'cozinha', titulo: 'Cozinha', descricao: 'Como a tela da cozinha avisa sobre pedidos atrasados.' },
     { id: 'delivery', titulo: 'Delivery', descricao: 'Entrega pronta no sistema; ligue quando quiser usar.' },
     { id: 'financeiro', titulo: 'Financeiro', descricao: 'Indicadores de acompanhamento.' },
+    { id: 'estoque', titulo: 'Estoque', descricao: 'Como o sistema calcula a sugestão de compra.' },
     { id: 'plano', titulo: 'Seu plano ONE UP Comanda', descricao: 'Recursos liberados pelo seu plano. Para mudar, fale com a ONE UP.' },
+    { id: 'oneup', titulo: 'ONE UP (só você vê)', descricao: 'Recursos que só a ONE UP liga. O Dono não vê esta seção.' },
 ];
+/** Seções que o Dono nunca vê ('interno' não aparece para ninguém na tela). */
+const SO_ONEUP = new Set(['oneup']);
+const OCULTAS = new Set(['interno']);
 export const CATALOGO = [
     // Identidade
     { chave: 'nome', secao: 'identidade', rotulo: 'Nome do restaurante', ajuda: 'Aparece no login, nas telas e no cardápio digital.', tipo: 'texto', padrao: 'Meu restaurante', minLen: 2, maxLen: 60, quem: 'DONO', coluna: { tabela: 'restaurante', campo: 'name' }, publico: true },
     { chave: 'subtitulo', secao: 'identidade', rotulo: 'Subtítulo', ajuda: 'Uma linha curta abaixo do nome (ex.: "Espetinhos e porções").', tipo: 'texto', padrao: '', maxLen: 60, quem: 'DONO', coluna: { tabela: 'restaurante', campo: 'tagline' }, publico: true },
     { chave: 'logo', secao: 'identidade', rotulo: 'Logotipo', ajuda: 'Imagem quadrada ou horizontal (PNG ou JPG, até 2 MB). Sem logotipo, aparece o nome.', tipo: 'imagem', padrao: null, opcional: true, quem: 'DONO', publico: true },
+    { chave: 'nome_app', secao: 'identidade', rotulo: 'Nome do aplicativo', ajuda: 'Nome que aparece embaixo do ícone no celular de quem baixar o app (clientes e equipe). Curto: até 18 letras. Vazio = nome do restaurante.', tipo: 'texto', padrao: '', maxLen: 18, quem: 'DONO', publico: true },
+    { chave: 'icone_app', secao: 'identidade', rotulo: 'Ícone do aplicativo', ajuda: 'Imagem QUADRADA (ideal 512 × 512 px, PNG). É o ícone na tela do celular. Sem ícone, usa o do ONE UP Comanda.', tipo: 'imagem', padrao: null, opcional: true, quem: 'DONO', publico: true },
     { chave: 'cor_destaque', secao: 'identidade', rotulo: 'Cor de destaque', ajuda: 'Cor dos botões principais, links e destaques.', tipo: 'cor', padrao: '#FCB132', quem: 'DONO', publico: true },
     { chave: 'tema', secao: 'identidade', rotulo: 'Tema das telas', ajuda: 'Escuro descansa a vista à noite e no salão com pouca luz; claro fica melhor de dia e em ambiente iluminado; automático segue o aparelho de cada pessoa.', tipo: 'escolha', opcoes: [{ valor: 'escuro', rotulo: 'Escuro' }, { valor: 'claro', rotulo: 'Claro' }, { valor: 'auto', rotulo: 'Automático' }], padrao: 'escuro', quem: 'DONO', publico: true },
     { chave: 'whatsapp', secao: 'identidade', rotulo: 'WhatsApp do restaurante', ajuda: 'Com DDD. Vira o botão "Falar no WhatsApp" do cardápio digital.', tipo: 'telefone', padrao: null, opcional: true, quem: 'DONO', coluna: { tabela: 'restaurante', campo: 'whatsappNumber' }, publico: true },
@@ -37,6 +44,7 @@ export const CATALOGO = [
     // Caixa e controle
     { chave: 'abertura_sugerida', secao: 'caixa', rotulo: 'Troco sugerido para abrir o caixa', ajuda: 'Valor que já vem preenchido em "Abrir o dia". O caixa pode mudar.', tipo: 'dinheiro', padrao: 0, min: 0, max: 10_000_000, quem: 'DONO' },
     { chave: 'desconto_max_caixa', secao: 'caixa', rotulo: 'Desconto máximo que o caixa dá sozinho (%)', ajuda: 'Acima disso, só o Dono. Vazio = sem limite.', tipo: 'percentual', padrao: null, opcional: true, min: 0, max: 100, quem: 'DONO' },
+    { chave: 'tolerancia_caixa', secao: 'caixa', rotulo: 'Tolerância no fechamento do caixa', ajuda: 'Fechamento às cegas: o caixa nunca vê o valor esperado nem a diferença. Se a diferença passar deste valor, ele só vê "Confira com o responsável". Você vê tudo em Caixas.', tipo: 'dinheiro', padrao: 500, min: 0, max: 100_000, quem: 'DONO' },
     { chave: 'cancelar_pronto_so_dono', secao: 'caixa', rotulo: 'Cancelar item já pronto: só o Dono', ajuda: 'Comida que já saiu da cozinha é perda. Ligado, o caixa não cancela sozinho.', tipo: 'bool', padrao: false, quem: 'DONO' },
     // Cozinha
     { chave: 'cozinha_amarelo_pct', secao: 'cozinha', rotulo: 'Pedido fica AMARELO com (% do tempo-meta)', ajuda: 'Ex.: 100% = quando passa do tempo-meta do prato.', tipo: 'numero', padrao: 100, min: 50, max: 300, quem: 'DONO' },
@@ -46,6 +54,13 @@ export const CATALOGO = [
     // Financeiro
     { chave: 'mei_ligado', secao: 'financeiro', rotulo: 'Indicador do limite do MEI', ajuda: 'Mostra no painel quanto do limite anual já foi faturado no sistema. Confirme o limite vigente com o contador.', tipo: 'bool', padrao: false, quem: 'DONO', coluna: { tabela: 'restaurante', campo: 'meiEnabled' } },
     { chave: 'mei_limite', secao: 'financeiro', rotulo: 'Limite anual de referência do MEI', ajuda: 'Valor usado no indicador.', tipo: 'dinheiro', padrao: 8_100_000, min: 0, max: 10_000_000_000, quem: 'DONO', coluna: { tabela: 'restaurante', campo: 'meiLimitCents' } },
+    // Estoque
+    { chave: 'estoque_dias_cobertura', secao: 'estoque', rotulo: 'Dias de estoque que você quer ter', ajuda: 'A sugestão de compra calcula: média de vendas por dia × estes dias − o que você já tem. Padrão: 7 dias.', tipo: 'numero', padrao: 7, min: 1, max: 60, quem: 'DONO' },
+    // Só a ONE UP vê e muda (o Dono nunca vê esta seção)
+    { chave: 'cobranca_whatsapp', secao: 'oneup', rotulo: 'Botão "💬 Cobrar" no A receber', ajuda: 'Desligado por padrão. Ligado, aparece o botão que abre o WhatsApp com a mensagem pronta e editável. O sistema nunca envia sozinho; registra a última cobrança (quem e quando).', tipo: 'bool', padrao: false, quem: 'ONEUP' },
+    { chave: 'mensagem_cobranca', secao: 'oneup', rotulo: 'Mensagem de cobrança', ajuda: 'Use {nome}, {valor}, {data} (data combinada) e {restaurante}. Dá para editar antes de enviar.', tipo: 'texto_longo', padrao: 'Oi, {nome}! Tudo bem? Aqui é do {restaurante}. Passando para lembrar do valor de {valor} que ficou em aberto{data}. Quando puder, me avisa por aqui. Obrigado!', minLen: 10, maxLen: 400, quem: 'ONEUP' },
+    { chave: 'backup_externo_em', secao: 'interno', rotulo: 'Último backup externo confirmado', ajuda: 'Gravado quando a ONE UP confirma "Já fiz" no lembrete de 30 dias.', tipo: 'texto', padrao: '', maxLen: 60, quem: 'ONEUP' },
+    { chave: 'backup_externo_adiado', secao: 'interno', rotulo: 'Lembrete de backup adiado até', ajuda: 'Lembrar amanhã.', tipo: 'texto', padrao: '', maxLen: 60, quem: 'ONEUP' },
     // Plano (só a ONE UP muda)
     { chave: 'modulo_cardapio_digital', secao: 'plano', rotulo: 'Cardápio digital incluído no plano', ajuda: 'Liberado pela ONE UP conforme o plano contratado.', tipo: 'bool', padrao: true, quem: 'ONEUP' },
     { chave: 'modulo_delivery', secao: 'plano', rotulo: 'Delivery incluído no plano', ajuda: 'Liberado pela ONE UP conforme o plano contratado.', tipo: 'bool', padrao: true, quem: 'ONEUP' },
@@ -154,17 +169,18 @@ export async function travas(tx = db) {
     return new Map(rows.map((t) => [t.chave, t.motivo]));
 }
 /** Tela de Configurações: catálogo + valores + quem pode mudar + cadeados. */
-export async function telaConfiguracoes() {
+export async function telaConfiguracoes(user) {
     const valores = await lerConfiguracoes();
     const locks = await travas();
+    const oneup = !!user?.oneup;
     return {
-        secoes: SECOES,
-        itens: CATALOGO.map((d) => ({
+        secoes: SECOES.filter((s) => oneup || !SO_ONEUP.has(s.id)),
+        itens: CATALOGO.filter((d) => !OCULTAS.has(d.secao) && (oneup || !SO_ONEUP.has(d.secao))).map((d) => ({
             chave: d.chave, secao: d.secao, rotulo: d.rotulo, ajuda: d.ajuda, tipo: d.tipo, padrao: d.padrao,
             min: d.min, max: d.max, maxLen: d.maxLen, minLen: d.minLen, opcional: !!d.opcional, opcoes: d.opcoes, requer: d.requer ?? null,
             quem: d.quem, valor: valores[d.chave], ehPadrao: JSON.stringify(valores[d.chave] ?? null) === JSON.stringify(d.padrao ?? null),
             trava: locks.get(d.chave) ?? null,
-            editavel: d.quem === 'DONO' && !locks.has(d.chave),
+            editavel: oneup || (d.quem === 'DONO' && !locks.has(d.chave)),
         })),
     };
 }
@@ -184,7 +200,7 @@ export async function aplicarConfiguracoes(valores, user, origem = 'EMPRESA') {
             const def = defDe(chave);
             if (!def)
                 throw new HttpError(400, `Configuração desconhecida: ${chave}.`);
-            if (origem !== 'ONEUP') {
+            if (origem !== 'ONEUP' && !(origem === 'EMPRESA' && user?.oneup)) {
                 if (def.quem !== 'DONO')
                     throw new HttpError(403, `"${def.rotulo}" é definido pelo seu plano. Fale com a ONE UP.`, 'CONFIG_ONEUP');
                 if (locks.has(chave))

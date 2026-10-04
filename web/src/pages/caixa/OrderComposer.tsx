@@ -22,7 +22,7 @@ function stockInfo(p: Product) {
   if (!p.trackStock) return null;
   if (p.stockQty <= 0) return { tone: 'danger', text: 'sem estoque' };
   const low = p.lowStockAt ?? 3;
-  if (p.stockQty <= low) return { tone: 'warn', text: `restam ${p.stockQty}` };
+  if (p.stockQty <= low) return { tone: 'warn', text: 'acabando' };
   return null;
 }
 

@@ -53,7 +53,22 @@ export const users = pgTable('users', {
   active: boolean('active').notNull().default(true),
   /** usuário da ONE UP (Administrador da plataforma) dentro da empresa: o Dono não vê nem altera */
   oneup: boolean('oneup').notNull().default(false),
+  pinHash: text('pin_hash'),
+  pinFalhas: integer('pin_falhas').notNull().default(0),
+  pinBloqueadoAte: ts('pin_bloqueado_ate'),
   createdAt: createdAt(),
+});
+
+/** Aparelho da equipe: o PIN só vale onde alguém já entrou com usuário e senha. */
+export const aparelhos = pgTable('aparelhos', {
+  id: serial('id').primaryKey(),
+  empresaId: empresaRef(),
+  tokenHash: text('token_hash').notNull().unique(),
+  nome: text('nome'),
+  criadoPor: integer('criado_por').references(() => users.id),
+  createdAt: createdAt(),
+  ultimoUso: ts('ultimo_uso'),
+  revogadoEm: ts('revogado_em'),
 });
 
 export const sessions = pgTable('sessions', {
@@ -171,6 +186,9 @@ export const accounts = pgTable('accounts', {
   pendingBy: integer('pending_by').references(() => users.id),
   closedAt: ts('closed_at'),
   closedBy: integer('closed_by').references(() => users.id),
+  promisedDate: date('promised_date', { mode: 'string' }),
+  ultimaCobrancaEm: ts('ultima_cobranca_em'),
+  ultimaCobrancaPor: integer('ultima_cobranca_por').references(() => users.id),
 }, (t) => [index('accounts_status_idx').on(t.status)]);
 
 export const orders = pgTable('orders', {
@@ -199,6 +217,7 @@ export const orders = pgTable('orders', {
   deliveredBy: integer('delivered_by').references(() => users.id),
   problemNote: text('problem_note'),
   problemAt: ts('problem_at'),
+  publicToken: text('public_token'),
 }, (t) => [index('orders_status_idx').on(t.status), index('orders_account_idx').on(t.accountId)]);
 
 export const orderItems = pgTable('order_items', {
@@ -335,6 +354,9 @@ export const customers = pgTable('customers', {
   contact: text('contact'),
   phone: text('phone'),
   note: text('note'),
+  aceitaOfertas: boolean('aceita_ofertas').notNull().default(false),
+  aceitaOfertasEm: ts('aceita_ofertas_em'),
+  aceitaOfertasTexto: text('aceita_ofertas_texto'),
   createdAt: createdAt(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => [index('customers_name_idx').on(t.name)]);
@@ -376,6 +398,8 @@ export const stockMovements = pgTable('stock_movements', {
   reason: text('reason'),
   orderItemId: integer('order_item_id').references(() => orderItems.id),
   userId: integer('user_id').references(() => users.id),
+  unitCostCents: integer('unit_cost_cents'),
+  fornecedor: text('fornecedor'),
   createdAt: createdAt(),
 }, (t) => [index('stock_mov_product_idx').on(t.productId)]);
 
@@ -534,4 +558,15 @@ export const crmConfig = pgTable('crm_config', {
   empresaId: integer('empresa_id').primaryKey().default(sql`app_empresa()`),
   config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
   updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+/** Pendência resolvida (avulso repetido ignorado, divergência conferida): some da lista. */
+export const pendenciasResolvidas = pgTable('pendencias_resolvidas', {
+  id: serial('id').primaryKey(),
+  empresaId: empresaRef(),
+  tipo: text('tipo').notNull(),
+  chave: text('chave').notNull(),
+  acao: text('acao').notNull(),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: createdAt(),
 });

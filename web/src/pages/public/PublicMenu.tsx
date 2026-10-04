@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, chaveDoEnvio, idAparelho, type ChaveEnvio } from '../../api';
 import { brl } from '../../format';
 import { Modal, Spinner } from '../../components/ui';
 import { BrandLogo, usePageTitle } from '../../components/brand';
+import { BotaoBaixarApp } from '../../components/instalar';
 
 type PGroup = { id: number; name: string; required: boolean; multiple: boolean; options: { id: number; name: string; priceDeltaCents: number }[] };
 type PProduct = { id: number; name: string; description: string; priceCents: number; imageUrl: string | null; soldOut?: boolean; groups: PGroup[] };
@@ -20,7 +22,8 @@ export default function PublicMenu() {
   const [cart, setCart] = useState<Line[]>([]);
   const [pick, setPick] = useState<PProduct | null>(null);
   const [checkout, setCheckout] = useState(false);
-  const [done, setDone] = useState<{ orderNumber: number; totalCents: number } | null>(null);
+  const nav = useNavigate();
+  const ultimo = lerLocal('oneup:ultimo-pedido');
   const total = cart.reduce((s, l) => s + l.unit * l.quantity, 0);
   const count = cart.reduce((s, l) => s + l.quantity, 0);
 
@@ -45,18 +48,6 @@ export default function PublicMenu() {
         <h2>Cardápio digital indisponível</h2>
         <p className="muted">Faça seu pedido no balcão.</p>
         {wa}
-      </div>
-    </div>
-  );
-
-  if (done) return (
-    <div className="pub">
-      {logo}
-      <div className="card center col gap-lg" style={{ margin: 16 }}>
-        <div style={{ fontSize: 48 }}>✅</div>
-        <h2>Pedido #{done.orderNumber} enviado!</h2>
-        <p className="muted">Total {brl(done.totalCents)}. Aguarde a confirmação do caixa — o pagamento é feito no balcão.</p>
-        <button className="btn primary block" onClick={() => { setDone(null); setCart([]); }}>Fazer outro pedido</button>
       </div>
     </div>
   );
@@ -89,6 +80,8 @@ export default function PublicMenu() {
           <span className={`badge ${data.deliveryOpen ? 'ok' : ''}`}>Delivery {data.deliveryOpen ? 'aberto' : 'fechado'}</span>
         </div>
         {cfg.boas_vindas && <p className="pub-welcome">{cfg.boas_vindas}</p>}
+        {ultimo && <a className="btn sm ghost" href={`/cardapio/pedido/${ultimo}`} onClick={(e) => { e.preventDefault(); nav(`/cardapio/pedido/${ultimo}`); }}>📍 Acompanhar meu último pedido</a>}
+        <div className={`pub-app${new URLSearchParams(location.search).has('instalar') ? ' destaque' : ''}`}><BotaoBaixarApp para="cliente" className="btn sm" texto="Baixar o app" /></div>
         <nav className="pub-cats">{data.categories!.map((c) => <a key={c.id} href={`#cat-${c.id}`}>{c.name}</a>)}</nav>
       </header>
       <main className="pub-main">
@@ -117,7 +110,8 @@ export default function PublicMenu() {
         </button>
       )}
       {pick && <PubOptions p={pick} onClose={() => setPick(null)} onAdd={(ids, q) => { add(pick, ids, q); setPick(null); }} />}
-      {checkout && <Checkout cart={cart} setCart={setCart} total={total} deliveryOpen={!!data.deliveryOpen} onClose={() => setCheckout(false)} onDone={(r) => { setCheckout(false); setDone(r); }} />}
+      {checkout && <Checkout cart={cart} setCart={setCart} total={total} deliveryOpen={!!data.deliveryOpen} restaurante={data.name} onClose={() => setCheckout(false)}
+        onDone={(r) => { setCheckout(false); setCart([]); gravarLocal('oneup:ultimo-pedido', r.token); nav(`/cardapio/pedido/${r.token}`); }} />}
     </div>
   );
 }
@@ -154,22 +148,46 @@ function PubOptions({ p, onClose, onAdd }: { p: PProduct; onClose: () => void; o
   );
 }
 
-function Checkout({ cart, setCart, total, deliveryOpen, onClose, onDone }: {
-  cart: Line[]; setCart: (f: (c: Line[]) => Line[]) => void; total: number; deliveryOpen: boolean;
-  onClose: () => void; onDone: (r: { orderNumber: number; totalCents: number }) => void;
+const lerLocal = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
+const gravarLocal = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento: segue sem lembrar */ } };
+
+/** (11) 91234-5678 enquanto digita */
+function mascaraZap(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 2) return d;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+function zapValido(v: string) {
+  const d = v.replace(/\D/g, '');
+  return (d.length === 10 || (d.length === 11 && d[2] === '9')) && Number(d.slice(0, 2)) >= 11;
+}
+
+type Mode = 'BALCAO' | 'LOCAL' | 'ENTREGA';
+const MODO_LABEL: Record<Mode, string> = { BALCAO: 'Retirar no balcão', LOCAL: 'Consumir aqui', ENTREGA: 'Entrega' };
+
+function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, onDone }: {
+  cart: Line[]; setCart: (f: (c: Line[]) => Line[]) => void; total: number; deliveryOpen: boolean; restaurante: string;
+  onClose: () => void; onDone: (r: { orderNumber: number; totalCents: number; token: string }) => void;
 }) {
-  const [name, setName] = useState('');
-  const [mode, setMode] = useState<'BALCAO' | 'LOCAL' | 'ENTREGA'>('BALCAO');
+  const [name, setName] = useState(lerLocal('oneup:cliente-nome'));
+  const [zap, setZap] = useState(mascaraZap(lerLocal('oneup:cliente-zap')));
+  const [ofertas, setOfertas] = useState(false);
+  const [mode, setMode] = useState<Mode>('BALCAO');
   const [location, setLocation] = useState('');
   const [note, setNote] = useState('');
+  const [revisar, setRevisar] = useState(false);
+  const [tentou, setTentou] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const envio: ChaveEnvio = useRef(null);
-  const valid = cart.length > 0 && (mode !== 'ENTREGA' || location.trim().length > 2);
-  type Mode = 'BALCAO' | 'LOCAL' | 'ENTREGA';
+  const nomeOk = name.trim().length >= 2;
+  const zapOk = zapValido(zap);
+  const valid = cart.length > 0 && nomeOk && zapOk && (mode !== 'ENTREGA' || location.trim().length > 2);
   const modes = useMemo(() => {
-    const m: { v: Mode; label: string }[] = [{ v: 'BALCAO', label: 'Retirar no balcão' }, { v: 'LOCAL', label: 'Consumir aqui' }];
-    if (deliveryOpen) m.push({ v: 'ENTREGA', label: 'Entrega' });
+    const m: Mode[] = ['BALCAO', 'LOCAL'];
+    if (deliveryOpen) m.push('ENTREGA');
     return m;
   }, [deliveryOpen]);
 
@@ -177,35 +195,65 @@ function Checkout({ cart, setCart, total, deliveryOpen, onClose, onDone }: {
     setBusy(true); setErr('');
     try {
       const corpo = {
-        customerName: name, mode, location, note,
+        customerName: name.trim(), phone: zap, aceitaOfertas: ofertas, mode, location, note,
         items: cart.map((l) => ({ productId: l.product.id, quantity: l.quantity, optionIds: l.optionIds })),
       };
       // a mesma chave num novo toque depois de falha de internet: o restaurante não recebe o pedido duas vezes
-      const r = await api.post<{ orderNumber: number; totalCents: number }>('/api/public/orders', corpo, chaveDoEnvio(envio, corpo), { 'x-aparelho': idAparelho() });
+      const r = await api.post<{ orderNumber: number; totalCents: number; token: string }>('/api/public/orders', corpo, chaveDoEnvio(envio, corpo), { 'x-aparelho': idAparelho() });
       envio.current = null;
+      gravarLocal('oneup:cliente-nome', name.trim()); gravarLocal('oneup:cliente-zap', zap.replace(/\D/g, ''));
       onDone(r);
-    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+    } catch (e) { setErr((e as Error).message); setRevisar(false); } finally { setBusy(false); }
   };
+
+  if (revisar) return (
+    <Modal title="Confira antes de enviar" onClose={onClose} footer={<div className="col" style={{ width: '100%', gap: 8 }}>
+      <button className="btn go lg block" disabled={busy} onClick={send}>{busy ? 'Enviando…' : `Enviar pedido · ${brl(total)}`}</button>
+      <button className="btn block" onClick={() => setRevisar(false)} disabled={busy}>Voltar e mudar</button>
+    </div>}>
+      <div className="col gap-lg">
+        <div>
+          {cart.map((l) => (
+            <div key={l.key} className="kv"><span>{l.quantity}× {l.product.name}{l.labels.length > 0 && <span className="small muted"> · {l.labels.join(', ')}</span>}</span><span className="v">{brl(l.unit * l.quantity)}</span></div>
+          ))}
+          <div className="kv total"><span>Total</span><span className="v">{brl(total)}</span></div>
+        </div>
+        <div className="info-box small col" style={{ gap: 4 }}>
+          <div><b>{name.trim()}</b> · WhatsApp {zap}</div>
+          <div>{MODO_LABEL[mode]}{location.trim() ? ` · ${location.trim()}` : ''}</div>
+          {note.trim() && <div>Obs.: {note.trim()}</div>}
+          {ofertas && <div>✓ Aceito receber ofertas pelo WhatsApp</div>}
+        </div>
+        <div className="small muted">O caixa confirma o pedido e o pagamento é feito no balcão. Depois de enviar, você acompanha o andamento nesta tela.</div>
+      </div>
+    </Modal>
+  );
 
   return (
     <Modal title="Seu pedido" onClose={onClose} footer={
-      <button className="btn go lg block" disabled={!valid || busy} onClick={send}>{busy ? 'Enviando…' : `Enviar pedido · ${brl(total)}`}</button>
+      <button className="btn go lg block" disabled={cart.length === 0 || busy} onClick={() => { setTentou(true); if (valid) setRevisar(true); }}>Revisar pedido · {brl(total)}</button>
     }>
       <div className="col gap-lg">
         <div>
           {cart.map((l) => (
             <div key={l.key} className="kv">
               <span>{l.quantity}× {l.product.name}{l.labels.length > 0 && <span className="small muted"> · {l.labels.join(', ')}</span>}</span>
-              <span className="row"><span className="v">{brl(l.unit * l.quantity)}</span><button className="btn sm ghost icon" onClick={() => setCart((c) => c.filter((x) => x.key !== l.key))}>✕</button></span>
+              <span className="row"><span className="v">{brl(l.unit * l.quantity)}</span><button className="btn sm ghost icon" aria-label="Tirar do pedido" onClick={() => setCart((c) => c.filter((x) => x.key !== l.key))}>✕</button></span>
             </div>
           ))}
         </div>
-        <label className="field"><span>Seu nome (opcional)</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} /></label>
-        <div className="seg">{modes.map((m) => <button key={m.v} className={mode === m.v ? 'on' : ''} onClick={() => setMode(m.v)}>{m.label}</button>)}</div>
-        <label className="field"><span>{mode === 'ENTREGA' ? 'Endereço / casa (obrigatório)' : 'Onde você está? (opcional)'}</span>
-          <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={mode === 'ENTREGA' ? 'Ex.: casa 123' : 'Ex.: perto da piscina'} maxLength={120} /></label>
+        <label className="field"><span>Seu nome *</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoComplete="name" />
+          {tentou && !nomeOk && <div className="small cancel-text">Informe o seu nome.</div>}</label>
+        <label className="field"><span>Seu WhatsApp *</span><input className="input" inputMode="tel" autoComplete="tel-national" value={zap} onChange={(e) => setZap(mascaraZap(e.target.value))} placeholder="(11) 91234-5678" />
+          {tentou && !zapOk && <div className="small cancel-text">Informe o WhatsApp com DDD, por exemplo (11) 91234-5678.</div>}
+          <div className="small faint">Usado só para falar com você sobre este pedido.</div></label>
+        <div className="seg">{modes.map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)}>{MODO_LABEL[m]}</button>)}</div>
+        <label className="field"><span>{mode === 'ENTREGA' ? 'Endereço / casa *' : 'Onde você está? (opcional)'}</span>
+          <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={mode === 'ENTREGA' ? 'Ex.: casa 123' : 'Ex.: perto da piscina'} maxLength={120} />
+          {tentou && mode === 'ENTREGA' && location.trim().length <= 2 && <div className="small cancel-text">Informe o endereço da entrega.</div>}</label>
         <label className="field"><span>Observação</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: sem cebola" maxLength={200} /></label>
-        <div className="small muted">O pedido será confirmado pelo caixa. O pagamento é feito no balcão.</div>
+        <label className="check small"><input type="checkbox" checked={ofertas} onChange={(e) => setOfertas(e.target.checked)} />
+          Aceito receber ofertas e novidades do {restaurante} pelo WhatsApp. Posso pedir para parar quando quiser. (opcional)</label>
         {err && <div className="cancel-text">{err}</div>}
       </div>
     </Modal>

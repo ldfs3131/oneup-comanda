@@ -163,7 +163,7 @@ async function main() {
   {
     const cerveja = menu.flatMap((c) => c.products).find((p: any) => p.name === 'Corona');
     const estoque = async () => (await db.query(`SELECT stock_qty FROM products WHERE id=$1`, [cerveja.id])).rows[0].stock_qty;
-    await caixa.post(`/api/stock/${cerveja.id}`, { type: 'AJUSTE', newQty: 1, reason: 'Teste oneup' });
+    await dono.post(`/api/stock/${cerveja.id}`, { type: 'AJUSTE', newQty: 1, reason: 'Teste oneup' });
     const v = await caixa.post('/api/accounts', { customerName: 'Sem estoque', items: [{ productId: cerveja.id, quantity: 3 }] });
     check('Vende 3 com só 1 no estoque, sem travar', v.status === 200, v.data);
     check('Estoque fica 0 (nunca negativo)', (await estoque()) === 0);
@@ -180,8 +180,10 @@ async function main() {
   console.log('\n[5] Online: app instalável com o nome do restaurante e certificado só para empresa que existe');
   const man = await new C('alfa').get('/manifest.webmanifest');
   const [{ name: nomeAlfa }] = (await db.query(`SELECT name FROM restaurant_settings WHERE empresa_id=$1`, [ALFA])).rows;
-  check('Manifesto do app traz o nome do restaurante', man.status === 200 && man.data.name === nomeAlfa && man.data.display === 'standalone', man.data);
+  check('Manifesto do app traz o nome do restaurante', man.status === 200 && man.data.name === `${nomeAlfa} — Equipe` && !/\bEqu$/.test(man.data.short_name) && man.data.display === 'standalone', man.data);
   check('Manifesto com ícones', man.data?.icons?.length === 2);
+  const manCli = await new C('alfa').get('/cardapio.webmanifest');
+  check('App dos clientes abre no cardápio, com o nome do restaurante', manCli.status === 200 && manCli.data.name === nomeAlfa && manCli.data.start_url.startsWith('/cardapio') && manCli.data.scope === '/cardapio', manCli.data);
   const tlsOk = await fetch(`${BASE}/api/health/tls?domain=alfa.localhost`);
   const tlsNao = await fetch(`${BASE}/api/health/tls?domain=nao-existe.localhost`);
   const tlsLixo = await fetch(`${BASE}/api/health/tls?domain=${encodeURIComponent('../../etc')}`);

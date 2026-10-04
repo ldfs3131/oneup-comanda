@@ -9,7 +9,10 @@ import { OpenDay } from './Board';
 type Current = { register: null; isOpen: boolean } | {
   register: { id: number; openedAt: string; openedByName: string; openingCashCents: number }; isOpen: boolean; blind: boolean; summary: RegisterSummary;
 };
-type CloseResult = { expectedCashCents: number; countedCashCents: number; differenceCents: number; receivedCents: number; openAccounts: number };
+type CloseResult =
+  | { cego?: false; expectedCashCents: number; countedCashCents: number; differenceCents: number; receivedCents: number; openAccounts: number }
+  // Caixa (fechamento às cegas): nunca recebe esperado, diferença nem totais — só se precisa conferir
+  | { cego: true; countedCashCents: number; openAccounts: number; conferir: boolean };
 
 export function useRegister() {
   return useQuery({ queryKey: ['register'], queryFn: () => api.get<Current>('/api/register/current'), refetchInterval: 30_000 });
@@ -25,14 +28,19 @@ export default function RegisterPage() {
   if (closed) return (
     <div className="page narrow" style={{ maxWidth: 520 }}>
       <div className="card col gap-lg">
-        <h1>Dia encerrado ✔</h1>
-        <div className="muted small">O estabelecimento ficou <b>FECHADO</b> e um backup automático foi iniciado.</div>
-        <div>
+        <h1>{closed.cego ? 'Contagem registrada ✔' : 'Dia encerrado ✔'}</h1>
+        <div className="muted small">O dia foi encerrado, o estabelecimento ficou <b>FECHADO</b> e um backup automático foi iniciado.</div>
+        {closed.cego ? <>
+          <div className="kv"><span>Dinheiro que você contou</span><span className="v">{brl(closed.countedCashCents)}</span></div>
+          {closed.conferir
+            ? <div className="problem-box">⚠ Confira com o responsável antes de ir embora.</div>
+            : <div className="info-box small">Tudo certo. O responsável confere os números do dia.</div>}
+        </> : <div>
           <div className="kv"><span>Total recebido no dia</span><span className="v">{brl(closed.receivedCents)}</span></div>
           <div className="kv"><span>Dinheiro esperado na gaveta</span><span className="v">{brl(closed.expectedCashCents)}</span></div>
           <div className="kv"><span>Dinheiro contado</span><span className="v">{brl(closed.countedCashCents)}</span></div>
           <div className="kv total"><span>Diferença</span><span className="v" style={{ color: closed.differenceCents === 0 ? 'var(--ok)' : 'var(--danger)' }}>{closed.differenceCents === 0 ? 'Sem diferença' : signed(closed.differenceCents)}</span></div>
-        </div>
+        </div>}
         {closed.openAccounts > 0 && <div className="info-box small">{closed.openAccounts} conta(s) continuam abertas e aparecem no próximo dia.</div>}
         <button className="btn primary block" onClick={() => setClosed(null)}>OK</button>
       </div>
@@ -65,6 +73,7 @@ export default function RegisterPage() {
 }
 
 export function RegisterSummaryView({ s, blind }: { s: RegisterSummary; blind?: boolean }) {
+  if (blind || s.salesCents == null) return <ResumoCego s={s} />;
   return (
     <div className="grid-3">
       <div className="card">
@@ -111,6 +120,42 @@ export function RegisterSummaryView({ s, blind }: { s: RegisterSummary; blind?: 
           {s.movements.map((m, i) => <div key={i} className="kv small"><span>{m.type === 'SANGRIA' ? '− Saída' : '＋ Suprimento'} · {dateTime(m.createdAt)} · {m.userName} · {m.reason}</span><span className="v">{brl(m.amountCents)}</span></div>)}
         </>}
       </div>
+    </div>
+  );
+}
+
+/** O que o Caixa vê do dia: movimento e gaveta, sem valores de venda, PIX, cartão ou esperado (fechamento às cegas). */
+function ResumoCego({ s }: { s: RegisterSummary }) {
+  return (
+    <div className="grid-3">
+      <div className="card">
+        <div className="panel-title">Movimento do dia</div>
+        <div className="kv"><span>Pedidos</span><span className="v">{s.ordersCount}</span></div>
+        <div className="kv"><span>Contas</span><span className="v">{s.accountsCount}</span></div>
+        <div className="kv"><span>Descontos/ajustes</span><span className="v">{s.discountsCount}</span></div>
+        <div className="kv"><span>Cancelamentos</span><span className="v">{s.cancellationsCount}</span></div>
+        <div className="kv"><span>Contas abertas agora</span><span className="v">{s.openAccountsNow}</span></div>
+      </div>
+      <div className="card">
+        <div className="panel-title">Dinheiro na gaveta</div>
+        <div className="kv"><span>Abertura</span><span className="v">{brl(s.openingCashCents)}</span></div>
+        <div className="kv"><span>+ Suprimentos</span><span className="v">{brl(s.suprimentosCents)}</span></div>
+        <div className="kv"><span>− Sangrias e despesas</span><span className="v">{brl(s.sangriasCents)}</span></div>
+      </div>
+      <div className="card">
+        <div className="panel-title">Fechamento às cegas 🔒</div>
+        <div className="small muted">No fim do dia, toque em <b>Encerrar o dia</b>, conte o dinheiro da gaveta e digite o valor. O responsável confere os números depois.</div>
+      </div>
+      {(s.pendingCreated.length > 0 || s.movements.length > 0) && <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <div className="panel-title">Contas deixadas a receber hoje ({s.pendingCreated.length})</div>
+        {!s.pendingCreated.length && <div className="muted small">Nenhuma.</div>}
+        {s.pendingCreated.map((p) => <div key={p.id} className="kv"><span>#{p.number} · {p.customerName} · {p.contact}</span><span className="v">{brl(p.balance)}</span></div>)}
+        {s.movements.length > 0 && <>
+          <div className="divider" />
+          <div className="panel-title">Sangrias, despesas e suprimentos</div>
+          {s.movements.map((m, i) => <div key={i} className="kv small"><span>{m.type === 'SANGRIA' ? '− Saída' : '＋ Suprimento'} · {dateTime(m.createdAt)} · {m.userName} · {m.reason}</span><span className="v">{brl(m.amountCents)}</span></div>)}
+        </>}
+      </div>}
     </div>
   );
 }
@@ -194,7 +239,7 @@ function CloseModal({ s, blind, onClose, onClosed }: { s: RegisterSummary; blind
         {s.openAccountsNow > 0 && (
           <div className="problem-box">Ainda há {s.openAccountsNow} conta(s) aberta(s). Elas continuam abertas e os pagamentos futuros entram no próximo dia.</div>
         )}
-        <div className="small muted">Conte o dinheiro da gaveta e digite o valor. {blind ? 'Por segurança, o valor esperado só aparece depois de confirmar.' : ''}</div>
+        <div className="small muted">Conte o dinheiro da gaveta e digite o valor. {blind ? 'Fechamento às cegas: o sistema guarda a sua contagem e o responsável confere.' : ''}</div>
         <label className="field"><span>Dinheiro contado na gaveta</span><MoneyInput value={counted} onChange={(v) => { setCounted(v); setConfirm(false); }} autoFocus /></label>
         {diff != null && (
           <div className="kv total"><span>Diferença</span><span className="v" style={{ color: diff === 0 ? 'var(--ok)' : 'var(--danger)' }}>{signed(diff)}</span></div>

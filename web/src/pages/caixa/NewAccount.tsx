@@ -33,7 +33,11 @@ export default function NewAccount() {
   if (data && !data.register) return <OpenDay />;
   const closed = settings && !settings.restaurant.isOpen;
 
+  // Toda conta precisa ser identificável: pelo menos um entre nome, telefone, mesa ou observação (2+ letras/números)
+  const real = (t: string) => t.replace(/[^\p{L}\p{N}]/gu, '').length >= 2;
+  const identificado = !!customerId || [customerName, phone, tableLabel, note].some(real);
   const create = async (items: ReturnType<typeof linesToItems>, orderNote = '', consumptionType = 'LOCAL') => {
+    if (!identificado) { toast('Preencha pelo menos um: nome, telefone, mesa ou observação.', 'danger'); return false; }
     const r = await guard<Created>((stockDecisions?: StockDecision[]) => {
       const corpo = { customerName, customerId, note, tableLabel, phone, items, orderNote, consumptionType, stockDecisions };
       return api.post<Created>('/api/accounts', corpo, chaveDoEnvio(envio, corpo));
@@ -62,7 +66,7 @@ export default function NewAccount() {
         header={
           <div className="col" style={{ gap: 8 }}>
             <div className="new-acc-fields">
-              <CustomerField value={customerName} label={cfg.exigir_nome ? 'Cliente *' : 'Cliente (opcional)'} onChange={(v) => { setName(v); setCustomerId(null); }} autoFocus
+              <CustomerField value={customerName} label={cfg.exigir_nome ? 'Cliente *' : 'Cliente'} onChange={(v) => { setName(v); setCustomerId(null); }} autoFocus
                 onPick={(c) => { setCustomerId(c.id); if (c.phone) setPhone(c.phone); }} />
               <label className="field" style={{ width: 120 }}>
                 <span>{cfg.rotulo_mesa ?? 'Mesa'}{cfg.exigir_mesa ? ' *' : ''}</span>
@@ -73,6 +77,7 @@ export default function NewAccount() {
                 <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: camisa azul, perto da piscina" maxLength={200} />
               </label>
             </div>
+            {!identificado && <div className="small muted">Para abrir, preencha <b>pelo menos um</b>: nome, telefone, {String(cfg.rotulo_mesa ?? 'mesa').toLowerCase()} ou observação.</div>}
             <div className="row wrap" style={{ gap: 8 }}>
               {more || cfg.exigir_telefone
                 ? <label className="field" style={{ width: 220 }}><span>Telefone{cfg.exigir_telefone ? ' *' : ''}</span><input className="input" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(61) 9…" maxLength={30} /></label>

@@ -5,7 +5,8 @@
   "logo": "happy-alpha-logo.png",
   "configuracoes": {
     "cor_destaque": "#f2d38a",
-    "esconder_sem_estoque": false
+    "esconder_sem_estoque": false,
+    "nome_app": "Happy Alpha"
   },
   "custos": [
     {
@@ -126,5 +127,6 @@
       ],
       "observacao": "Print do app da maquininha (atualizado em 30/09/2026 14:12). Não inclui vendas em dinheiro. Contestadas, canceladas e devolvidas: R$ 0,00. Total a receber: R$ 48.161,57."
     }
-  ]
+  ],
+  "icone": "happy-alpha-icone.png"
 }

@@ -3,10 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from './api';
 import type { User } from './types';
 
-export type Meta = { demoMode: boolean; restaurantName: string; tagline: string; version: string; product?: string; empresa?: string | null; logo?: string | null; accent?: string | null; tema?: 'escuro' | 'claro' | 'auto' };
+export type Meta = { demoMode: boolean; restaurantName: string; tagline: string; version: string; product?: string; empresa?: string | null; logo?: string | null; accent?: string | null; tema?: 'escuro' | 'claro' | 'auto'; nomeApp?: string | null; icone?: string | null };
 type AuthCtx = {
   user: User | null; loading: boolean; offline: boolean; meta: Meta | null;
-  login: (u: string, p: string, remember?: boolean) => Promise<User>; logout: () => Promise<void>;
+  login: (u: string, p: string, remember?: boolean) => Promise<User>; loginPin: (userId: number, pin: string) => Promise<User>; logout: () => Promise<void>;
 };
 const Ctx = createContext<AuthCtx>(null as unknown as AuthCtx);
 
@@ -46,13 +46,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return r.user;
   }, [qc]);
 
+  const loginPin = useCallback(async (userId: number, pin: string) => {
+    const r = await api.post<{ user: User }>('/api/auth/pin', { userId, pin });
+    qc.clear();
+    setUser(r.user);
+    return r.user;
+  }, [qc]);
+
   const logout = useCallback(async () => {
     await api.post('/api/auth/logout').catch(() => undefined);
     qc.clear();
     setUser(null);
   }, [qc]);
 
-  return <Ctx.Provider value={{ user, loading, offline, meta, login, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, loading, offline, meta, login, loginPin, logout }}>{children}</Ctx.Provider>;
 }
 
 export const useAuth = () => useContext(Ctx);

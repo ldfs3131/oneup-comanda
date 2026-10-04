@@ -32,6 +32,12 @@ export function ThemeApplier() {
     mq.addEventListener('change', aplicar);
     return () => mq.removeEventListener('change', aplicar);
   }, [tema]);
+  // ícone e nome do app no iPhone (o Safari lê estas tags, não o manifesto)
+  const icone = meta?.icone; const nomeApp = meta?.nomeApp || meta?.restaurantName;
+  useEffect(() => {
+    document.querySelector('link[rel="apple-touch-icon"]')?.setAttribute('href', icone || '/comanda-icon-180.png');
+    if (nomeApp) document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', nomeApp);
+  }, [icone, nomeApp]);
   useEffect(() => {
     const root = document.documentElement;
     if (accent && /^#[0-9a-f]{6}$/i.test(accent)) {

@@ -7,11 +7,32 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 | 0. Auditoria e prompt mestre | ✅ 01/10 | `docs/ONE-UP-AUDITORIA.md`, `docs/PROMPT-MESTRE-ONE-UP.md` |
 | 1. ONE Base multi-empresa | ✅ 01/10 | 124 e2e + 30 insights + demo + **145 de vazamento** |
 | 2. Personalização pelo Dono | ✅ 01/10 | **54 de personalização** + telas no navegador (computador, tablet e celular) |
-| 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ⏭ próxima | escassez + às cegas |
-| 4. Ficha 5.3–5.10 (R3 Leva 1 restante) | pendente | |
+| 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ✅ 04/10 (3.2.0) | **67 da Leva 1** + às cegas no e2e |
+| 4. Ficha 5.3–5.10 (R3 Leva 1 restante) | ✅ 04/10 (3.2.0) | suíte `leva1` |
 | 5. Command Center fase 1 + Financeiro ONE UP + modo suporte | pendente | |
 | 6. Migração do Happy Alpha (paralelo e virada) | pendente | |
 | 7. Inteligência, Raio-X, Recuperador | pendente | |
+
+## Versão 3.2.0 (04/10) — aplicativo do restaurante + Leva 1 completa
+
+- **Aplicativo sem Play Store:** dois apps instaláveis pelo navegador com nome e ícone do restaurante — clientes (abre o
+  cardápio) e equipe (abre o sistema); página `/app` com os dois botões; Dono troca nome e ícone em Configurações.
+- **PIN de 4 números** para Caixa e Cozinha, só em aparelho onde alguém já entrou com senha; 5 erros = bloqueio de 5 min;
+  Dono vê e revoga aparelhos; "Trocar de pessoa" em 2 toques. Definir o primeiro PIN não derruba ninguém.
+- **Fechamento às cegas total:** Caixa nunca recebe esperado, diferença, PIX, cartão nem total (API e tela); acima da
+  tolerância (Configurações → Caixa) vê só "Confira com o responsável".
+- **Pedido identificável:** pelo menos um entre nome, telefone, mesa ou observação.
+- **Cardápio digital:** nome e WhatsApp obrigatórios, caixinha separada de ofertas (texto e hora guardados), tela de
+  revisão e acompanhamento por código aleatório (aguardando → confirmado → em preparação → pronto; recusado com motivo).
+- **A receber:** data combinada, etiquetas venceu/hoje/sem data/em dia por urgência; botão "💬 Cobrar" desligado por padrão,
+  só a ONE UP liga (seção "ONE UP (só você vê)" em Configurações); nunca envia sozinho, registra a última cobrança.
+- **Estoque do Dono:** atual com mínimo, entrada de compra (custo e fornecedor; pergunta antes de mudar o custo), ajuste com
+  motivo, sugestão de compra com a conta aberta (≥14 dias de dados), histórico imutável. Caixa vê só "acabou/acabando".
+- **Pendências:** produtos sem custo (preenche ali), avulsos repetidos (virar produto/ignorar), divergências (conferido).
+- **Importação por planilha CSV** em Cardápio: modelo, prévia com erro por linha, atualiza por nome, nunca apaga.
+- **Financeiro do Dono:** Hoje/7 dias/Mês/Ano; lucro com ▲▼ vs período anterior; cascata exata; formas de pagamento;
+  12 meses com "sem dados"; produtos em ordem alfabética com "sem custo" (nunca 100%).
+- **Menu do Dono** com 6 itens (+ "Mais"); Tempo de preparo só ONE UP; lembrete de backup externo a cada 30 dias (só ONE UP).
 
 ## Versão 3.0.0 online (01/10) — entrega para o teste do Happy Alpha
 

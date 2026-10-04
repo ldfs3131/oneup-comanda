@@ -2,11 +2,13 @@ import { respostaCompartilhada } from '../lib/cacheRota.js';
 import { idempotent } from '../lib/idempotency.js';
 import { z } from 'zod';
 import { currentContext, db, nextNumber } from '../db/index.js';
-import { accounts, deliverySettings, restaurantSettings } from '../db/schema.js';
+import { randomBytes } from 'node:crypto';
+import { and, eq, sql } from 'drizzle-orm';
+import { accounts, cancellations, customers, deliverySettings, orderItems, orders, restaurantSettings } from '../db/schema.js';
 import { HttpError, bad, brl, conflict, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
-import { currentRegister, insertOrder } from '../services/accounts.js';
+import { currentRegister, insertOrder, upsertCustomer } from '../services/accounts.js';
 import { loadMenu } from './menu.js';
 import { configuracoesPublicas, lerConfig } from '../services/configuracoes.js';
 /*
@@ -32,6 +34,20 @@ function registrar(chave) {
 }
 const LIMITE_APARELHO = { max: 6, janela: 10 * 60_000 };
 const LIMITE_IP = { max: 150, janela: 60_000 };
+/** WhatsApp brasileiro: DDD + número (10 ou 11 dígitos), aceita +55. Devolve só dígitos ou null. */
+export function normalizarWhatsapp(bruto) {
+    let d = bruto.replace(/\D/g, '');
+    if ((d.length === 12 || d.length === 13) && d.startsWith('55'))
+        d = d.slice(2);
+    if (d.length !== 10 && d.length !== 11)
+        return null;
+    if (Number(d.slice(0, 2)) < 11)
+        return null;
+    if (d.length === 11 && d[2] !== '9')
+        return null;
+    return d;
+}
+export const textoConsentimento = (restaurante) => `Aceito receber ofertas e novidades do ${restaurante} pelo WhatsApp. Posso pedir para parar quando quiser.`;
 async function settings() {
     const [r] = await db.select().from(restaurantSettings).limit(1);
     const [d] = await db.select().from(deliverySettings).limit(1);
@@ -79,7 +95,9 @@ export async function publicRoutes(app) {
         if (!r.isOpen)
             throw conflict('O restaurante está fechado no momento.');
         const b = parse(z.object({
-            customerName: z.string().trim().max(60).optional().transform((v) => v || null),
+            customerName: z.string().trim().min(2, 'informe o seu nome').max(60),
+            phone: z.string().trim().min(8, 'informe o seu WhatsApp com DDD').max(30),
+            aceitaOfertas: z.boolean().default(false),
             location: z.string().trim().max(120).optional().transform((v) => v || null),
             mode: z.enum(['BALCAO', 'LOCAL', 'ENTREGA']),
             note: z.string().trim().max(200).optional().transform((v) => v || null),
@@ -90,6 +108,9 @@ export async function publicRoutes(app) {
                 note: z.string().trim().max(120).nullable().optional(),
             })).min(1).max(30),
         }), req.body);
+        const phone = normalizarWhatsapp(b.phone);
+        if (!phone)
+            throw bad('WhatsApp inválido: use DDD + número, por exemplo (11) 91234-5678.');
         if (b.mode === 'ENTREGA' && !d.isOpen)
             throw conflict('O delivery está fechado no momento.');
         if (b.mode === 'ENTREGA' && !b.location)
@@ -99,17 +120,54 @@ export async function publicRoutes(app) {
             const reg = await currentRegister(tx);
             const number = await nextNumber(tx, 'account');
             const accNote = [modeLabel, b.location].filter(Boolean).join(' — ');
+            const customerId = await upsertCustomer(tx, b.customerName, null, phone);
+            // Consentimento: só grava quando o cliente marca a caixinha (texto exato e momento). Desmarcar num pedido não apaga um "sim" anterior.
+            if (customerId && b.aceitaOfertas) {
+                await tx.update(customers).set({ aceitaOfertas: true, aceitaOfertasEm: new Date(), aceitaOfertasTexto: textoConsentimento(r.name) }).where(eq(customers.id, customerId));
+            }
             const [acc] = await tx.insert(accounts).values({
-                number, customerName: b.customerName, note: accNote, origin: b.mode === 'ENTREGA' ? 'DELIVERY' : 'QR_CODE',
+                number, customerName: b.customerName, phone, customerId, note: accNote, origin: b.mode === 'ENTREGA' ? 'DELIVERY' : 'QR_CODE',
                 cashRegisterId: reg?.id ?? null,
             }).returning();
             const o = await insertOrder(tx, { accountId: acc.id, items: b.items, note: b.note, userId: null, origin: 'QR_CODE', cashRegisterId: reg?.id ?? null, consumptionType: b.mode === 'ENTREGA' ? 'VIAGEM' : 'LOCAL' });
+            // Código aleatório para o cliente acompanhar o pedido (não dá para adivinhar o de outra pessoa)
+            const token = randomBytes(12).toString('base64url');
+            await tx.update(orders).set({ publicToken: token }).where(eq(orders.id, o.order.id));
             await audit(tx, { action: 'qr.order', entityType: 'order', entityId: o.order.id, message: `Cliente${b.customerName ? ` ${b.customerName}` : ''} enviou pelo QR Code o pedido #${o.order.number} (${brl(o.totalCents)}, ${modeLabel}). Aguardando confirmação do caixa.` });
-            return { acc, o };
+            return { acc, o, token };
         });
         notify.qrNew({ orderNumber: res.o.order.number, accountNumber: res.acc.number, customerName: res.acc.customerName });
         notify.ordersChanged();
         notify.accountsChanged(res.acc.id);
-        return { orderNumber: res.o.order.number, totalCents: res.o.totalCents };
+        return { orderNumber: res.o.order.number, totalCents: res.o.totalCents, token: res.token };
     }
+    // Acompanhamento do pedido pelo código: só etapas e itens (sem nome, telefone nem estimativa)
+    app.get('/api/public/pedido/:token', async (req, reply) => {
+        const { token } = parse(z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{12,40}$/) }), req.params);
+        const [o] = await db.select({ id: orders.id, number: orders.number, status: orders.status, origin: orders.origin, goesToKitchen: orders.goesToKitchen, createdAt: orders.createdAt, confirmedAt: orders.confirmedAt, startedAt: orders.startedAt, readyAt: orders.readyAt, deliveredAt: orders.deliveredAt })
+            .from(orders).where(eq(orders.publicToken, token));
+        if (!o)
+            return reply.code(404).send({ error: 'Pedido não encontrado.' });
+        const itens = await db.select({ nome: orderItems.productName, quantidade: orderItems.quantity, preco: orderItems.unitPriceCents, opcoes: orderItems.optionsSnapshot, status: orderItems.status })
+            .from(orderItems).where(eq(orderItems.orderId, o.id));
+        let motivo = null;
+        if (o.status === 'CANCELLED') {
+            const [c] = await db.select({ reason: cancellations.reason }).from(cancellations).where(and(eq(cancellations.orderId, o.id), eq(cancellations.target, 'ORDER'))).orderBy(sql `id DESC`).limit(1);
+            motivo = c?.reason ?? null;
+        }
+        const etapa = o.status === 'CANCELLED' ? 'recusado'
+            : o.status === 'AWAITING_CONFIRMATION' ? 'aguardando'
+                : o.status === 'DELIVERED' ? 'entregue'
+                    : o.status === 'READY' ? 'pronto'
+                        : o.status === 'IN_PREPARATION' ? 'preparo'
+                            : 'confirmado';
+        const ativos = itens.filter((i) => i.status === 'ACTIVE' || o.status === 'CANCELLED');
+        reply.header('Cache-Control', 'no-store');
+        return {
+            numero: o.number, etapa, motivo, cozinha: o.goesToKitchen,
+            horarios: { enviado: o.createdAt, confirmado: o.confirmedAt, preparo: o.startedAt, pronto: o.readyAt, entregue: o.deliveredAt },
+            itens: ativos.map((i) => ({ nome: i.nome, quantidade: i.quantidade, opcoes: (i.opcoes ?? []).map((x) => x.name) })),
+            totalCents: ativos.reduce((t, i) => t + i.preco * i.quantidade, 0),
+        };
+    });
 }

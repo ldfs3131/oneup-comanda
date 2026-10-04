@@ -10,8 +10,10 @@ export async function r2Tests(ctx) {
     const menu = async () => (await admin.get('/api/menu?all=1')).data;
     const prod = async (name) => (await menu()).flatMap((c) => c.products).find((p) => p.name === name);
     const kitchen = async () => (await coz.get('/api/kitchen/orders')).data;
+    // Toda conta precisa de identificação mínima (nome, telefone, mesa ou obs). Nos testes, mesa padrão quando nada vier.
     const newAcc = async (body) => {
-        const r = await caixa.post('/api/accounts', body);
+        const ident = body.customerName || body.phone || body.tableLabel || body.note || body.contact;
+        const r = await caixa.post('/api/accounts', ident ? body : { tableLabel: 'Mesa 1', ...body });
         if (r.status !== 200)
             console.log('   (erro ao criar conta)', r.data);
         return r;
@@ -29,7 +31,7 @@ export async function r2Tests(ctx) {
     // a suíte V1 muda o preço da batata para R$ 29; volta para R$ 25 (preço oficial)
     await admin.put(`/api/products/${batata.id}`, { ...batata, priceCents: 2500, groups: [] });
     // estoque inicial para os testes
-    await caixa.post('/api/stock/count', { items: [{ productId: coca.id, qty: 20 }, { productId: heineken.id, qty: 10 }], reason: 'Contagem inicial do teste' });
+    await admin.post('/api/stock/count', { items: [{ productId: coca.id, qty: 20 }, { productId: heineken.id, qty: 10 }], reason: 'Contagem inicial do teste' });
     const g = await newAcc({
         customerName: 'Gustavo', note: 'camisa vermelha', tableLabel: '7', consumptionType: 'LOCAL',
         items: [{ productId: jantinha.id, quantity: 1, optionIds: [jantinha.groups[0].options[0].id] }, { productId: coca.id, quantity: 1 }],
@@ -50,9 +52,11 @@ export async function r2Tests(ctx) {
     await coz.post(`/api/kitchen/orders/${kOrd.id}/ready`);
     const rp = await readyEv;
     check('R1. Nome no alerta de pronto', rp?.customerName === 'Gustavo', rp);
-    const noName = await newAcc({ items: [{ productId: batata.id, quantity: 1 }] });
+    const vazia = await caixa.post('/api/accounts', { note: ' .', items: [{ productId: batata.id, quantity: 1 }] });
+    check('Leva 1: conta sem nenhuma identificação é recusada (nome, telefone, mesa ou obs)', vazia.status === 400 && /pelo menos um/.test(vazia.data.error), vazia.data);
+    const noName = await newAcc({ tableLabel: 'Mesa 7', items: [{ productId: batata.id, quantity: 1 }] });
     const accNo = (await caixa.get(`/api/accounts/${noName.data.id}`)).data;
-    check('T2. Conta sem nome fica sem nome (a tela mostra "Cliente não informado" só neste caso)', accNo.customerName === null);
+    check('T2. Conta só com mesa abre sem nome', accNo.customerName === null && accNo.tableLabel === 'Mesa 7', accNo);
     const hist = (await admin.get('/api/orders/history?search=Gustavo')).data;
     check('R1. Nome no histórico (admin)', hist.length >= 1 && hist.every((h) => h.customerName === 'Gustavo'));
     console.log('\n[R2] Reabertura: cozinha recebe só a diferença');
@@ -103,7 +107,7 @@ export async function r2Tests(ctx) {
     const ppAcc = (await caixa.get(`/api/accounts/${pp.data.id}`)).data;
     check('T9. Desconto grava valor, motivo, usuário, total antes e depois', ppAcc.discounts[0].totalBeforeCents === 10000 && ppAcc.discounts[0].totalAfterCents === 9000 && ppAcc.discounts[0].userName === 'Caixa');
     console.log('\n[R2] Estoque (T10) e cozumel com cerveja');
-    await caixa.post(`/api/stock/${coca.id}`, { type: 'AJUSTE', newQty: 1, reason: 'Teste de estoque 1' });
+    await admin.post(`/api/stock/${coca.id}`, { type: 'AJUSTE', newQty: 1, reason: 'Teste de estoque 1' });
     const st1 = await newAcc({ items: [{ productId: coca.id, quantity: 1 }] });
     const cocaNow = async () => (await q('SELECT stock_qty FROM products WHERE id = $1', [coca.id]))[0].stock_qty;
     check('T10. Estoque 1 → vende → 0', st1.status === 200 && (await cocaNow()) === 0);
@@ -187,7 +191,7 @@ export async function r2Tests(ctx) {
     console.log('\n[R2] Permissões do caixa (T22)');
     const forb = await Promise.all(['/api/dashboard', '/api/finance', '/api/registers', '/api/orders/history', '/api/insights', '/api/audit', '/api/users', '/api/timing']
         .map((u) => caixa.get(u)));
-    check('T22. Caixa não acessa financeiro, dashboard, histórico, insights, auditoria, usuários', forb.every((r) => r.status === 403), forb.map((r) => r.status));
+    check('T22. Caixa não acessa financeiro, dashboard, histórico, insights, auditoria, usuários', forb.every((r) => r.status === 403 || r.status === 404), forb.map((r) => r.status));
     const oldAcc = (await q(`SELECT id FROM accounts WHERE status = 'CLOSED' AND cash_register_id IS NOT NULL AND cash_register_id <> (SELECT id FROM cash_registers WHERE status='OPEN') ORDER BY id LIMIT 1`))[0];
     if (oldAcc)
         check('T22. Caixa não abre conta de dia anterior (API)', (await caixa.get(`/api/accounts/${oldAcc.id}`)).status === 403);
@@ -204,6 +208,9 @@ export async function r2Tests(ctx) {
     // ontem + hoje: o teste joga o pedido 131 min para trás (de madrugada isso cai no dia anterior)
     const dia = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() + d * 86400_000));
     const timingUrl = `/api/timing?from=${dia(-1)}&to=${dia(0)}`;
+    check('Mapa de demora é só da ONE UP: Dono não vê (404)', (await admin.get(timingUrl)).status === 404);
+    await q(`UPDATE users SET oneup = true WHERE username = 'admin'`); // daqui em diante o admin age como ONE UP
+    await admin.post('/api/auth/login', { username: 'admin', password: 'admin123' });
     const tim = (await admin.get(timingUrl)).data;
     check('T24. Tempo suspeito (esquecido) fica fora das médias', tim.suspects.some((s) => s.id === tk.id));
     const confirmed = (await q(`SELECT confirmed_at FROM orders WHERE id = $1`, [tk.id]))[0].confirmed_at;
@@ -213,6 +220,8 @@ export async function r2Tests(ctx) {
     check('T24. Correção do admin guarda o horário original e sai dos suspeitos', fix.status === 200 && corr.length === 1 && corr[0].before && !tim2.suspects.some((s) => s.id === tk.id), { fix: fix.data, corr, sus: tim2.suspects });
     const badFix = await admin.post(`/api/orders/${tk.id}/times`, { field: 'startedAt', value: new Date(confirmed.getTime() + 60 * 60_000).toISOString(), reason: 'teste inválido' });
     check('Correção com ordem inválida é recusada', badFix.status === 400);
+    await q(`UPDATE users SET oneup = false WHERE username = 'admin'`);
+    await admin.post('/api/auth/login', { username: 'admin', password: 'admin123' });
     console.log('\n[R2] Cliente recorrente, insights, logout');
     await caixa.post(`/api/accounts/${noName.data.id}/pending`, { customerName: 'Fulano Fiado', contact: 'casa 99' });
     const sug = (await caixa.get('/api/customers/suggest?q=fulano')).data;

@@ -102,6 +102,7 @@ export function UserMenu() {
               <Link className="btn block" to="/caixa" onClick={() => setOpen(false)}>Operar caixa</Link>
               <Link className="btn block" to="/cozinha" onClick={() => setOpen(false)}>Tela da cozinha</Link>
             </>}
+            {user.role !== 'ADMIN' && <button className="btn primary block" onClick={async () => { await logout(); nav('/login'); }}>Trocar de pessoa</button>}
             <button className="btn block" onClick={() => { setPw(true); setOpen(false); }}>Trocar senha</button>
             <button className="btn danger block" onClick={async () => { await logout(); nav('/login'); }}>Sair</button>
           </div>

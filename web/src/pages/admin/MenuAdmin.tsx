@@ -4,6 +4,7 @@ import { api } from '../../api';
 import { brl, centsToInput } from '../../format';
 import type { Category, Product } from '../../types';
 import { Badge, Modal, MoneyInput, Spinner, Toggle, useAction } from '../../components/ui';
+import { ImportarPlanilha } from '../../components/importar';
 
 type GroupDraft = { id?: number; name: string; required: boolean; multiple: boolean; options: { id?: number; name: string; priceDeltaCents: number | null; available: boolean; stockProductId: number | null }[] };
 
@@ -14,6 +15,7 @@ export default function MenuAdmin() {
   const [newCatFor, setNewCatFor] = useState<number | null>(null);
   const [catModal, setCatModal] = useState<Category | 'new' | null>(null);
   const [showInactive, setShowInactive] = useState(false);
+  const [importar, setImportar] = useState(false);
   const { run } = useAction();
   const refresh = () => { qc.invalidateQueries({ queryKey: ['menu'] }); };
   const act = async (fn: () => Promise<unknown>, msg?: string) => { if (await run(fn, msg)) refresh(); };
@@ -29,6 +31,7 @@ export default function MenuAdmin() {
         </div>
         <div className="row wrap">
           <label className="check small"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Mostrar desativados</label>
+          <button className="btn" onClick={() => setImportar(true)}>⇪ Importar planilha</button>
           <button className="btn" onClick={() => setCatModal('new')}>＋ Categoria</button>
           <button className="btn primary" onClick={() => { setNewCatFor(data[0]?.id ?? null); setEditing('new'); }}>＋ Produto</button>
         </div>
@@ -85,6 +88,7 @@ export default function MenuAdmin() {
         </div>
       ))}
 
+      {importar && <ImportarPlanilha onClose={() => setImportar(false)} />}
       {editing && <ProductModal product={editing === 'new' ? null : editing} categories={data} defaultCategoryId={newCatFor}
         onClose={() => setEditing(null)} onSaved={refresh} />}
       {catModal && <CategoryModal category={catModal === 'new' ? null : catModal} onClose={() => setCatModal(null)} onSaved={refresh} />}
@@ -198,7 +202,7 @@ function ProductModal({ product, categories, defaultCategoryId, onClose, onSaved
         <div className="card tight row wrap" style={{ background: 'var(--surface-2)', gap: 16 }}>
           <label className="check"><input type="checkbox" checked={trackStock} onChange={(e) => setTrackStock(e.target.checked)} />Controlar estoque (por unidade)</label>
           {trackStock && <label className="row small">Avisar quando tiver <input className="input" style={{ width: 80 }} inputMode="numeric" value={lowStockAt} onChange={(e) => setLowStockAt(e.target.value.replace(/\D/g, '').slice(0, 5))} /> ou menos</label>}
-          {trackStock && product && <span className="small muted">Atual: {product.stockQty} — entradas e contagens em Caixa › Estoque.</span>}
+          {trackStock && product && <span className="small muted">Atual: {product.stockQty} — compras, ajustes e contagens em Estoque.</span>}
         </div>
         <div className="row wrap" style={{ gap: 20 }}>
           <label className="check"><input type="checkbox" checked={kitchen} onChange={(e) => setKitchen(e.target.checked)} />Vai para a cozinha</label>

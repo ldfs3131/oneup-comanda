@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { gravarImagem } from '../lib/imagem.js';
+import { gravarImagem, validarIcone } from '../lib/imagem.js';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { closePools, db, runAsEmpresa, runAsSystem, waitForDatabase } from '../db/index.js';
 import { categories, configHistorico, configTravas, empresas, orderItems, paymentMethods, productCosts, products, referenciasExternas, roles, sessions, users, } from '../db/schema.js';
@@ -197,6 +197,13 @@ async function provisionar(p, pasta) {
             const url = await gravarImagem(readFileSync(resolve(pasta, p.logo)), 'logo');
             await aplicarConfiguracoes({ logo: url }, null, 'ONEUP');
             console.log(`  ✔ Logotipo aplicado (${url})`);
+        }
+        if (p.icone && !(await lerConfig('icone_app'))) {
+            const buf = readFileSync(resolve(pasta, p.icone));
+            validarIcone(buf);
+            const url = await gravarImagem(buf, 'icone');
+            await aplicarConfiguracoes({ icone_app: url }, null, 'ONEUP');
+            console.log(`  ✔ Ícone do aplicativo aplicado (${url})`);
         }
         const iniciais = {};
         for (const [k, v] of Object.entries(p.configuracoes ?? {})) {

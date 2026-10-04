@@ -2,7 +2,8 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { networkInterfaces } from 'node:os';
 import { avisosConfig, config } from './config.js';
 import { appPool, bindContext, db, ensureEmpresaBase, ensurePlatformData, releaseContext, runAsEmpresa, runAsSystem, runMigrations, systemPool, waitForDatabase } from './db/index.js';
@@ -20,9 +21,12 @@ import { publicRoutes } from './routes/public.js';
 import { stockRoutes } from './routes/stock.js';
 import { managementRoutes } from './routes/management.js';
 import { configuracoesRoutes } from './routes/configuracoes.js';
+import { pendenciasRoutes } from './routes/pendencias.js';
+import { importacaoRoutes } from './routes/importacao.js';
 import { cleanupIdempotency } from './lib/idempotency.js';
 import { registrarRespostaCompartilhada } from './lib/cacheRota.js';
-import { rotaUploads } from './lib/imagem.js';
+import { dimensoesDe, rotaUploads } from './lib/imagem.js';
+import { configuracoesPublicas } from './services/configuracoes.js';
 /**
  * Cada chamada de API pertence a UMA empresa (descoberta pelo endereço). A conexão do banco dessa
  * requisição fica presa a ela (RLS) e é devolvida ao terminar. Sem empresa válida: 404.
@@ -71,26 +75,49 @@ export async function buildApp() {
     await app.register(stockRoutes);
     await app.register(managementRoutes);
     await app.register(configuracoesRoutes);
+    await app.register(pendenciasRoutes);
+    await app.register(importacaoRoutes);
     app.get('/api/health', async () => ({ ok: true, time: new Date().toISOString() }));
     // App instalável (tablet da cozinha, celular do caixa): nome do restaurante no ícone da tela inicial (ícone ONE UP Comanda)
-    app.get('/manifest.webmanifest', async (req, reply) => {
+    // Dois aplicativos instaláveis com o nome e o ícone do restaurante: CLIENTES (abre o cardápio) e EQUIPE (abre o sistema)
+    // Corta no fim de uma palavra (nome do ícone não fica "Restaurante do Teste Equ")
+    const encurta = (t, n) => { if (t.length <= n)
+        return t; const c = t.slice(0, n + 1); const i = c.lastIndexOf(' '); return (i > 3 ? c.slice(0, i) : t.slice(0, n)).trim(); };
+    const manifesto = (tipo) => async (req, reply) => {
         const emp = await empresaPorSlug(slugDaRequisicao(req.headers.host, req.headers['x-empresa']));
         let nome = config.productName;
+        let curto = 'Comanda';
+        let icone = null;
+        let tema = 'escuro';
         if (emp) {
-            const [r] = await runAsEmpresa(emp.id, () => db.select({ name: restaurantSettings.name }).from(restaurantSettings).limit(1));
-            nome = r?.name || emp.nome;
+            const r = await runAsEmpresa(emp.id, async () => {
+                const [s] = await db.select({ name: restaurantSettings.name }).from(restaurantSettings).limit(1);
+                return { nome: s?.name || emp.nome, pub: await configuracoesPublicas() };
+            });
+            curto = r.pub.nome_app || r.nome;
+            nome = r.pub.nome_app || r.nome;
+            icone = r.pub.icone_app || null;
+            tema = r.pub.tema || 'escuro';
         }
+        const dim = icone ? dimensoesDe(icone) : null;
+        const fundo = tema === 'claro' ? '#f6f4ee' : '#161513';
         reply.type('application/manifest+json').header('Cache-Control', 'no-cache');
         return {
-            name: nome, short_name: nome.length > 12 ? nome.split(/\s+/)[0].slice(0, 12) : nome, lang: 'pt-BR',
-            description: `${config.productName} — sistema de gestão para restaurantes`,
-            start_url: '/', scope: '/', display: 'standalone', orientation: 'any', background_color: '#161513', theme_color: '#161513',
-            icons: [
-                { src: '/comanda-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-                { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
-            ],
+            id: tipo === 'cliente' ? '/cardapio' : '/', lang: 'pt-BR', dir: 'ltr',
+            name: tipo === 'cliente' ? nome : `${nome} — Equipe`,
+            short_name: tipo === 'cliente' ? encurta(curto, 24) : `${encurta(curto, 17)} Equipe`,
+            description: tipo === 'cliente' ? `Cardápio e pedidos de ${nome}` : `${nome}: caixa, cozinha e gestão (${config.productName})`,
+            start_url: tipo === 'cliente' ? '/cardapio?origem=app' : '/?origem=app', scope: tipo === 'cliente' ? '/cardapio' : '/',
+            display: 'standalone', orientation: 'any', background_color: fundo, theme_color: fundo,
+            icons: icone && dim
+                ? [{ src: icone, sizes: `${dim.w}x${dim.h}`, type: /\.png$/i.test(icone) ? 'image/png' : /\.webp$/i.test(icone) ? 'image/webp' : 'image/jpeg', purpose: 'any' },
+                    { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }]
+                : [{ src: '/comanda-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+                    { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }],
         };
-    });
+    };
+    app.get('/manifest.webmanifest', manifesto('equipe'));
+    app.get('/cardapio.webmanifest', manifesto('cliente'));
     // Proxy HTTPS (Caddy, certificado sob demanda) pergunta se o endereço é de uma empresa ativa antes de emitir certificado
     app.get('/api/health/tls', async (req, reply) => {
         const domain = String(req.query.domain ?? '').toLowerCase();
@@ -105,9 +132,15 @@ export async function buildApp() {
                 res.header('Cache-Control', path.includes('assets') ? 'public, max-age=31536000, immutable' : 'no-cache');
             },
         });
+        // o cardápio é instalado como o app dos CLIENTES (manifesto próprio); o resto, como o app da EQUIPE
+        let htmlCardapio = null;
         app.setNotFoundHandler((req, reply) => {
             if (req.url.startsWith('/api/') || req.url.startsWith('/uploads/')) {
                 return reply.status(404).send({ error: 'Rota não encontrada.' });
+            }
+            if (req.url === '/cardapio' || req.url.startsWith('/cardapio?') || req.url.startsWith('/cardapio/')) {
+                htmlCardapio ??= readFileSync(join(config.webDist, 'index.html'), 'utf8').replace('href="/manifest.webmanifest"', 'href="/cardapio.webmanifest"');
+                return reply.type('text/html').header('Cache-Control', 'no-cache').send(htmlCardapio);
             }
             return reply.type('text/html').sendFile('index.html');
         });

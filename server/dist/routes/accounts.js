@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, nextNumber } from '../db/index.js';
 import { accounts, cancellations, customers, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users, } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
-import { HttpError, bad, brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
+import { HttpError, bad, brl, centsSchema, conflict, hojeSP, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
 import { lerConfig, lerConfiguracoes } from '../services/configuracoes.js';
 import { audit } from '../lib/audit.js';
 import { idempotent } from '../lib/idempotency.js';
@@ -178,7 +178,38 @@ export async function accountRoutes(app) {
         }
         return listAccountsWithTotals(db, sql.join(conds, sql ` AND `), 300);
     });
-    app.get('/api/accounts/receivable', ops, async () => listAccountsWithTotals(db, sql `a.status = 'PENDING'`, 500));
+    // A receber: etiqueta venceu / hoje / sem data / em dia, ordenado por urgência (o mais atrasado primeiro)
+    app.get('/api/accounts/receivable', ops, async () => {
+        const hoje = hojeSP();
+        const ordem = { venceu: 0, hoje: 1, sem_data: 2, em_dia: 3 };
+        const lista = (await listAccountsWithTotals(db, sql `a.status = 'PENDING'`, 500)).map((a) => ({
+            ...a,
+            situacao: (!a.promisedDate ? 'sem_data' : a.promisedDate < hoje ? 'venceu' : a.promisedDate === hoje ? 'hoje' : 'em_dia'),
+        }));
+        return lista.sort((x, y) => ordem[x.situacao] - ordem[y.situacao]
+            || (x.promisedDate ?? '').localeCompare(y.promisedDate ?? '')
+            || String(x.pendingAt ?? '').localeCompare(String(y.pendingAt ?? '')));
+    });
+    // Cobrança pelo WhatsApp: DESLIGADA por padrão; só a ONE UP liga (por restaurante). Nunca envia sozinho.
+    app.get('/api/accounts/receivable/cobranca', ops, async () => {
+        const cfg = await lerConfiguracoes();
+        return { ligada: cfg.cobranca_whatsapp === true, mensagem: cfg.cobranca_whatsapp === true ? String(cfg.mensagem_cobranca ?? '') : null, restaurante: String(cfg.nome ?? '') };
+    });
+    app.post('/api/accounts/:id/cobranca', ops, async (req) => {
+        const { id } = parse(idParam, req.params);
+        const user = me(req);
+        if ((await lerConfig('cobranca_whatsapp')) !== true)
+            throw new HttpError(403, 'Cobrança pelo WhatsApp não está ligada neste restaurante.', 'COBRANCA_DESLIGADA');
+        await db.transaction(async (tx) => {
+            const acc = await getAccount(tx, id, true);
+            if (acc.status !== 'PENDING')
+                throw conflict('Só contas a receber podem ser cobradas.');
+            await tx.update(accounts).set({ ultimaCobrancaEm: new Date(), ultimaCobrancaPor: user.id }).where(eq(accounts.id, id));
+            await audit(tx, { userId: user.id, action: 'account.cobranca', entityType: 'account', entityId: id, message: `${user.name} abriu a cobrança pelo WhatsApp da conta #${acc.number} (${acc.customerName ?? 'sem nome'}).` });
+        });
+        notify.accountsChanged(id);
+        return { ok: true };
+    });
     app.get('/api/accounts/:id', ops, async (req) => {
         const { id } = parse(idParam, req.params);
         await scoped(me(req), id);
@@ -225,6 +256,11 @@ export async function accountRoutes(app) {
             falta.push(String(cfg.rotulo_mesa ?? 'mesa').toLowerCase());
         if (falta.length)
             throw bad(`Preencha: ${falta.join(', ')}.`);
+        // Toda conta precisa ser identificável: pelo menos um entre nome, telefone, casa, mesa ou observação (2+ letras/números)
+        const real = (t) => (t ?? '').replace(/[^\p{L}\p{N}]/gu, '').length >= 2;
+        if (!b.customerId && ![b.customerName, b.phone, b.contact, b.tableLabel, b.note].some(real)) {
+            throw bad('Para abrir o pedido, preencha pelo menos um: nome, telefone, mesa ou observação.');
+        }
         if (b.customerId) {
             const [c] = await db.select({ id: customers.id }).from(customers).where(eq(customers.id, b.customerId));
             if (!c)
@@ -455,7 +491,10 @@ export async function accountRoutes(app) {
             customerName: z.string().trim().min(2, 'informe o nome do cliente').max(80),
             contact: z.string().trim().min(2, 'informe casa ou telefone').max(120),
             note: optText(200),
+            promisedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'data inválida').nullable().optional(),
         }), req.body);
+        if (b.promisedDate && b.promisedDate < hojeSP())
+            throw bad('A data combinada não pode ser no passado.');
         const user = me(req);
         await db.transaction(async (tx) => {
             const acc = await getAccount(tx, id, true);
@@ -468,11 +507,11 @@ export async function accountRoutes(app) {
             const customerId = await upsertCustomer(tx, b.customerName, b.contact, acc.phone);
             await tx.update(accounts).set({
                 status: 'PENDING', customerName: b.customerName, contact: b.contact, note: b.note ?? acc.note, customerId,
-                pendingAt: new Date(), pendingBy: user.id,
+                pendingAt: new Date(), pendingBy: user.id, promisedDate: b.promisedDate ?? null,
             }).where(eq(accounts.id, id));
             await audit(tx, {
                 userId: user.id, action: 'account.pending', entityType: 'account', entityId: id,
-                message: `${user.name} marcou a conta #${acc.number} (${b.customerName}, ${b.contact}) como PENDENTE — saldo ${brl(t.balance)}.`,
+                message: `${user.name} marcou a conta #${acc.number} (${b.customerName}, ${b.contact}) como PENDENTE — saldo ${brl(t.balance)}${b.promisedDate ? `, combinado para ${b.promisedDate.split('-').reverse().join('/')}` : ''}.`,
             });
         });
         notify.accountsChanged(id);

@@ -1,4 +1,4 @@
-import { salvarImagem } from '../lib/imagem.js';
+import { salvarImagem, validarIcone } from '../lib/imagem.js';
 import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/index.js';
@@ -12,26 +12,34 @@ const pct = (bp) => `${(bp / 100).toLocaleString('pt-BR', { minimumFractionDigit
 /** Personalização do restaurante pelo Dono (perfil ADMIN da empresa até a fase de perfis por pessoa). */
 export async function configuracoesRoutes(app) {
     const dono = { preHandler: requireRole('ADMIN') };
-    app.get('/api/configuracoes', dono, async () => telaConfiguracoes());
+    app.get('/api/configuracoes', dono, async (req) => telaConfiguracoes(me(req)));
     app.patch('/api/configuracoes', dono, async (req) => {
         const { valores } = parse(schemaPatch, req.body);
         const r = await aplicarConfiguracoes(valores, me(req));
         if (r.alteradas.length)
             notify.settingsChanged();
-        return { ...r, tela: await telaConfiguracoes() };
+        return { ...r, tela: await telaConfiguracoes(me(req)) };
     });
     app.post('/api/configuracoes/padrao', dono, async (req) => {
         const { chaves } = parse(schemaPadrao, req.body);
         const r = await voltarAoPadrao(chaves, me(req));
         if (r.alteradas.length)
             notify.settingsChanged();
-        return { ...r, tela: await telaConfiguracoes() };
+        return { ...r, tela: await telaConfiguracoes(me(req)) };
     });
     app.get('/api/configuracoes/historico', dono, async (req) => {
         const { chave } = parse(z.object({ chave: z.string().max(60).optional() }), req.query);
         return historico(chave);
     });
     /** Logotipo: gravado na pasta da própria empresa. */
+    /** Imagens do catálogo (logotipo, ícone do app): cada uma com a sua regra. */
+    app.post('/api/configuracoes/imagem/:chave', dono, async (req) => {
+        const { chave } = parse(z.object({ chave: z.enum(['logo', 'icone_app']) }), req.params);
+        const url = await salvarImagem(req, chave === 'logo' ? 'logo' : 'icone', 2 * 1024 * 1024, chave === 'icone_app' ? validarIcone : undefined);
+        await aplicarConfiguracoes({ [chave]: url }, me(req));
+        notify.settingsChanged();
+        return { [chave]: url };
+    });
     app.post('/api/configuracoes/logo', dono, async (req) => {
         const url = await salvarImagem(req, 'logo', 2 * 1024 * 1024);
         await aplicarConfiguracoes({ logo: url }, me(req));

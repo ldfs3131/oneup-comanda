@@ -28,6 +28,7 @@ roda conexoes env DATABASE_URL=$PG/of_iso node dist/scripts/conexao-test.js
 roda comite env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/comite-test.js
 roda oneup env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/oneup-test.js
 roda ritmo env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/ritmo-test.js
+roda leva1 env DATABASE_URL=$PG/of_iso BASE_URL=http://localhost:3200 node dist/scripts/leva1-test.js
 kill $S2 2>/dev/null; wait $S2 2>/dev/null
 
 echo; [ $falhas -eq 0 ] && echo "TUDO OK" || echo "$falhas suíte(s) falharam"

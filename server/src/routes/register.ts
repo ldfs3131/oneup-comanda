@@ -9,7 +9,8 @@ import { brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } fr
 import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
 import { currentRegister, requireOpenRegister } from '../services/accounts.js';
-import { registerSummary } from '../services/register.js';
+import { registerSummary, resumoCego } from '../services/register.js';
+import { lerConfig } from '../services/configuracoes.js';
 import { runBackupAndRecord } from '../services/backup.js';
 import { setEstablishmentOpen } from '../services/day.js';
 
@@ -29,7 +30,7 @@ export async function registerRoutes(app: FastifyInstance) {
       register: { ...reg, openedByName: opener?.name },
       isOpen: s?.isOpen ?? false,
       blind,
-      summary: blind ? { ...summary, expectedCashCents: null, cashReceivedCents: null } : summary,
+      summary: blind ? resumoCego(summary) : summary,
     };
   });
 
@@ -93,9 +94,16 @@ export async function registerRoutes(app: FastifyInstance) {
         message: `${user.name} encerrou o dia/caixa. Recebido: ${brl(s.receivedCents)}. Dinheiro esperado ${brl(s.expectedCashCents)}, contado ${brl(b.countedCashCents)}, diferença ${diff > 0 ? '+' : ''}${brl(diff)}.`,
       });
       await setEstablishmentOpen(tx, user, false, 'encerramento do dia');
-      return {
+      const completo = {
         id: reg.id, expectedCashCents: s.expectedCashCents, countedCashCents: b.countedCashCents, differenceCents: diff,
         receivedCents: s.receivedCents, openAccounts: s.openAccountsNow,
+      };
+      if (user.role === 'ADMIN') return completo;
+      // caixa: só "contagem registrada"; diferença acima da tolerância vira um aviso sem valor
+      const tolerancia = (await lerConfig<number>('tolerancia_caixa', tx)) ?? 500;
+      return {
+        id: reg.id, cego: true as const, countedCashCents: b.countedCashCents, openAccounts: s.openAccountsNow,
+        conferir: Math.abs(diff) > tolerancia,
       };
     });
     notify.registerChanged(); notify.settingsChanged();

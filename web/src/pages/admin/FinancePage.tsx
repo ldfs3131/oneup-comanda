@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../../api';
 import { addDaysISO, brl, dateOnly, fmtDay, pct, todayISO } from '../../format';
@@ -7,143 +8,113 @@ import RitmoMes from './RitmoMes';
 
 type Fin = {
   from: string; to: string; grossSalesCents: number; discountsCents: number; revenueCents: number; receivedCents: number;
-  receivedByMethod: { name: string; cents: number; feesCents: number; taxaBp: number }[]; feesCents: number; netReceivedCents: number; pendingCents: number; openBalanceCents: number;
+  receivedByMethod: { name: string; code: string; cents: number; feesCents: number; taxaBp: number }[]; feesCents: number; netReceivedCents: number; pendingCents: number; openBalanceCents: number;
   costCents: number; costCoverage: number; grossProfitCents: number; grossMargin: number | null;
-  expensesCents: number; expensesByCategory: { name: string; cents: number; count: number }[]; operatingResultCents: number;
-  products: { id: number | null; name: string; priceCents: number | null; currentCostCents: number | null; unitMarginCents: number | null; qty: number; revenueCents: number; costCents: number | null; marginCents: number | null; qtyWithoutCost: number }[];
+  expensesCents: number; expensesByCategory: { name: string; cents: number; count: number }[];
+  lucroCents: number; margemLucro: number | null;
+  semCusto: { name: string; qtd: number }[];
+  tabela: { id: number | null; name: string; priceCents: number | null; costCents: number | null; margemPct: number | null; vendidos: number; semCustoVendidos: number; lucroCents: number | null }[];
+  anterior: { from: string; to: string; lucroCents: number; vendidoCents: number; temDados: boolean };
+  meses: { mes: string; vendidoCents: number | null; lucroCents: number | null }[] | null;
 };
 type Expense = { id: number; description: string; amountCents: number; date: string; note: string | null; paidFromRegister: boolean; cancelledAt: string | null; cancelReason: string | null; categoryName: string; userName: string };
 type Cat = { id: number; name: string; active: boolean };
+type Periodo = 'hoje' | '7d' | 'mes' | 'ano';
 
-const monthStart = () => todayISO().slice(0, 8) + '01';
+const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const nomeMes = (m: string) => `${MESES[Number(m.slice(5, 7)) - 1]}/${m.slice(2, 4)}`;
+const CORES = ['var(--cat-1)', 'var(--cat-2)', 'var(--cat-3)', 'var(--cat-4)'];
+
+function rangeDe(p: Periodo) {
+  const t = todayISO();
+  if (p === 'hoje') return { from: t, to: t };
+  if (p === '7d') return { from: addDaysISO(t, -6), to: t };
+  if (p === 'mes') return { from: t.slice(0, 8) + '01', to: t };
+  const d = new Date(t.slice(0, 8) + '01T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 11);
+  return { from: d.toISOString().slice(0, 10), to: t, ano: '1' };
+}
 
 export default function FinancePage() {
-  const [range, setRange] = useState({ from: monthStart(), to: todayISO() });
-  const [tab, setTab] = useState<'dre' | 'products' | 'expenses' | 'ritmo'>('dre');
+  const [periodo, setPeriodo] = useState<Periodo>('mes');
+  const range = rangeDe(periodo);
+  const [tab, setTab] = useState<'resumo' | 'despesas' | 'produtos' | 'ritmo'>('resumo');
   const [newExp, setNewExp] = useState(false);
   const [cancel, setCancel] = useState<Expense | null>(null);
-  const [sort, setSort] = useState<'revenue' | 'margin' | 'qty'>('revenue');
+  const [custo, setCusto] = useState<Fin['tabela'][number] | null>(null);
   const { data: f, isLoading } = useQuery({ queryKey: ['finance', range], queryFn: () => api.get<Fin>(`/api/finance${qs(range)}`) });
-  const { data: exps = [] } = useQuery({ queryKey: ['expenses', range], queryFn: () => api.get<Expense[]>(`/api/expenses${qs(range)}`) });
+  const { data: exps = [] } = useQuery({ queryKey: ['expenses', range], queryFn: () => api.get<Expense[]>(`/api/expenses${qs({ from: range.from, to: range.to })}`) });
   const { run } = useAction();
   const qc = useQueryClient();
   const refresh = () => { qc.invalidateQueries({ queryKey: ['finance'] }); qc.invalidateQueries({ queryKey: ['expenses'] }); };
-
-  const quick = (from: string, to: string) => setRange({ from, to });
-  const products = [...(f?.products ?? [])].sort((a, b) => sort === 'qty' ? b.qty - a.qty : sort === 'margin' ? (b.marginCents ?? -1e12) - (a.marginCents ?? -1e12) : b.revenueCents - a.revenueCents);
+  const rotulo = { hoje: 'Hoje', '7d': 'Últimos 7 dias', mes: 'Este mês', ano: 'Últimos 12 meses' }[periodo];
 
   return (
     <div className="col gap-lg">
       <div className="row between wrap">
         <div>
           <h1>Financeiro</h1>
-          <div className="muted small">{tab === 'ritmo' ? 'Receita acumulada do mês comparada com os meses anteriores, no mesmo dia' : `${fmtDay(range.from)} a ${fmtDay(range.to)} · valores em regime de venda (data do pedido)`}</div>
+          <div className="muted small">{tab === 'ritmo' ? 'Vendas acumuladas do mês comparadas com os meses anteriores, no mesmo dia' : `${rotulo} · ${fmtDay(range.from)} a ${fmtDay(range.to)}`}</div>
         </div>
-        {tab !== 'ritmo' && <div className="row wrap">
-          <div className="seg">
-            <button onClick={() => quick(todayISO(), todayISO())}>Hoje</button>
-            <button onClick={() => quick(addDaysISO(todayISO(), -6), todayISO())}>7 dias</button>
-            <button onClick={() => quick(monthStart(), todayISO())}>Mês</button>
-            <button onClick={() => { const t = todayISO(); const d = new Date(t.slice(0, 8) + '01T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); const s = d.toISOString().slice(0, 10); quick(s, addDaysISO(t.slice(0, 8) + '01', -1)); }}>Mês passado</button>
-          </div>
-          <input type="date" className="input" style={{ width: 160 }} value={range.from} max={range.to} onChange={(e) => e.target.value && setRange((r) => ({ ...r, from: e.target.value }))} />
-          <input type="date" className="input" style={{ width: 160 }} value={range.to} min={range.from} max={todayISO()} onChange={(e) => e.target.value && setRange((r) => ({ ...r, to: e.target.value }))} />
+        {tab !== 'ritmo' && <div className="seg">
+          {(['hoje', '7d', 'mes', 'ano'] as const).map((p) => <button key={p} className={periodo === p ? 'on' : ''} onClick={() => setPeriodo(p)}>{{ hoje: 'Hoje', '7d': '7 dias', mes: 'Mês', ano: 'Ano' }[p]}</button>)}
         </div>}
       </div>
       <div className="seg">
-        <button className={tab === 'dre' ? 'on' : ''} onClick={() => setTab('dre')}>Resultado</button>
-        <button className={tab === 'products' ? 'on' : ''} onClick={() => setTab('products')}>Por produto</button>
-        <button className={tab === 'expenses' ? 'on' : ''} onClick={() => setTab('expenses')}>Despesas</button>
+        <button className={tab === 'resumo' ? 'on' : ''} onClick={() => setTab('resumo')}>Resumo</button>
+        <button className={tab === 'despesas' ? 'on' : ''} onClick={() => setTab('despesas')}>Despesas</button>
+        <button className={tab === 'produtos' ? 'on' : ''} onClick={() => setTab('produtos')}>Produtos</button>
         <button className={tab === 'ritmo' ? 'on' : ''} onClick={() => setTab('ritmo')}>Ritmo do mês</button>
       </div>
 
       {tab === 'ritmo' && <RitmoMes />}
 
       {tab !== 'ritmo' && (isLoading || !f ? <Spinner /> : <>
-        {tab === 'dre' && <>
-          {f.costCoverage < 0.999 && f.grossSalesCents > 0 && (
-            <div className="info-box small">⚠ Só {pct(f.costCoverage)} das vendas do período têm custo cadastrado. O CMV e o lucro bruto consideram apenas esses itens — cadastre os custos em <b>Cardápio</b> para o resultado ficar completo.</div>
-          )}
-          <div className="grid-2">
-            <div className="card dre">
-              <div className="panel-title">Resultado do período</div>
-              <div className="kv"><span>Vendas brutas</span><span className="v">{brl(f.grossSalesCents)}</span></div>
-              <div className="kv"><span>− Descontos</span><span className="v">{brl(f.discountsCents)}</span></div>
-              <div className="kv total"><span>= Faturamento</span><span className="v">{brl(f.revenueCents)}</span></div>
-              <div className="kv"><span>− CMV (custo dos produtos vendidos)</span><span className="v">{brl(f.costCents)}</span></div>
-              <div className="kv total"><span>= Lucro bruto <span className="small muted">{f.grossMargin != null ? `margem ${pct(f.grossMargin, 1)}` : ''}</span></span><span className="v">{brl(f.grossProfitCents)}</span></div>
-              <div className="kv"><span>− Despesas</span><span className="v">{brl(f.expensesCents)}</span></div>
-              <div className="kv"><span>− Taxas da maquininha <span className="small muted">(estimado)</span></span><span className="v">{brl(f.feesCents)}</span></div>
-              <div className="kv total"><span>= Resultado operacional</span><span className="v" style={{ color: f.operatingResultCents >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{brl(f.operatingResultCents)}</span></div>
-              <div className="small faint mt">Resultado operacional não inclui impostos, pró-labore e outros itens fora do sistema — não é “lucro líquido”.</div>
-            </div>
-            <div className="col gap-lg">
-              <div className="card">
-                <div className="panel-title">Recebido no período</div>
-                {f.receivedByMethod.map((m) => (
-                  <div key={m.name} className="kv">
-                    <span>{m.name}{m.feesCents > 0 && <span className="small faint"> · taxa {brl(m.feesCents)}</span>}</span>
-                    <span className="v">{brl(m.cents)}</span>
-                  </div>
-                ))}
-                <div className="kv total"><span>Total recebido</span><span className="v">{brl(f.receivedCents)}</span></div>
-                {f.feesCents > 0 && <>
-                  <div className="kv"><span>− Taxas da maquininha</span><span className="v">{brl(f.feesCents)}</span></div>
-                  <div className="kv total"><span>= Cai na conta</span><span className="v" style={{ color: 'var(--ok)' }}>{brl(f.netReceivedCents)}</span></div>
-                </>}
-                {f.feesCents === 0 && f.receivedCents > 0 && <div className="small faint mt">Cadastre a taxa da maquininha em Configurações → Formas de pagamento para ver quanto cai na conta.</div>}
-              </div>
-              <div className="card">
-                <div className="panel-title">A receber (agora)</div>
-                <div className="kv"><span>Contas pendentes (fiado)</span><span className="v" style={{ color: 'var(--danger)' }}>{brl(f.pendingCents)}</span></div>
-                <div className="kv"><span>Saldo de contas abertas</span><span className="v">{brl(f.openBalanceCents)}</span></div>
-              </div>
-              <div className="card">
-                <div className="panel-title">Despesas por categoria</div>
-                {!f.expensesByCategory.length && <div className="muted small">Nenhuma despesa no período.</div>}
-                {f.expensesByCategory.map((e) => <div key={e.name} className="kv"><span>{e.name} <span className="faint small">({e.count})</span></span><span className="v">{brl(e.cents)}</span></div>)}
-              </div>
-            </div>
-          </div>
-        </>}
-
-        {tab === 'products' && (
+        {f.semCusto.length > 0 && (tab === 'resumo' || tab === 'produtos') && (
+          <div className="info-box small">⚠ {f.semCusto.length} produto(s) vendidos sem custo cadastrado ({f.semCusto.slice(0, 3).map((x) => x.name).join(', ')}{f.semCusto.length > 3 ? '…' : ''}): <b>o lucro pode estar maior que o real</b>. <Link to="/admin/pendencias">Preencher os custos</Link></div>
+        )}
+        {tab === 'resumo' && <Resumo f={f} periodo={periodo} />}
+        {tab === 'produtos' && (
           <div className="card" style={{ padding: 0 }}>
-            <div className="row between wrap" style={{ padding: 12 }}>
-              <div className="small muted">Custo congelado no momento da venda. Margem unitária usa preço e custo atuais.</div>
-              <div className="seg">
-                <button className={sort === 'revenue' ? 'on' : ''} onClick={() => setSort('revenue')}>Faturamento</button>
-                <button className={sort === 'margin' ? 'on' : ''} onClick={() => setSort('margin')}>Margem</button>
-                <button className={sort === 'qty' ? 'on' : ''} onClick={() => setSort('qty')}>Quantidade</button>
-              </div>
-            </div>
+            <div className="small muted" style={{ padding: 12 }}>Todos os produtos ativos, em ordem alfabética. Margem = (preço − custo) ÷ preço. Lucro total = vendas com custo − custo.</div>
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>Produto</th><th className="right">Qtd.</th><th className="right">Faturamento</th><th className="right">Custo</th><th className="right">Margem</th><th className="right hide-mobile">Preço / custo atual</th><th className="right hide-mobile">Margem unit.</th></tr></thead>
+                <thead><tr><th>Produto</th><th className="right">Preço</th><th className="right">Custo</th><th className="right">Margem</th><th className="right">Vendidos</th><th className="right">Lucro total</th></tr></thead>
                 <tbody>
-                  {products.map((p) => (
+                  {f.tabela.map((p) => (
                     <tr key={`${p.id}-${p.name}`}>
-                      <td>{p.name}{p.qtyWithoutCost > 0 && <div className="small faint">{p.qtyWithoutCost} un. sem custo</div>}</td>
-                      <td className="right num">{p.qty}</td>
-                      <td className="right num">{brl(p.revenueCents)}</td>
-                      <td className="right num">{p.costCents == null ? <span className="faint">—</span> : brl(p.costCents)}</td>
-                      <td className="right num">{p.marginCents == null ? <span className="faint">—</span> : <>{brl(p.marginCents)} <span className="faint small">{pct(p.revenueCents ? p.marginCents / p.revenueCents : null)}</span></>}</td>
-                      <td className="right num small hide-mobile">{p.priceCents != null ? brl(p.priceCents) : '—'} / {p.currentCostCents != null ? brl(p.currentCostCents) : <Badge tone="warn">sem custo</Badge>}</td>
-                      <td className="right num hide-mobile">{p.unitMarginCents != null ? brl(p.unitMarginCents) : '—'}</td>
+                      <td>{p.name}{p.semCustoVendidos > 0 && p.costCents != null && <div className="small faint">{p.semCustoVendidos} vendido(s) antes do custo</div>}</td>
+                      <td className="right num">{p.priceCents != null ? brl(p.priceCents) : '—'}</td>
+                      <td className="right num">{p.costCents != null ? brl(p.costCents) : <button className="linkish" onClick={() => p.id && setCusto(p)} disabled={!p.id}><Badge tone="warn">sem custo</Badge></button>}</td>
+                      <td className="right num">{p.margemPct != null ? pct(p.margemPct, 0) : <span className="faint">—</span>}</td>
+                      <td className="right num">{p.vendidos || <span className="faint">0</span>}</td>
+                      <td className="right num">{p.lucroCents != null ? brl(p.lucroCents) : <span className="faint">—</span>}</td>
                     </tr>
                   ))}
-                  {!products.length && <tr><td colSpan={7} className="empty">Sem vendas no período.</td></tr>}
+                  {!f.tabela.length && <tr><td colSpan={6} className="empty">Nenhum produto.</td></tr>}
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
-        {tab === 'expenses' && (
+        {tab === 'despesas' && (
           <div className="col gap-lg">
             <div className="row between wrap">
-              <div className="small muted">Despesas do caixa (pagas com a gaveta) entram aqui automaticamente.</div>
-              <button className="btn primary" onClick={() => setNewExp(true)}>＋ Nova despesa</button>
+              <div className="small muted">Despesas pagas com o dinheiro da gaveta entram aqui automaticamente.</div>
+              <button className="btn primary" onClick={() => setNewExp(true)}>＋ Lançar despesa</button>
+            </div>
+            <div className="card">
+              <div className="panel-title">Despesas por categoria · {brl(f.expensesCents)}</div>
+              {!f.expensesByCategory.length && <div className="muted small">Nenhuma despesa no período.</div>}
+              {f.expensesByCategory.map((e) => {
+                const p = f.expensesCents ? e.cents / f.expensesCents : 0;
+                return (
+                  <div key={e.name} className="barra-linha">
+                    <div className="row between"><span>{e.name} <span className="faint small">({e.count})</span></span><span className="num">{brl(e.cents)} <span className="faint small">{pct(p, 0)}</span></span></div>
+                    <div className="barra-trilho"><span style={{ width: `${Math.max(2, p * 100)}%`, background: 'var(--cat-1)' }} /></div>
+                  </div>
+                );
+              })}
             </div>
             <div className="card" style={{ padding: 0 }}>
               <div className="table-wrap">
@@ -169,6 +140,7 @@ export default function FinancePage() {
         )}
       </>)}
       {newExp && <ExpenseModal onClose={() => setNewExp(false)} onDone={refresh} />}
+      {custo && <CustoModal p={custo} onClose={() => setCusto(null)} onDone={refresh} />}
       {cancel && (
         <ReasonModal title={`Cancelar despesa "${cancel.description}"`} confirmLabel="Cancelar despesa" danger
           description={cancel.paidFromRegister ? 'Se o caixa do dia ainda estiver aberto, o valor volta para a gaveta (suprimento).' : undefined}
@@ -176,6 +148,135 @@ export default function FinancePage() {
           onConfirm={(reason) => run(async () => { await api.post(`/api/expenses/${cancel.id}/cancel`, { reason }); refresh(); }, 'Despesa cancelada.')} />
       )}
     </div>
+  );
+}
+
+/** Resumo do Dono: só números. Lucro com ▲▼ vs período anterior, 4 cartões, cascata exata, formas de pagamento e (no Ano) 12 meses. */
+function Resumo({ f, periodo }: { f: Fin; periodo: Periodo }) {
+  const varPct = f.anterior.temDados && f.anterior.lucroCents !== 0 ? (f.lucroCents - f.anterior.lucroCents) / Math.abs(f.anterior.lucroCents) : null;
+  const anteriorTxt = { hoje: 'ontem', '7d': '7 dias anteriores', mes: 'mesmo nº de dias antes', ano: '12 meses anteriores' }[periodo];
+  const passos = [
+    { r: 'Vendido', v: f.grossSalesCents, sinal: '' },
+    { r: 'Descontos', v: -f.discountsCents, sinal: '−' },
+    { r: 'Custo dos produtos', v: -f.costCents, sinal: '−' },
+    { r: 'Despesas', v: -f.expensesCents, sinal: '−' },
+    ...(f.feesCents > 0 ? [{ r: 'Taxas da maquininha', v: -f.feesCents, sinal: '−' }] : []),
+  ];
+  const base = Math.max(1, f.grossSalesCents);
+  const formas = f.receivedByMethod.filter((m) => m.cents > 0);
+  return (
+    <div className="col gap-lg">
+      <div className="card lucro-hero">
+        <div className="small muted">Lucro do período</div>
+        <div className="lucro-valor" style={{ color: f.lucroCents >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{brl(f.lucroCents)}</div>
+        <div className="row wrap" style={{ gap: 10 }}>
+          <span className="small">Margem {f.margemLucro != null ? pct(f.margemLucro, 1) : '—'}</span>
+          {varPct != null
+            ? <span className={`small ${varPct >= 0 ? 'ok-text' : 'cancel-text'}`}>{varPct >= 0 ? '▲' : '▼'} {pct(Math.abs(varPct), 0)} vs {anteriorTxt} ({brl(f.anterior.lucroCents)})</span>
+            : <span className="small faint">sem dados do período anterior para comparar</span>}
+        </div>
+        <div className="small faint" style={{ marginTop: 6 }}>ⓘ Lucro = Vendido − Descontos − Custo dos produtos − Despesas lançadas{f.feesCents > 0 ? ' − Taxas da maquininha' : ''}. Não inclui impostos, pró-labore nem taxas que não foram lançadas.</div>
+      </div>
+      <div className="fin-cartoes">
+        <div className="tile"><div className="label">Vendido</div><div className="value">{brl(f.grossSalesCents)}</div></div>
+        <div className="tile"><div className="label">Custo dos produtos</div><div className="value">{brl(f.costCents)}</div></div>
+        <div className="tile"><div className="label">Despesas</div><div className="value">{brl(f.expensesCents)}</div></div>
+        <div className="tile"><div className="label">A receber (agora)</div><div className="value">{brl(f.pendingCents)}</div></div>
+      </div>
+      <div className="grid-2">
+        <div className="card">
+          <div className="panel-title">Do vendido ao lucro</div>
+          {passos.map((p) => (
+            <div key={p.r} className="barra-linha">
+              <div className="row between"><span>{p.sinal ? `${p.sinal} ` : ''}{p.r}</span><span className="num">{brl(Math.abs(p.v))}</span></div>
+              <div className="barra-trilho"><span style={{ width: `${Math.min(100, (Math.abs(p.v) / base) * 100)}%`, background: p.v >= 0 ? 'var(--cat-1)' : 'var(--faint)' }} /></div>
+            </div>
+          ))}
+          <div className="kv total"><span>= Lucro</span><span className="v" style={{ color: f.lucroCents >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{brl(f.lucroCents)}</span></div>
+        </div>
+        <div className="card">
+          <div className="panel-title">Como os clientes pagaram · {brl(f.receivedCents)}</div>
+          {!formas.length ? <div className="muted small">Nenhum recebimento no período.</div> : <>
+            <div className="barra-formas" role="img" aria-label={formas.map((m) => `${m.name} ${brl(m.cents)}`).join(', ')}>
+              {formas.map((m, i) => <span key={m.code} title={`${m.name}: ${brl(m.cents)} (${pct(m.cents / f.receivedCents, 0)})`} style={{ flexGrow: m.cents, background: CORES[i % CORES.length] }} />)}
+            </div>
+            {formas.map((m, i) => (
+              <div key={m.code} className="kv">
+                <span className="row" style={{ gap: 8 }}><span className="legenda-cor" style={{ background: CORES[i % CORES.length] }} />{m.name}</span>
+                <span className="v">{brl(m.cents)} <span className="faint small">{pct(m.cents / f.receivedCents, 0)}</span></span>
+              </div>
+            ))}
+            {f.feesCents > 0 && <div className="small faint mt">Taxas da maquininha {brl(f.feesCents)} · cai na conta {brl(f.netReceivedCents)}</div>}
+          </>}
+        </div>
+      </div>
+      {periodo === 'ano' && f.meses && <AnoGrafico meses={f.meses} />}
+    </div>
+  );
+}
+
+/** 12 barras de vendido e lucro (uma escala, legenda; mês sem dados aparece cinza "sem dados", nunca zero). */
+function AnoGrafico({ meses }: { meses: NonNullable<Fin['meses']> }) {
+  const [foco, setFoco] = useState<number | null>(null);
+  const max = Math.max(1, ...meses.map((m) => Math.max(m.vendidoCents ?? 0, m.lucroCents ?? 0)));
+  const min = Math.min(0, ...meses.map((m) => m.lucroCents ?? 0));
+  const H = 180, W = 720, padB = 24, top = 8;
+  const escala = (v: number) => top + ((max - v) / (max - min)) * (H - top - padB);
+  const zero = escala(0);
+  const col = W / 12, bw = Math.min(22, col / 3);
+  const m = foco != null ? meses[foco] : null;
+  return (
+    <div className="card">
+      <div className="row between wrap">
+        <div className="panel-title" style={{ margin: 0 }}>Vendido e lucro · 12 meses</div>
+        <div className="row small" style={{ gap: 12 }}>
+          <span className="row" style={{ gap: 6 }}><span className="legenda-cor" style={{ background: 'var(--cat-1)' }} />Vendido</span>
+          <span className="row" style={{ gap: 6 }}><span className="legenda-cor" style={{ background: 'var(--cat-2)' }} />Lucro</span>
+        </div>
+      </div>
+      <div className="small" style={{ minHeight: 20, marginTop: 4 }}>
+        {m ? (m.vendidoCents == null ? <span className="faint">{nomeMes(m.mes)}: sem dados</span>
+          : <span><b>{nomeMes(m.mes)}</b> · vendido {brl(m.vendidoCents)} · lucro {brl(m.lucroCents ?? 0)}</span>) : <span className="faint">Toque numa barra para ver os valores.</span>}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="ano-svg" role="img" aria-label="Vendido e lucro por mês nos últimos 12 meses">
+        <line x1={0} x2={W} y1={zero} y2={zero} stroke="var(--border)" />
+        {meses.map((mm, i) => {
+          const x = i * col + col / 2;
+          const on = foco === i;
+          return (
+            <g key={mm.mes} onMouseEnter={() => setFoco(i)} onMouseLeave={() => setFoco(null)} onClick={() => setFoco(on ? null : i)} style={{ cursor: 'pointer' }}>
+              <rect x={i * col} y={0} width={col} height={H} fill={on ? 'var(--surface-2)' : 'transparent'} />
+              {mm.vendidoCents == null
+                ? <rect x={x - bw - 1} y={zero - 4} width={bw * 2 + 2} height={4} rx={2} fill="var(--faint)" opacity={0.5} />
+                : <>
+                  <rect x={x - bw - 1} y={escala(mm.vendidoCents)} width={bw} height={Math.max(1, zero - escala(mm.vendidoCents))} rx={4} fill="var(--cat-1)" />
+                  {(() => { const l = mm.lucroCents ?? 0; const y = l >= 0 ? escala(l) : zero; return <rect x={x + 1} y={y} width={bw} height={Math.max(1, Math.abs(escala(l) - zero))} rx={4} fill="var(--cat-2)" />; })()}
+                </>}
+              <text x={x} y={H - 6} textAnchor="middle" className="ano-mes">{nomeMes(mm.mes)}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+function CustoModal({ p, onClose, onDone }: { p: Fin['tabela'][number]; onClose: () => void; onDone: () => void }) {
+  const [v, setV] = useState<number | null>(null);
+  const [passado, setPassado] = useState(true);
+  const { busy, run } = useAction();
+  return (
+    <Modal title={`Custo · ${p.name}`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Voltar</button>
+      <button className="btn primary" disabled={busy || v == null} onClick={async () => {
+        if (await run(() => api.post(`/api/products/${p.id}/custo`, { costCents: v, applyCostToPast: passado }), 'Custo salvo.')) { onDone(); onClose(); }
+      }}>Salvar</button>
+    </>}>
+      <div className="col gap-lg">
+        <label className="field"><span>Quanto custa para você cada unidade?</span><MoneyInput value={v} onChange={setV} autoFocus /></label>
+        <label className="check small"><input type="checkbox" checked={passado} onChange={(e) => setPassado(e.target.checked)} />Usar também nas vendas que ficaram sem custo</label>
+      </div>
+    </Modal>
   );
 }
 

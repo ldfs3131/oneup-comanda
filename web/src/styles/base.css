@@ -28,6 +28,8 @@
   --chart-passado: #9a937f;
   --chart-media: #5b9fe6;
   --chart-ano: #e3699c;
+  /* categóricas fixas (não seguem a cor do restaurante); validadas no script da skill dataviz contra a superfície */
+  --cat-1: #4a8ad4; --cat-2: #d0588a; --cat-3: #b07f2a; --cat-4: #3a9e82;
   --radius: 12px;
   --radius-lg: 16px;
   --shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
@@ -279,6 +281,7 @@ textarea.input { min-height: 80px; resize: vertical; }
   --chart-passado: #8c8576;
   --chart-media: #1d66b0;
   --chart-ano: #c2407a;
+  --cat-1: #2f6fb8; --cat-2: #b83e72; --cat-3: #9a6a10; --cat-4: #13876a;
   color-scheme: light;
 }
 :root[data-theme="light"] .btn.primary:hover { filter: brightness(0.96); }

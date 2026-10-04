@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
-import { and, eq, gt, lt, ne } from 'drizzle-orm';
+import { and, eq, gt, isNull, lt, ne } from 'drizzle-orm';
 import { currentContext, db } from './db/index.js';
-import { roles, sessions, users } from './db/schema.js';
+import { aparelhos, roles, sessions, users } from './db/schema.js';
 import { HttpError } from './lib/http.js';
 import { config } from './config.js';
 
@@ -145,3 +145,33 @@ export const clearLoginRate = (empresaId: number, ip: string, username: string) 
 // para igualar o tempo de resposta quando o usuário não existe (não revela quais logins existem)
 export const HASH_FALSO = bcrypt.hashSync('senha-que-nao-existe-' + randomBytes(8).toString('hex'), 10);
 setInterval(() => { const now = Date.now(); for (const [k, a] of attempts) if (a.until < now) attempts.delete(k); }, 10 * 60_000).unref();
+
+// ---------------------------------------------------------------------------------------------
+// APARELHO DA EQUIPE + PIN
+// O PIN de 4 dígitos é curto: por isso só funciona num aparelho onde alguém da equipe já entrou com usuário e
+// senha (cookie próprio, guardado em hash) e trava a pessoa por 5 min depois de 5 erros seguidos.
+export const COOKIE_APARELHO = 'oneup_aparelho';
+const DIAS_APARELHO = 400;
+
+export async function aparelhoValido(token: string | undefined) {
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
+  const [a] = await db.select().from(aparelhos).where(and(eq(aparelhos.tokenHash, sha(token)), isNull(aparelhos.revogadoEm)));
+  return a ?? null;
+}
+
+/** Depois de um login com senha: marca este aparelho como da equipe (ou só atualiza o último uso). */
+export async function lembrarAparelho(req: FastifyRequest, reply: FastifyReply, userId: number) {
+  const atual = await aparelhoValido(req.cookies[COOKIE_APARELHO]);
+  if (atual) { await db.update(aparelhos).set({ ultimoUso: new Date() }).where(eq(aparelhos.id, atual.id)); return; }
+  const token = randomBytes(32).toString('hex');
+  const ua = String(req.headers['user-agent'] ?? '');
+  const nome = /iphone/i.test(ua) ? 'iPhone' : /ipad/i.test(ua) ? 'iPad' : /android/i.test(ua) ? (/mobile/i.test(ua) ? 'Celular Android' : 'Tablet Android') : /windows/i.test(ua) ? 'Computador Windows' : /mac os/i.test(ua) ? 'Mac' : 'Navegador';
+  await db.insert(aparelhos).values({ tokenHash: sha(token), nome, criadoPor: userId, ultimoUso: new Date() });
+  reply.setCookie(COOKIE_APARELHO, token, { path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, maxAge: DIAS_APARELHO * 86400 });
+}
+
+export const PIN_MAX_ERROS = 5;
+export const PIN_BLOQUEIO_MIN = 5;
+export const pinValido = (p: string) => /^\d{4}$/.test(p);
+export const hashPin = (p: string) => bcrypt.hash(p, 10);
+export const conferirPin = (p: string, h: string) => bcrypt.compare(p, h);

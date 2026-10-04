@@ -67,3 +67,14 @@ export const signed = (c: number) => `${c > 0 ? '+' : c < 0 ? '−' : ''}${brl(M
 export const addDaysISO = (d: string, n: number) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 export const fmtDay = (d: string) => d.split('-').reverse().join('/');
 export const minutesUntil = (d: string | null | undefined, now = Date.now()) => d ? Math.round((new Date(d).getTime() - now) / 60000) : null;
+/** "há 5 min", "há 3 h", "há 2 dias" */
+export function timeAgo(d: string | Date | null | undefined) {
+  if (!d) return '—';
+  const min = Math.max(0, Math.round((Date.now() - new Date(d).getTime()) / 60000));
+  if (min < 1) return 'agora';
+  if (min < 60) return `há ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `há ${h} h`;
+  const dias = Math.round(h / 24);
+  return `há ${dias} dia${dias > 1 ? 's' : ''}`;
+}

@@ -146,6 +146,24 @@ export async function adminRoutes(app) {
     });
     // ---------- Insights ----------
     app.get('/api/insights', insightsAdmin, async () => computeInsights(db));
+    // ---------- Lembrete de backup externo a cada 30 dias (só ONE UP) ----------
+    app.get('/api/oneup/lembretes', { preHandler: requireOneup() }, async () => {
+        const cfg = await lerConfiguracoes();
+        const ultimo = String(cfg.backup_externo_em ?? '');
+        const adiado = String(cfg.backup_externo_adiado ?? '');
+        const vencido = !ultimo || Date.now() - Date.parse(ultimo) > 30 * 86400_000;
+        const mostrar = vencido && (!adiado || Date.parse(adiado) <= Date.now());
+        return { backupExterno: { mostrar, ultimoEm: ultimo || null } };
+    });
+    app.post('/api/oneup/lembretes/backup', { preHandler: requireOneup() }, async (req) => {
+        const { acao } = parse(z.object({ acao: z.enum(['feito', 'amanha']) }), req.body);
+        const agora = new Date();
+        if (acao === 'feito')
+            await aplicarConfiguracoes({ backup_externo_em: agora.toISOString(), backup_externo_adiado: '' }, me(req), 'ONEUP');
+        else
+            await aplicarConfiguracoes({ backup_externo_adiado: new Date(agora.getTime() + 20 * 3600_000).toISOString() }, me(req), 'ONEUP');
+        return { ok: true };
+    });
     // ---------- Base de comparação (só ONE UP): vendas de antes do sistema × período atual ----------
     app.get('/api/oneup/referencias', { preHandler: requireOneup() }, async (req) => {
         const q0 = parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional() }), req.query);

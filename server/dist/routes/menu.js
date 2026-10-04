@@ -204,6 +204,25 @@ export async function menuRoutes(app) {
         notify.menuChanged();
         return p;
     });
+    // Só o custo (Pendências "sem custo", entrada de compra com custo novo): histórico em product_costs
+    app.post('/api/products/:id/custo', admin, async (req) => {
+        const { id } = parse(idParam, req.params);
+        const b = parse(z.object({ costCents: z.number().int().min(0).max(100_000_00), applyCostToPast: z.boolean().optional() }), req.body);
+        const user = me(req);
+        const msg = await db.transaction(async (tx) => {
+            const [p] = await tx.select().from(products).where(eq(products.id, id)).for('update');
+            if (!p)
+                throw notFound('Produto não encontrado.');
+            const m = await recordCost(tx, id, b.costCents, p.costCents, b.applyCostToPast, user.id);
+            if (!m)
+                return '';
+            await tx.update(products).set({ costCents: b.costCents, updatedAt: new Date() }).where(eq(products.id, id));
+            await audit(tx, { userId: user.id, action: 'product.update', entityType: 'product', entityId: id, message: `${user.name} alterou "${p.name}": ${m}.` });
+            return m;
+        });
+        notify.menuChanged();
+        return { ok: true, alterado: !!msg };
+    });
     app.put('/api/products/:id', admin, async (req) => {
         const { id } = parse(idParam, req.params);
         const b = parse(productSchema, req.body);

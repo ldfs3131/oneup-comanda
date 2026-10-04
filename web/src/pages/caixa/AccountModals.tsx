@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
-import { brl } from '../../format';
+import { addDaysISO, brl, todayISO } from '../../format';
 import type { AccountDetail, Board, OrderItem, PaymentMethod } from '../../types';
 import { Modal, MoneyInput, useAction } from '../../components/ui';
 import { useMesaLabel } from '../../components/brand';
@@ -158,19 +158,26 @@ export function PendingModal({ account, onClose, onDone }: { account: AccountDet
   const [name, setName] = useState(account.customerName ?? '');
   const [contact, setContact] = useState(account.contact ?? '');
   const [note, setNote] = useState(account.note ?? '');
+  const [data, setData] = useState('');
   const { busy, run } = useAction();
-  const ok = name.trim().length >= 2 && contact.trim().length >= 2;
+  const ok = name.trim().length >= 2 && contact.trim().length >= 2 && (!data || data >= todayISO());
   return (
     <Modal title="Cliente saiu sem pagar" onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Voltar</button>
       <button className="btn danger solid" disabled={!ok || busy} onClick={async () => {
-        if (await run(() => api.post(`/api/accounts/${account.id}/pending`, { customerName: name.trim(), contact: contact.trim(), note: note.trim() || null }), 'Conta marcada como pendente.')) { onDone(); onClose(); }
+        if (await run(() => api.post(`/api/accounts/${account.id}/pending`, { customerName: name.trim(), contact: contact.trim(), note: note.trim() || null, promisedDate: data || null }), 'Conta marcada como pendente.')) { onDone(); onClose(); }
       }}>Marcar como pendente ({brl(account.totals.balance)})</button>
     </>}>
       <div className="col gap-lg">
         <div className="muted small">Para cobrar depois, o nome e a casa/telefone são obrigatórios.</div>
         <label className="field"><span>Nome do cliente *</span><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></label>
         <label className="field"><span>Casa ou telefone *</span><input className="input" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Ex.: casa 123 · (61) 9…" maxLength={120} /></label>
+        <label className="field"><span>Data combinada para pagar (opcional)</span>
+          <input className="input" type="date" value={data} min={todayISO()} onChange={(e) => setData(e.target.value)} />
+          <div className="row wrap" style={{ gap: 6 }}>
+            {[['Amanhã', 1], ['Em 7 dias', 7], ['Em 15 dias', 15], ['Em 30 dias', 30]].map(([r, d]) => <button key={r} type="button" className="btn sm" onClick={() => setData(addDaysISO(todayISO(), d as number))}>{r}</button>)}
+          </div>
+        </label>
         <label className="field"><span>Observação</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} /></label>
       </div>
     </Modal>

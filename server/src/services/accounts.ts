@@ -332,7 +332,8 @@ export async function listAccountsWithTotals(tx: Executor, where: ReturnType<typ
   const r = await tx.execute(sql`
     SELECT a.*, t.subtotal, t.discounts, t.paid, (t.subtotal - t.discounts) AS total,
            (t.subtotal - t.discounts - t.paid) AS balance,
-           ou.name AS opened_by_name, pu.name AS pending_by_name,
+           ou.name AS opened_by_name, pu.name AS pending_by_name, cu.name AS cobranca_por_name,
+           to_char(a.promised_date, 'YYYY-MM-DD') AS promised_str,
            (SELECT COUNT(*) FROM orders o WHERE o.account_id = a.id AND o.status IN ('CONFIRMED','IN_PREPARATION')) AS in_kitchen,
            (SELECT COUNT(*) FROM orders o WHERE o.account_id = a.id AND o.status = 'READY') AS ready,
            (SELECT MAX(o.created_at) FROM orders o WHERE o.account_id = a.id) AS last_order_at,
@@ -340,6 +341,7 @@ export async function listAccountsWithTotals(tx: Executor, where: ReturnType<typ
     FROM accounts a
     LEFT JOIN users ou ON ou.id = a.opened_by
     LEFT JOIN users pu ON pu.id = a.pending_by
+    LEFT JOIN users cu ON cu.id = a.ultima_cobranca_por
     CROSS JOIN LATERAL (
       SELECT
         COALESCE((SELECT SUM(oi.unit_price_cents * oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id
@@ -358,5 +360,7 @@ export async function listAccountsWithTotals(tx: Executor, where: ReturnType<typ
     subtotal: Number(row.subtotal), discounts: Number(row.discounts), paid: Number(row.paid),
     total: Number(row.total), balance: Number(row.balance),
     inKitchen: Number(row.in_kitchen), ready: Number(row.ready), lastOrderAt: row.last_order_at, nextReadyAt: row.next_ready_at,
+    promisedDate: (row.promised_str as string | null) ?? null,
+    ultimaCobrancaEm: row.ultima_cobranca_em ?? null, ultimaCobrancaPor: row.cobranca_por_name ?? null,
   }));
 }

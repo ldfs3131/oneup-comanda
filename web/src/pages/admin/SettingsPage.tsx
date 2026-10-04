@@ -148,6 +148,14 @@ function Operacao({ busy, run, isOpen, qrLigado }: { busy: boolean; run: ReturnT
           </div>
         </div>
       )}
+      <div className="row wrap" style={{ alignItems: 'center', gap: 12, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+        <div className="col grow">
+          <b>📲 Aplicativo do restaurante</b>
+          <div className="mono small" style={{ wordBreak: 'break-all' }}>{window.location.origin}/app</div>
+          <div className="small muted">Mande este link para a equipe e para os clientes: lá cada um baixa o seu app (clientes: cardápio; equipe: sistema). O nome e o ícone vêm de "Nome do aplicativo" e "Ícone do aplicativo", abaixo.</div>
+        </div>
+        <button className="btn sm" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/app`).then(() => toast('Link do aplicativo copiado.', 'ok')).catch(() => toast('Não deu para copiar.', 'danger'))}>Copiar link</button>
+      </div>
     </div>
   );
 }
@@ -190,7 +198,7 @@ function Campo({ it, busy, dependeOk, onSave, onPadrao, onHist }: {
       );
       break;
     case 'imagem':
-      controle = <Imagem value={(atual as string | null) ?? null} disabled={bloqueado} onRemove={() => onSave(null)} />;
+      controle = <Imagem chave={it.chave} value={(atual as string | null) ?? null} disabled={bloqueado} onRemove={() => onSave(null)} />;
       break;
     default:
       controle = <input className="input" disabled={bloqueado} maxLength={it.maxLen} inputMode={it.tipo === 'telefone' ? 'tel' : it.tipo === 'url' ? 'url' : undefined}
@@ -237,19 +245,20 @@ function CorPicker({ value, disabled, onChange }: { value: string; disabled: boo
   );
 }
 
-function Imagem({ value, disabled, onRemove }: { value: string | null; disabled: boolean; onRemove: () => void }) {
+function Imagem({ chave, value, disabled, onRemove }: { chave: string; value: string | null; disabled: boolean; onRemove: () => void }) {
+  const icone = chave === 'icone_app';
   const qc = useQueryClient();
   const { busy, run } = useAction();
   const enviar = (f: File) => run(async () => {
     const fd = new FormData(); fd.append('file', f);
-    await api.upload('/api/configuracoes/logo', fd);
+    await api.upload(`/api/configuracoes/imagem/${chave}`, fd);
     qc.invalidateQueries({ queryKey: ['configuracoes'] }); qc.invalidateQueries({ queryKey: ['meta'] });
-  }, 'Logotipo atualizado.');
+  }, icone ? 'Ícone do aplicativo atualizado.' : 'Logotipo atualizado.');
   return (
     <div className="row wrap" style={{ gap: 10 }}>
-      {value ? <img src={value} alt="Logotipo" style={{ height: 56, maxWidth: 180, objectFit: 'contain', background: 'var(--surface-2)', borderRadius: 8, padding: 4 }} /> : <span className="small faint">Sem logotipo</span>}
+      {value ? <img src={value} alt={icone ? 'Ícone do aplicativo' : 'Logotipo'} style={icone ? { height: 64, width: 64, objectFit: 'cover', borderRadius: 14 } : { height: 56, maxWidth: 180, objectFit: 'contain', background: 'var(--surface-2)', borderRadius: 8, padding: 4 }} /> : <span className="small faint">{icone ? 'Usando o ícone do ONE UP Comanda' : 'Sem logotipo'}</span>}
       <label className={`btn sm${disabled || busy ? ' disabled' : ''}`}>
-        {value ? 'Trocar' : 'Enviar logotipo'}
+        {value ? 'Trocar' : icone ? 'Enviar ícone' : 'Enviar logotipo'}
         <input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={disabled || busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) enviar(f); e.target.value = ''; }} />
       </label>
       {value && <button className="btn sm ghost" disabled={disabled || busy} onClick={onRemove}>Remover</button>}

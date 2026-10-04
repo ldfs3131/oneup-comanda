@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { cashMovements, expenseCategories, expenses, orders, orderTimeCorrections } from '../db/schema.js';
-import { me, requireRole } from '../auth.js';
+import { me, requireOneup, requireRole } from '../auth.js';
 import { bad, brl, centsSchema, conflict, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { notify } from '../realtime.js';
@@ -24,7 +24,23 @@ export async function managementRoutes(app: FastifyInstance) {
 
   // =============== FINANCEIRO ===============
   app.get('/api/finance', admin, async (req) => {
-    const r = rangeOf(parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional() }), req.query));
+    const qy = parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional(), ano: z.enum(['1']).optional() }), req.query);
+    const r = rangeOf(qy);
+    const atual = await financeiro(r);
+    // Período anterior do mesmo tamanho (para o ▲▼ do lucro)
+    const dias = Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86400_000) + 1;
+    const desl = (d: string, k: number) => new Date(Date.parse(d + 'T12:00:00Z') + k * 86400_000).toISOString().slice(0, 10);
+    const ant = await financeiro({ from: desl(r.from, -dias), to: desl(r.from, -1) }, true);
+    const meses = qy.ano ? await mesAMes(r) : null;
+    return {
+      ...atual,
+      anterior: { from: desl(r.from, -dias), to: desl(r.from, -1), lucroCents: ant.lucroCents, vendidoCents: ant.revenueCents, temDados: ant.grossSalesCents > 0 || ant.expensesCents > 0 },
+      meses,
+    };
+  });
+
+  /** Números do período. Lucro = Vendido − Descontos − Custo dos produtos − Despesas − Taxas da maquininha (quando cadastradas). */
+  async function financeiro(r: { from: string; to: string }, resumido = false) {
     const q = async (s: ReturnType<typeof sql>) => (await db.execute(s)).rows as any[];
     const live = sql`o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED') AND oi.status = 'ACTIVE'`;
     const [sales] = await q(sql`
@@ -34,11 +50,24 @@ export async function managementRoutes(app: FastifyInstance) {
       FROM orders o JOIN order_items oi ON oi.order_id = o.id WHERE ${inRange('o.created_at', r)} AND ${live}`);
     const [disc] = await q(sql`SELECT COALESCE(SUM(amount_cents),0) AS cents FROM discounts WHERE ${inRange('created_at', r)}`);
     const received = await q(sql`
-      SELECT pm.name, COALESCE(SUM(p.amount_cents),0) AS cents,
+      SELECT pm.name, pm.code, COALESCE(SUM(p.amount_cents),0) AS cents,
              COALESCE(ROUND(SUM(p.amount_cents::bigint * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)),0) AS fees, pm.taxa_bp AS "taxaBp"
       FROM payment_methods pm
       LEFT JOIN payments p ON p.method_id = pm.id AND p.reversed_at IS NULL AND ${inRange('p.created_at', r)}
       GROUP BY pm.id ORDER BY pm.sort_order`);
+    const exp = await q(sql`
+      SELECT c.name, COALESCE(SUM(e.amount_cents),0) AS cents, COUNT(e.id) AS count
+      FROM expenses e JOIN expense_categories c ON c.id = e.category_id
+      WHERE e.cancelled_at IS NULL AND e.date BETWEEN ${r.from}::date AND ${r.to}::date
+      GROUP BY c.name ORDER BY cents DESC`);
+    const gross = n(sales.gross), discounts = n(disc.cents), revenue = gross - discounts;
+    const cost = n(sales.cost), coverage = gross > 0 ? n(sales.gross_with_cost) / gross : 0;
+    const expensesTotal = exp.reduce((s, e) => s + n(e.cents), 0);
+    const grossProfit = revenue - cost;
+    const fees = received.reduce((s, x) => s + n(x.fees), 0);
+    const lucro = grossProfit - expensesTotal - fees;
+    if (resumido) return { grossSalesCents: gross, revenueCents: revenue, expensesCents: expensesTotal, lucroCents: lucro } as const;
+
     const [recv] = await q(sql`
       SELECT
         COALESCE(SUM(bal) FILTER (WHERE status = 'PENDING'),0) AS pending,
@@ -48,45 +77,86 @@ export async function managementRoutes(app: FastifyInstance) {
         - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE account_id=a.id),0)
         - COALESCE((SELECT SUM(amount_cents) FROM payments WHERE account_id=a.id AND reversed_at IS NULL),0) AS bal
         FROM accounts a WHERE a.status IN ('PENDING','OPEN','PARTIALLY_PAID')) x`);
-    const exp = await q(sql`
-      SELECT c.name, COALESCE(SUM(e.amount_cents),0) AS cents, COUNT(e.id) AS count
-      FROM expenses e JOIN expense_categories c ON c.id = e.category_id
-      WHERE e.cancelled_at IS NULL AND e.date BETWEEN ${r.from}::date AND ${r.to}::date
-      GROUP BY c.name ORDER BY cents DESC`);
     const products = await q(sql`
       SELECT oi.product_id AS id, oi.product_name AS name, p.price_cents AS price, p.cost_cents AS "currentCost",
              SUM(oi.quantity) AS qty, SUM(oi.unit_price_cents*oi.quantity) AS revenue,
              SUM(oi.unit_cost_cents*oi.quantity) FILTER (WHERE oi.unit_cost_cents IS NOT NULL) AS cost,
+             SUM(oi.unit_price_cents*oi.quantity) FILTER (WHERE oi.unit_cost_cents IS NOT NULL) AS revenue_with_cost,
              SUM(oi.quantity) FILTER (WHERE oi.unit_cost_cents IS NULL) AS qty_without_cost
       FROM orders o JOIN order_items oi ON oi.order_id = o.id LEFT JOIN products p ON p.id = oi.product_id
       WHERE ${inRange('o.created_at', r)} AND ${live}
       GROUP BY oi.product_id, oi.product_name, p.price_cents, p.cost_cents ORDER BY revenue DESC`);
-
-    const gross = n(sales.gross), discounts = n(disc.cents), revenue = gross - discounts;
-    const cost = n(sales.cost), coverage = gross > 0 ? n(sales.gross_with_cost) / gross : 0;
-    const expensesTotal = exp.reduce((s, e) => s + n(e.cents), 0);
-    const grossProfit = revenue - cost;
-    const fees = received.reduce((s, x) => s + n(x.fees), 0);
+    // Tabela do Dono: todos os produtos ativos + os vendidos no período, em ordem alfabética. Sem custo = "sem custo" (nunca 100%).
+    const catalogo = await q(sql`SELECT id, name, price_cents AS price, cost_cents AS cost FROM products WHERE active`);
+    const vendidos = new Map(products.filter((p) => p.id != null).map((p) => [n(p.id), p]));
+    const tabela = [
+      ...catalogo.map((c) => {
+        const v = vendidos.get(n(c.id));
+        return {
+          id: n(c.id), name: c.name as string, priceCents: n(c.price), costCents: c.cost == null ? null : n(c.cost),
+          margemPct: c.cost == null || !n(c.price) ? null : (n(c.price) - n(c.cost)) / n(c.price),
+          vendidos: v ? n(v.qty) : 0, semCustoVendidos: v ? n(v.qty_without_cost) : 0,
+          lucroCents: v && v.cost != null ? n(v.revenue_with_cost) - n(v.cost) : null,
+        };
+      }),
+      ...products.filter((p) => p.id == null || !catalogo.some((c) => n(c.id) === n(p.id))).map((p) => ({
+        id: p.id == null ? null : n(p.id), name: `${p.name}${p.id == null ? ' (avulso)' : ''}`, priceCents: p.price == null ? null : n(p.price),
+        costCents: p.currentCost == null ? null : n(p.currentCost), margemPct: null as number | null,
+        vendidos: n(p.qty), semCustoVendidos: n(p.qty_without_cost), lucroCents: p.cost != null ? n(p.revenue_with_cost) - n(p.cost) : null,
+      })),
+    ].sort((x, y) => x.name.localeCompare(y.name, 'pt-BR'));
+    const semCusto = products.filter((p) => n(p.qty_without_cost) > 0).map((p) => ({ name: p.name as string, qtd: n(p.qty_without_cost) }));
     return {
       from: r.from, to: r.to,
       grossSalesCents: gross, discountsCents: discounts, revenueCents: revenue,
       receivedCents: received.reduce((s, x) => s + n(x.cents), 0),
-      receivedByMethod: received.map((x) => ({ name: x.name, cents: n(x.cents), feesCents: n(x.fees), taxaBp: n(x.taxaBp) })),
+      receivedByMethod: received.map((x) => ({ name: x.name, code: x.code, cents: n(x.cents), feesCents: n(x.fees), taxaBp: n(x.taxaBp) })),
       // taxas da maquininha: calculadas com a taxa de cada forma no dia do recebimento
       feesCents: fees, netReceivedCents: received.reduce((s, x) => s + n(x.cents), 0) - fees,
       pendingCents: n(recv.pending), openBalanceCents: n(recv.open),
       costCents: cost, costCoverage: coverage,
       grossProfitCents: grossProfit, grossMargin: revenue > 0 ? grossProfit / revenue : null,
       expensesCents: expensesTotal, expensesByCategory: exp.map((e) => ({ name: e.name, cents: n(e.cents), count: n(e.count) })),
-      operatingResultCents: grossProfit - expensesTotal - fees,
+      operatingResultCents: lucro, lucroCents: lucro, margemLucro: revenue > 0 ? lucro / revenue : null,
+      semCusto,
+      tabela,
       products: products.map((p) => ({
         id: p.id, name: p.name, priceCents: p.price == null ? null : n(p.price), currentCostCents: p.currentCost == null ? null : n(p.currentCost),
         unitMarginCents: p.price != null && p.currentCost != null ? n(p.price) - n(p.currentCost) : null,
         qty: n(p.qty), revenueCents: n(p.revenue), costCents: p.cost == null ? null : n(p.cost),
-        marginCents: p.cost == null ? null : n(p.revenue) - n(p.cost), qtyWithoutCost: n(p.qty_without_cost),
+        marginCents: p.cost == null ? null : n(p.revenue_with_cost) - n(p.cost), qtyWithoutCost: n(p.qty_without_cost),
       })),
     };
-  });
+  }
+
+  /** 12 meses até o fim do período: vendido e lucro por mês. Mês sem nenhum movimento = null ("sem dados", nunca zero). */
+  async function mesAMes(r: { from: string; to: string }) {
+    const fim = r.to.slice(0, 7);
+    const [y, m] = fim.split('-').map(Number);
+    const lista: string[] = [];
+    for (let i = 11; i >= 0; i--) { const d = new Date(Date.UTC(y, m - 1 - i, 1)); lista.push(d.toISOString().slice(0, 7)); }
+    const ini = lista[0] + '-01';
+    const q = async (s: ReturnType<typeof sql>) => (await db.execute(s)).rows as any[];
+    const rr = { from: ini, to: r.to };
+    const mesDe = (col: string) => sql.raw(`to_char(${col} AT TIME ZONE '${TZ}', 'YYYY-MM')`);
+    const vendas = await q(sql`SELECT ${mesDe('o.created_at')} AS mes, SUM(oi.unit_price_cents*oi.quantity) AS gross,
+        COALESCE(SUM(oi.unit_cost_cents*oi.quantity) FILTER (WHERE oi.unit_cost_cents IS NOT NULL),0) AS cost
+      FROM orders o JOIN order_items oi ON oi.order_id = o.id
+      WHERE ${inRange('o.created_at', rr)} AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED') AND oi.status = 'ACTIVE' GROUP BY 1`);
+    const descontos = await q(sql`SELECT ${mesDe('created_at')} AS mes, SUM(amount_cents) AS cents FROM discounts WHERE ${inRange('created_at', rr)} GROUP BY 1`);
+    const taxas = await q(sql`SELECT ${mesDe('p.created_at')} AS mes, ROUND(SUM(p.amount_cents::bigint * COALESCE(p.taxa_bp, pm.taxa_bp) / 10000.0)) AS cents
+      FROM payments p JOIN payment_methods pm ON pm.id = p.method_id WHERE p.reversed_at IS NULL AND ${inRange('p.created_at', rr)} GROUP BY 1`);
+    const desp = await q(sql`SELECT to_char(date, 'YYYY-MM') AS mes, SUM(amount_cents) AS cents FROM expenses
+      WHERE cancelled_at IS NULL AND date BETWEEN ${ini}::date AND ${r.to}::date GROUP BY 1`);
+    const por = (rows: any[]) => new Map(rows.map((x) => [x.mes as string, x]));
+    const V = por(vendas), D = por(descontos), T = por(taxas), E = por(desp);
+    return lista.map((mes) => {
+      const v = V.get(mes);
+      if (!v && !E.get(mes)) return { mes, vendidoCents: null, lucroCents: null };
+      const vendido = n(v?.gross) - n(D.get(mes)?.cents);
+      return { mes, vendidoCents: vendido, lucroCents: vendido - n(v?.cost) - n(E.get(mes)?.cents) - n(T.get(mes)?.cents) };
+    });
+  }
 
   // =============== RITMO DO MÊS (mesma permissão do financeiro) ===============
   app.get('/api/finance/ritmo', admin, async (req) => {
@@ -186,7 +256,7 @@ export async function managementRoutes(app: FastifyInstance) {
   });
 
   // =============== TEMPO DE PREPARO ===============
-  app.get('/api/timing', admin, async (req) => {
+  app.get('/api/timing', { preHandler: requireOneup() }, async (req) => {
     const r = rangeOf(parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional() }), req.query));
     const rows = (await db.execute(sql`
       SELECT o.id, o.number, o.status, o.expected_minutes AS expected,

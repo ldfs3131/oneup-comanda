@@ -63,3 +63,7 @@ export function errorHandler(err, _req, reply) {
     _req.log.error(err);
     return reply.status(500).send({ error: 'Erro interno. Tente novamente.' });
 }
+/** Data de hoje (AAAA-MM-DD) no fuso do restaurante (America/Sao_Paulo). */
+export function hojeSP(offsetDias = 0) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() + offsetDias * 86400_000));
+}

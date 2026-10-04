@@ -24,7 +24,7 @@ if (process.env.DATABASE_URL) {
   const n = Number((await c.query('SELECT count(*) FROM drizzle.__drizzle_migrations')).rows[0].count);
   check(`Instalação nova aplicou todas as ${e.length} migrações`, n === e.length, n);
   const col = await c.query(`SELECT 1 FROM information_schema.columns WHERE table_name='sessions' AND column_name='aparelho_id'`);
-  check('Última migração presente no banco (sessions.aparelho_id)', col.rowCount === 1);
+  check("Colunas das migrações presentes (sessions.aparelho_id)", col.rowCount === 1);
   await c.end();
 }
 console.log(`\nResultado migrações: ${ok} verificações OK, ${falhas.length} falhas.`);

@@ -2,6 +2,7 @@ import { useSettings } from '../../components/layout';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '../../auth';
 import { api, qs } from '../../api';
 import { addDaysISO, brl, dateTime, fmtDay, pct, todayISO } from '../../format';
 import type { InsightsResult } from '../../types';
@@ -47,7 +48,8 @@ export default function Dashboard() {
   const r = presetRange(preset, custom);
   const { data: d, isLoading } = useQuery({ queryKey: ['dashboard', r.from, r.to], queryFn: () => api.get<Dash>(`/api/dashboard${qs(r)}`), refetchInterval: 60_000 });
   const { data: settings } = useSettings();
-  const { data: ins } = useQuery({ queryKey: ['insights'], queryFn: () => api.get<InsightsResult>('/api/insights'), refetchInterval: 5 * 60_000, enabled: settings?.insightsEnabled === true });
+  const oneup = !!useAuth().user?.oneup;
+  const { data: ins } = useQuery({ queryKey: ['insights'], queryFn: () => api.get<InsightsResult>('/api/insights'), refetchInterval: 5 * 60_000, enabled: oneup && settings?.insightsEnabled === true });
   const pick = (p: Preset) => { setPreset(p); try { sessionStorage.setItem('ha:dashPreset', p); } catch { /* ok */ } };
   const single = r.from === r.to;
   const maxHour = Math.max(1, ...(d?.byHour ?? []).map((h) => h.orders));
@@ -90,12 +92,12 @@ export default function Dashboard() {
 
       {isLoading || !d ? <Spinner /> : <>
         <div className="tiles">
-          <div className="tile hero"><div className="label">Faturamento</div><div className="value num">{brl(d.revenueCents)}</div><div className="sub">vendas {brl(d.grossSalesCents)} − descontos {brl(d.discountsCents)}</div></div>
+          <div className="tile hero"><div className="label">Vendido (já sem descontos)</div><div className="value num">{brl(d.revenueCents)}</div><div className="sub">vendas {brl(d.grossSalesCents)} − descontos {brl(d.discountsCents)}</div></div>
           <div className="tile"><div className="label">Contas</div><div className="value num">{d.accountsCount}</div></div>
           <div className="tile"><div className="label">Pedidos</div><div className="value num">{d.ordersCount}</div><div className="sub">{d.itemsSold} itens</div></div>
           <div className="tile"><div className="label">Ticket médio</div><div className="value num">{brl(d.averageTicketCents)}</div><div className="sub">por conta</div></div>
           <div className="tile"><div className="label">Recebido</div><div className="value num">{brl(d.receivedCents)}</div></div>
-          <div className="tile"><div className="label">Tempo de cozinha</div><div className="value num">{d.kitchenMedianMin != null ? `${d.kitchenMedianMin} min` : '—'}</div><div className="sub">mediana · {d.kitchenSamples} pedidos</div></div>
+          {oneup && <div className="tile"><div className="label">Tempo de cozinha</div><div className="value num">{d.kitchenMedianMin != null ? `${d.kitchenMedianMin} min` : '—'}</div><div className="sub">mediana · {d.kitchenSamples} pedidos</div></div>}
         </div>
 
         <div className="tiles">
@@ -106,8 +108,8 @@ export default function Dashboard() {
           {d.ordersAwaiting > 0 && <div className="tile"><div className="label">Aguardando confirmação (QR)</div><div className="value num">{d.ordersAwaiting}</div></div>}
         </div>
 
-        <div className="grid-2">
-          <div className="card">
+        <div className={oneup ? 'grid-2' : ''}>
+          {oneup && <div className="card">
             <div className="panel-title">Pedidos por hora {single ? '' : '(soma do período)'}</div>
             {!d.byHour.length ? <div className="muted small">Sem pedidos.</div> : (
               <div className="bars hours">
@@ -123,7 +125,7 @@ export default function Dashboard() {
                 })}
               </div>
             )}
-          </div>
+          </div>}
           <div className="card">
             <div className="panel-title">Vendas por categoria</div>
             {!d.byCategory.length && <div className="muted small">Sem vendas.</div>}
@@ -137,7 +139,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="grid-3">
+        <div className={oneup ? 'grid-3' : 'grid-2'}>
           <div className="card">
             <div className="panel-title">Pagamentos recebidos</div>
             {d.payments.map((p) => <div key={p.code} className="kv"><span>{p.name} <span className="faint small">({p.count})</span></span><span className="v">{brl(p.cents)}</span></div>)}
@@ -155,16 +157,16 @@ export default function Dashboard() {
             <div className="kv small"><span className="muted">· perdas (já preparado/entregue)</span><span className="v">{brl(d.lossCents)}</span></div>
             <Link to="/admin/cancelamentos" className="small">Ver cancelamentos →</Link>
           </div>
-          <div className="card">
+          {oneup && <div className="card">
             <div className="panel-title">Mais vendidos</div>
             {!d.topProducts.length && <div className="muted small">Sem vendas.</div>}
             {d.topProducts.map((p) => <div key={p.name} className="kv"><span className="ellipsis">{p.name}</span><span className="v">{p.qty}× <span className="faint small">{brl(p.cents)}</span></span></div>)}
-          </div>
+          </div>}
         </div>
 
         {!!d.semEstoque?.length && (
           <div className="card" style={{ borderColor: 'var(--warn)' }}>
-            <div className="row between"><div className="panel-title">⚠ Vendido sem estoque registrado — ajuste a contagem</div><Link to="/caixa/estoque" className="small">Ajustar estoque →</Link></div>
+            <div className="row between"><div className="panel-title">⚠ Vendido sem estoque registrado — ajuste a contagem</div><Link to="/admin/estoque" className="small">Ajustar estoque →</Link></div>
             <div className="small muted" style={{ marginBottom: 8 }}>O caixa não trava a venda quando o sistema mostra zero. Conte o que tem e corrija em Estoque para os números ficarem certos.</div>
             <div className="row wrap" style={{ gap: 8 }}>
               {d.semEstoque.map((x) => <span key={x.id} className="badge warn">{x.name}: {x.faltou} un. ({x.vezes}×)</span>)}

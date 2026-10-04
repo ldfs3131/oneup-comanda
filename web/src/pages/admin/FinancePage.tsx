@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../auth';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { addDaysISO, brl, dateOnly, fmtDay, pct, todayISO } from '../../format';
@@ -36,6 +37,7 @@ function rangeDe(p: Periodo) {
 
 export default function FinancePage() {
   const [periodo, setPeriodo] = useState<Periodo>('mes');
+  const oneup = !!useAuth().user?.oneup; // projeção e médias (Ritmo do mês) são leitura da ONE UP
   const range = rangeDe(periodo);
   const [tab, setTab] = useState<'resumo' | 'despesas' | 'produtos' | 'ritmo'>('resumo');
   const [newExp, setNewExp] = useState(false);
@@ -63,7 +65,7 @@ export default function FinancePage() {
         <button className={tab === 'resumo' ? 'on' : ''} onClick={() => setTab('resumo')}>Resumo</button>
         <button className={tab === 'despesas' ? 'on' : ''} onClick={() => setTab('despesas')}>Despesas</button>
         <button className={tab === 'produtos' ? 'on' : ''} onClick={() => setTab('produtos')}>Produtos</button>
-        <button className={tab === 'ritmo' ? 'on' : ''} onClick={() => setTab('ritmo')}>Ritmo do mês</button>
+        {oneup && <button className={tab === 'ritmo' ? 'on' : ''} onClick={() => setTab('ritmo')}>Ritmo do mês</button>}
       </div>
 
       {tab === 'ritmo' && <RitmoMes />}

@@ -138,6 +138,7 @@ export const cashRegisters = pgTable('cash_registers', {
     differenceCents: integer('difference_cents'),
     closingNote: text('closing_note'),
     summary: jsonb('summary'),
+    primeiraContagemCents: integer('primeira_contagem_cents'),
 });
 export const cashMovements = pgTable('cash_movements', {
     empresaId: empresaRef(),
@@ -273,8 +274,19 @@ export const cancellations = pgTable('cancellations', {
     stockReturned: boolean('stock_returned').notNull().default(false),
     wasInPreparation: boolean('was_in_preparation').notNull().default(false),
     reason: text('reason').notNull(),
+    motivoCliente: text('motivo_cliente'),
     cashRegisterId: integer('cash_register_id').references(() => cashRegisters.id),
     userId: integer('user_id').notNull().references(() => users.id),
+    createdAt: createdAt(),
+});
+/** "Permitir suporte": janela em que a ONE UP vê dados de clientes (o Dono liga e ela expira sozinha). */
+export const suporteLiberacoes = pgTable('suporte_liberacoes', {
+    empresaId: empresaRef(),
+    id: serial('id').primaryKey(),
+    ate: ts('ate').notNull(),
+    criadoPor: integer('criado_por'),
+    encerradoEm: ts('encerrado_em'),
+    encerradoPor: integer('encerrado_por'),
     createdAt: createdAt(),
 });
 // ---------- Auditoria e configurações ----------
@@ -330,6 +342,9 @@ export const customers = pgTable('customers', {
     aceitaOfertas: boolean('aceita_ofertas').notNull().default(false),
     aceitaOfertasEm: ts('aceita_ofertas_em'),
     aceitaOfertasTexto: text('aceita_ofertas_texto'),
+    ofertasRevogadasEm: ts('ofertas_revogadas_em'),
+    anonimizadoEm: ts('anonimizado_em'),
+    juntadoEm: integer('juntado_em'),
     createdAt: createdAt(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => [index('customers_name_idx').on(t.name)]);

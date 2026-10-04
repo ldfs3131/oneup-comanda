@@ -156,6 +156,8 @@ async function main() {
     check('Caixa não recebe o custo dos produtos', mc.flatMap((c) => c.products).every((p) => !('costCents' in p)));
     const dash = (await dono.get('/api/dashboard')).data;
     check('Painel do Dono sem o tempo de cozinha (leitura da ONE UP)', dash.kitchenMedianMin === null);
+    check('Painel do Dono sem ranking de mais vendidos e sem movimento por hora', dash.topProducts.length === 0 && dash.byHour.length === 0);
+    check('Ritmo do mês (projeção) não abre para o Dono', (await dono.get('/api/finance/ritmo')).status === 404);
     await db.end();
     console.log(`\nResultado auditoria: ${passed} verificações OK, ${failures.length} falhas.`);
     if (failures.length) {

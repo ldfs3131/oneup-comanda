@@ -65,5 +65,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export const useAuth = () => useContext(Ctx);
 
 export function homeFor(role: string) {
-  return role === 'ADMIN' ? '/admin' : role === 'COZINHA' ? '/cozinha' : '/caixa';
+  // o Dono entra direto em Pedidos (o painel do dia fica em "Mais")
+  return role === 'ADMIN' ? '/admin/pedidos' : role === 'COZINHA' ? '/cozinha' : '/caixa';
 }

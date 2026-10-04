@@ -137,9 +137,10 @@ export async function adminRoutes(app: FastifyInstance) {
       payments: byMethod.map((m) => ({ code: m.code, name: m.name, cents: n(m.cents), count: n(m.count), feesCents: n(m.fees) })),
       receivedCents: byMethod.reduce((acc, m) => acc + n(m.cents), 0),
       feesCents: byMethod.reduce((acc, m) => acc + n(m.fees), 0),
-      topProducts: topProducts.map((t) => ({ name: t.name, qty: n(t.qty), cents: n(t.cents) })),
+      // ranking ("mais vendidos") e movimento por hora são leitura da ONE UP: o Dono vê números, não interpretação
+      topProducts: me(req).oneup ? topProducts.map((t) => ({ name: t.name, qty: n(t.qty), cents: n(t.cents) })) : [],
       byCategory: byCategory.map((c) => ({ name: c.name, cents: n(c.cents), qty: n(c.qty) })),
-      byHour: byHour.map((h) => ({ hour: n(h.h), orders: n(h.orders) })),
+      byHour: me(req).oneup ? byHour.map((h) => ({ hour: n(h.h), orders: n(h.orders) })) : [],
       // tempo de cozinha é leitura da ONE UP (mapa de demora): o Dono não recebe
       kitchenMedianMin: !me(req).oneup || times?.kitchen == null ? null : Math.round(Number(times.kitchen)), kitchenSamples: me(req).oneup ? n(times?.n) : 0,
       lowStock: lowStock.map((l) => ({ id: l.id, name: l.name, qty: n(l.qty), lim: n(l.lim) })),

@@ -59,7 +59,10 @@ async function main() {
     return (r.headers.get('set-cookie') ?? '').split(';')[0];
   };
   const get = async (cookie: string, path: string) => { const r = await fetch(BASE + path, { headers: { 'x-empresa': 'ritmo', cookie } }); return { status: r.status, data: await r.json().catch(() => null) }; };
-  const dono = await login('admin', 'ritmo-admin');
+  execFileSync('node', ['dist/scripts/plataforma.js', 'oneup-usuario', '--empresa=ritmo', '--login=lucas.ritmo', '--nome=ONE UP', '--senha=segredo-ritmo-1'],
+    { cwd: SERVER, env: { ...process.env, DATABASE_URL: DB_URL }, stdio: 'ignore' });
+  const donoReal = await login('admin', 'ritmo-admin');
+  const dono = await login('lucas.ritmo', 'segredo-ritmo-1'); // o Ritmo do mês (projeção e médias) é leitura da ONE UP
   const caixa = await login('caixa', 'ritmo-caixa');
 
   if (!ja) {
@@ -136,10 +139,11 @@ async function main() {
 
   console.log('\n[5] Permissão');
   const rc = await get(caixa, '/api/finance/ritmo');
-  check('Caixa NÃO acessa o Ritmo do mês', rc.status === 403, rc.status);
+  check('Caixa NÃO acessa o Ritmo do mês', rc.status === 404 || rc.status === 403, rc.status);
   check('Sem login: 401', (await get('', '/api/finance/ritmo')).status === 401);
   const rd = await get(dono, '/api/finance/ritmo?modo=bruto');
-  check('Dono acessa (mesma permissão do financeiro)', rd.status === 200 && rd.data.modo === 'bruto');
+  check('ONE UP acessa', rd.status === 200 && rd.data.modo === 'bruto');
+  check('Dono NÃO acessa (projeção e médias são interpretação da ONE UP): 404', (await get(donoReal, '/api/finance/ritmo')).status === 404);
   check('Parâmetro inválido é recusado', (await get(dono, '/api/finance/ritmo?mes=2026-13')).status === 400);
 
   await pgc.end(); await closePools();

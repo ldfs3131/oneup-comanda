@@ -160,7 +160,7 @@ export async function managementRoutes(app: FastifyInstance) {
   }
 
   // =============== RITMO DO MÊS (mesma permissão do financeiro) ===============
-  app.get('/api/finance/ritmo', admin, async (req) => {
+  app.get('/api/finance/ritmo', { preHandler: requireOneup() }, async (req) => {
     const q = parse(z.object({ mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(), modo: z.enum(['liquido', 'bruto']).default('liquido') }), req.query);
     return ritmoDoMes(db, { mes: q.mes, modo: q.modo, hoje: todayLocal() });
   });

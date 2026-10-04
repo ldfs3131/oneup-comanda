@@ -2,8 +2,8 @@ import { respostaCompartilhada } from '../lib/cacheRota.js';
 import { z } from 'zod';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { currentContext, db, nextNumber } from '../db/index.js';
-import { accounts, cancellations, customers, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users, } from '../db/schema.js';
-import { me, requireRole } from '../auth.js';
+import { accounts, cancellations, cashMovements, customers, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users, } from '../db/schema.js';
+import { autorizadoPeloDono, me, requireRole } from '../auth.js';
 import { HttpError, bad, brl, centsSchema, conflict, hojeSP, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
 import { lerConfig, lerConfiguracoes } from '../services/configuracoes.js';
 import { audit } from '../lib/audit.js';
@@ -534,9 +534,9 @@ export async function accountRoutes(app) {
             if (b.amountCents > t.balance)
                 throw bad(`O desconto não pode ser maior que o saldo em aberto (${brl(t.balance)}).`);
             // perdoar fiado é decisão do Dono: o caixa não "ajusta" conta a receber (o dinheiro sumiria sem diferença no caixa)
-            if (user.role !== 'ADMIN' && acc.status === 'PENDING')
+            if (user.role !== 'ADMIN' && !autorizadoPeloDono(req) && acc.status === 'PENDING')
                 throw new HttpError(403, 'Conta a receber: só o Dono pode dar desconto. Para quitar, use Receber.', 'DESCONTO_FIADO_SO_DONO');
-            if (user.role !== 'ADMIN') {
+            if (user.role !== 'ADMIN' && !autorizadoPeloDono(req)) {
                 const limite = await lerConfig('desconto_max_caixa', tx);
                 if (limite != null && t.subtotal > 0) {
                     const jaDados = (await tx.select({ v: discounts.amountCents }).from(discounts).where(eq(discounts.accountId, id))).reduce((s2, x) => s2 + x.v, 0);
@@ -642,7 +642,7 @@ export async function accountRoutes(app) {
                 throw conflict('Esta conta já tem pagamentos. Peça ao Dono para estornar antes de cancelar.');
             const ords = await tx.select().from(orders).where(eq(orders.accountId, id));
             // a mesma trava do cancelamento de pedido: comida que já saiu da cozinha não some cancelando a conta inteira
-            await exigirDonoSeProntoNaCozinha(tx, user, ords.some((o) => o.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status)));
+            await exigirDonoSeProntoNaCozinha(tx, user, ords.some((o) => o.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status)), req);
             const reg = await currentRegister(tx);
             let lost = false;
             let stockBack = false;
@@ -691,7 +691,7 @@ export async function accountRoutes(app) {
             const { o, acc } = await orderWithAccount(tx, it.orderId, true);
             await assertAccountInScope(tx, user, acc);
             assertAccountEditable(acc.status);
-            await exigirDonoSeProntoNaCozinha(tx, user, it.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status));
+            await exigirDonoSeProntoNaCozinha(tx, user, it.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status), req);
             const qty = Math.min(b.quantity ?? it.quantity, it.quantity);
             const partial = qty < it.quantity;
             const value = it.unitPriceCents * qty;
@@ -738,7 +738,11 @@ export async function accountRoutes(app) {
     });
     app.post('/api/orders/:id/cancel', ops, async (req) => {
         const { id } = parse(idParam, req.params);
-        const { reason, returnStock } = parse(z.object({ reason: reasonSchema, returnStock: z.boolean().default(true) }), req.body);
+        const { reason, returnStock, motivoCliente } = parse(z.object({
+            reason: reasonSchema, returnStock: z.boolean().default(true),
+            // pedido do cardápio digital: o motivo que o CLIENTE vê vem de uma lista (o texto do caixa fica interno)
+            motivoCliente: z.enum(['FALTA', 'FECHANDO', 'DUPLICADO', 'BALCAO']).optional(),
+        }), req.body);
         const user = me(req);
         const info = await db.transaction(async (tx) => {
             const { o, acc } = await orderWithAccount(tx, id, true);
@@ -746,7 +750,7 @@ export async function accountRoutes(app) {
             assertAccountEditable(acc.status);
             if (o.status === 'CANCELLED')
                 throw conflict('Pedido já cancelado.');
-            await exigirDonoSeProntoNaCozinha(tx, user, o.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status));
+            await exigirDonoSeProntoNaCozinha(tx, user, o.goesToKitchen && ['READY', 'DELIVERED'].includes(o.status), req);
             const items = await tx.select().from(orderItems).where(and(eq(orderItems.orderId, id), eq(orderItems.status, 'ACTIVE')));
             const value = items.reduce((s, i) => s + i.unitPriceCents * i.quantity, 0);
             const t = await accountTotals(tx, acc.id);
@@ -763,7 +767,7 @@ export async function accountRoutes(app) {
             await tx.update(orders).set({ status: 'CANCELLED' }).where(eq(orders.id, id));
             const reg = await currentRegister(tx);
             await tx.insert(cancellations).values({
-                target: 'ORDER', accountId: acc.id, orderId: id,
+                target: 'ORDER', accountId: acc.id, orderId: id, motivoCliente: motivoCliente ?? null,
                 description: `Pedido #${o.number}: ${items.map((i) => `${i.quantity}× ${i.productName}`).join(', ')}`,
                 amountCents: counted, wasInPreparation: lost, reason, userId: user.id, cashRegisterId: reg?.id ?? null,
                 statusBefore: ORDER_STATUS_PT[o.status], statusAfter: 'Cancelado', stockReturned: stockBack,
@@ -938,10 +942,13 @@ export async function accountRoutes(app) {
         return { ok: true };
     });
     // Estorno de pagamento (somente admin)
-    app.post('/api/payments/:id/reverse', admin, async (req) => {
+    app.post('/api/payments/:id/reverse', ops, async (req) => {
         const { id } = parse(idParam, req.params);
         const { reason } = parse(z.object({ reason: reasonSchema }), req.body);
         const user = me(req);
+        const autorizou = user.role === 'ADMIN' ? null : autorizadoPeloDono(req);
+        if (user.role !== 'ADMIN' && !autorizou)
+            throw new HttpError(403, 'Estorno de pagamento: precisa da autorização do Dono.', 'AUTORIZACAO_DONO');
         const accId = await db.transaction(async (tx) => {
             const [p] = await tx.select().from(payments).where(eq(payments.id, id)).for('update');
             if (!p)
@@ -951,8 +958,19 @@ export async function accountRoutes(app) {
             const acc = await getAccount(tx, p.accountId, true);
             if (acc.status === 'CLOSED')
                 throw conflict('Reabra a conta antes de estornar um pagamento.');
+            const [m] = await tx.select().from(paymentMethods).where(eq(paymentMethods.id, p.methodId));
+            const reg = await currentRegister(tx);
+            // dinheiro recebido num dia já fechado e devolvido hoje: sai da gaveta de hoje (sangria automática), senão o caixa fecha com falta que não é dele
+            let devolucao = '';
+            if (m?.isCash && reg && reg.id !== p.cashRegisterId) {
+                await tx.insert(cashMovements).values({ cashRegisterId: reg.id, type: 'SANGRIA', amountCents: p.amountCents, reason: `Devolução do estorno (conta #${acc.number})`, userId: user.id });
+                devolucao = ' — dinheiro devolvido da gaveta de hoje (sangria automática)';
+            }
+            else if (m?.isCash && !reg && p.cashRegisterId) {
+                throw conflict('Abra o dia para devolver o dinheiro deste estorno pela gaveta.');
+            }
             await tx.update(payments).set({ reversedAt: new Date(), reversedBy: user.id, reversalReason: reason }).where(eq(payments.id, id));
-            await audit(tx, { userId: user.id, action: 'payment.reverse', entityType: 'account', entityId: acc.id, message: `${user.name} estornou o pagamento de ${brl(p.amountCents)} da ${label(acc)}. Motivo: ${reason}` });
+            await audit(tx, { userId: user.id, action: 'payment.reverse', entityType: 'account', entityId: acc.id, message: `${user.name} estornou o pagamento de ${brl(p.amountCents)} da ${label(acc)}${autorizou ? ` com autorização de ${autorizou.name}` : ''}${devolucao}. Motivo: ${reason}` });
             await recomputeStatus(tx, acc.id);
             return acc.id;
         });
@@ -960,10 +978,41 @@ export async function accountRoutes(app) {
         notify.registerChanged();
         return { ok: true };
     });
+    // Forma de pagamento lançada errada (Cartão em vez de PIX…): o caixa troca enquanto o dia está aberto, com motivo.
+    // O pagamento original é estornado e um novo, do mesmo valor, entra na forma certa — o esperado da gaveta fica certo.
+    app.post('/api/payments/:id/forma', ops, async (req) => {
+        const { id } = parse(idParam, req.params);
+        const b = parse(z.object({ methodId: z.number().int().positive(), reason: reasonSchema }), req.body);
+        const user = me(req);
+        const accId = await idempotent(req, 'payment.forma', () => db.transaction(async (tx) => {
+            const [p] = await tx.select().from(payments).where(eq(payments.id, id)).for('update');
+            if (!p)
+                throw notFound('Pagamento não encontrado.');
+            if (p.reversedAt)
+                throw conflict('Este pagamento já foi estornado.');
+            const reg = await currentRegister(tx);
+            if (!reg || reg.id !== p.cashRegisterId)
+                throw conflict('Só dá para trocar a forma de um pagamento do dia que está aberto. Para dias anteriores, fale com o Dono.');
+            const [velha] = await tx.select().from(paymentMethods).where(eq(paymentMethods.id, p.methodId));
+            const [nova] = await tx.select().from(paymentMethods).where(eq(paymentMethods.id, b.methodId));
+            if (!nova || !nova.active)
+                throw bad('Forma de pagamento inválida.');
+            if (nova.id === p.methodId)
+                throw bad('O pagamento já está nessa forma.');
+            const acc = await getAccount(tx, p.accountId, true);
+            await tx.update(payments).set({ reversedAt: new Date(), reversedBy: user.id, reversalReason: `Troca de forma: ${velha?.name ?? '?'} → ${nova.name}. ${b.reason}` }).where(eq(payments.id, id));
+            await tx.insert(payments).values({ accountId: p.accountId, methodId: nova.id, amountCents: p.amountCents, tenderedCents: null, cashRegisterId: reg.id, userId: user.id, taxaBp: nova.taxaBp });
+            await audit(tx, { userId: user.id, action: 'payment.forma', entityType: 'account', entityId: acc.id, message: `${user.name} trocou a forma de um pagamento de ${brl(p.amountCents)} da ${label(acc)}: ${velha?.name ?? '?'} → ${nova.name}. Motivo: ${b.reason}` });
+            return acc.id;
+        }));
+        notify.accountsChanged(accId);
+        notify.registerChanged();
+        return { ok: true };
+    });
 }
 /** Configuração do Dono: comida que já saiu da cozinha só o Dono cancela (é perda). */
-async function exigirDonoSeProntoNaCozinha(tx, user, prontoNaCozinha) {
-    if (!prontoNaCozinha || user.role === 'ADMIN')
+async function exigirDonoSeProntoNaCozinha(tx, user, prontoNaCozinha, req) {
+    if (!prontoNaCozinha || user.role === 'ADMIN' || autorizadoPeloDono(req))
         return;
     if (await lerConfig('cancelar_pronto_so_dono', tx)) {
         throw new HttpError(403, 'Este item já saiu da cozinha: só o Dono pode cancelar.', 'CANCELAR_SO_DONO');

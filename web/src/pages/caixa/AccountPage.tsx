@@ -5,7 +5,7 @@ import { api, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { useAuth } from '../../auth';
 import { CONSUMPTION_LABEL, ORIGIN_LABEL, SITUATION, brl, dateTime, minutesUntil, time } from '../../format';
 import type { AccountDetail, Consumption, Order, OrderItem, StockDecision } from '../../types';
-import { AccountBadge, Badge, OrderBadge, ReasonModal, Spinner, useAction } from '../../components/ui';
+import { AccountBadge, Badge, Modal, OrderBadge, ReasonModal, Spinner, useAction } from '../../components/ui';
 import { useStockGuard } from '../../components/stock';
 import { OrderDetailModal } from '../../components/OrderDetail';
 import OrderComposer, { linesToItems, useMenu, type CartLine } from './OrderComposer';
@@ -46,6 +46,7 @@ export default function AccountPage() {
   const [transfer, setTransfer] = useState<Order | null>(null);
   const [detail, setDetail] = useState<number | null>(null);
   const [reverse, setReverse] = useState<number | null>(null);
+  const [troca, setTroca] = useState<number | null>(null);
   const [returnStock, setReturnStock] = useState(true);
 
   // conta que saiu de "aberta" não precisa mais lembrar a divisão por pessoas
@@ -202,7 +203,8 @@ export default function AccountPage() {
                   </span>
                   <span className="row">
                     <span className="v">{brl(p.amountCents)}</span>
-                    {isAdmin && !p.reversedAt && acc.status !== 'CLOSED' && <button className="btn sm ghost" onClick={() => setReverse(p.id)}>Estornar</button>}
+                    {!p.reversedAt && !isAdmin && dateTime(p.createdAt).slice(0, 5) === dateTime(new Date().toISOString()).slice(0, 5) && <button className="btn sm ghost" onClick={() => setTroca(p.id)}>Trocar forma</button>}
+                    {!p.reversedAt && acc.status !== 'CLOSED' && <button className="btn sm ghost" onClick={() => setReverse(p.id)}>Estornar</button>}
                   </span>
                 </div>
               ))}
@@ -313,6 +315,7 @@ export default function AccountPage() {
             onClose={() => setReverse(null)}
             onConfirm={(reason) => act(() => api.post(`/api/payments/${reverse}/reverse`, { reason }), 'Pagamento estornado.')} />
         )}
+        {troca && <TrocarFormaModal pagamentoId={troca} atual={acc.payments.find((p) => p.id === troca)?.methodCode ?? ''} onClose={() => setTroca(null)} onDone={() => act(async () => undefined)} />}
         {detail && <OrderDetailModal orderId={detail} onClose={() => setDetail(null)} />}
         {stockModal}
         {maisUm.aviso}
@@ -371,4 +374,28 @@ function useMaisUmComDesfazer() {
     </div>
   ) : null;
   return { agendar, aviso };
+}
+
+/** Forma lançada errada (Cartão em vez de PIX…): troca enquanto o dia está aberto, com motivo. */
+function TrocarFormaModal({ pagamentoId, atual, onClose, onDone }: { pagamentoId: number; atual: string; onClose: () => void; onDone: () => void }) {
+  const { data: metodos = [] } = useQuery({ queryKey: ['methods'], queryFn: () => api.get<{ id: number; code: string; name: string }[]>('/api/payment-methods') });
+  const [m, setM] = useState<number | null>(null);
+  const [motivo, setMotivo] = useState('Lançado na forma errada');
+  const { busy, run } = useAction();
+  const qc = useQueryClient();
+  return (
+    <Modal title="Trocar a forma do pagamento" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Voltar</button>
+      <button className="btn primary" disabled={!m || motivo.trim().length < 3 || busy} onClick={async () => {
+        if (await run(() => api.post(`/api/payments/${pagamentoId}/forma`, { methodId: m, reason: motivo.trim() }, true), 'Forma de pagamento trocada.')) { qc.invalidateQueries(); onDone(); onClose(); }
+      }}>Trocar</button>
+    </>}>
+      <div className="col gap-lg">
+        <div className="small muted">O valor não muda: só a forma. Fica registrado com o seu nome e o motivo.</div>
+        <div className="field"><span>Forma certa</span>
+          <div className="seg wrap">{metodos.filter((x) => x.code !== atual).map((x) => <button key={x.id} className={m === x.id ? 'on' : ''} onClick={() => setM(x.id)}>{x.name}</button>)}</div></div>
+        <label className="field"><span>Motivo</span><input className="input" value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={200} /></label>
+      </div>
+    </Modal>
+  );
 }

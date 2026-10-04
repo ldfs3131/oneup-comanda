@@ -3,6 +3,10 @@
  * Roda na empresa "beta" do banco de duas empresas (EMPRESA_HEADER=true; veja testes.sh), depois da suíte leva1.
  */
 import pg from 'pg';
+import { execFileSync } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const SERVER = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BASE = process.env.BASE_URL ?? 'http://localhost:3200';
 const DB_URL = process.env.DATABASE_URL;
 let passed = 0;
@@ -158,6 +162,43 @@ async function main() {
     check('Painel do Dono sem o tempo de cozinha (leitura da ONE UP)', dash.kitchenMedianMin === null);
     check('Painel do Dono sem ranking de mais vendidos e sem movimento por hora', dash.topProducts.length === 0 && dash.byHour.length === 0);
     check('Ritmo do mês (projeção) não abre para o Dono', (await dono.get('/api/finance/ritmo')).status === 404);
+    console.log('\n[Happy Alpha 3.3] "Permitir suporte": a ONE UP só vê dados de clientes com o Dono liberando');
+    execFileSync('node', ['dist/scripts/plataforma.js', 'oneup-usuario', '--empresa=beta', '--login=lucas.beta', '--nome=Lucas', '--senha=segredo-beta-1'], { cwd: SERVER, env: { ...process.env, DATABASE_URL: DB_URL }, stdio: 'ignore' });
+    const one = new C();
+    await one.login('lucas.beta', 'segredo-beta-1');
+    const recOne = JSON.stringify((await one.get('/api/accounts/receivable')).data);
+    check('Sem liberação: telefone/contato do cliente chegam mascarados para a ONE UP', !/casa 7/.test(recOne) && /\*\*\*\*|••••/.test(recOne), recOne.slice(0, 300));
+    check('A ONE UP não consegue se liberar sozinha', (await one.post('/api/suporte/liberar', { minutos: 30 })).status === 403);
+    check('O Dono libera por 30 minutos', (await dono.post('/api/suporte/liberar', { minutos: 30 })).status === 200);
+    await new Promise((r) => setTimeout(r, 30));
+    const recLib = JSON.stringify((await one.get('/api/accounts/receivable?x=1')).data);
+    check('Com liberação: a ONE UP vê os dados', /casa 7/.test(recLib), recLib.slice(0, 200));
+    await dono.post('/api/suporte/encerrar');
+    const audS = (await db.query(`SELECT message, user_role FROM audit_logs WHERE empresa_id=$1 AND user_id=(SELECT id FROM users WHERE empresa_id=$1 AND username='lucas.beta') ORDER BY id DESC LIMIT 1`, [BETA])).rows[0];
+    check('Ações da ONE UP aparecem como "Suporte ONE UP" para o Dono', audS?.user_role === 'ONEUP' && /^Suporte ONE UP · /.test(audS.message), audS);
+    console.log('\n[Happy Alpha 3.3] Autorização do Dono no aparelho do caixa');
+    const caixa2 = new C();
+    await caixa2.login('caixa', 'beta-caixa');
+    const ac = await caixa2.post('/api/accounts', { tableLabel: '3', items: [{ productId: p1.id, quantity: 1 }] });
+    const methods = (await dono.get('/api/payment-methods')).data;
+    const PIX = methods.find((m) => m.code === 'PIX').id, CART = methods.find((m) => m.code === 'CARTAO').id, DIN = methods.find((m) => m.code === 'DINHEIRO').id;
+    await caixa2.post(`/api/accounts/${ac.data.id}/payments`, { payments: [{ methodId: CART, amountCents: p1.priceCents }], close: false });
+    const det = (await caixa2.get(`/api/accounts/${ac.data.id}`)).data;
+    const pg1 = det.payments[0];
+    const troca = await caixa2.req('POST', `/api/payments/${pg1.id}/forma`, { methodId: PIX, reason: 'Era PIX, lancei cartão' });
+    const det2 = (await caixa2.get(`/api/accounts/${ac.data.id}`)).data;
+    check('Caixa troca a forma do pagamento do dia (cartão → PIX), valor igual', troca.status === 200 && det2.payments.some((p) => p.methodCode === 'PIX' && !p.reversedAt && p.amountCents === p1.priceCents) && det2.payments.some((p) => p.methodCode === 'CARTAO' && p.reversedAt), det2.payments);
+    const novo = det2.payments.find((p) => !p.reversedAt);
+    const semAut = await caixa2.post(`/api/payments/${novo.id}/reverse`, { reason: 'Cliente pagou duas vezes' });
+    check('Estorno pelo caixa sem o Dono → pede autorização (403 AUTORIZACAO_DONO)', semAut.status === 403 && semAut.data.code === 'AUTORIZACAO_DONO', semAut.data);
+    check('Senha errada do Dono não autoriza', (await caixa2.post('/api/auth/autorizar', { username: 'admin', password: 'errada' })).status === 400);
+    const aut = await caixa2.post('/api/auth/autorizar', { username: 'admin', password: 'beta-admin' });
+    check('Dono digita a senha no aparelho do caixa → código de autorização', aut.status === 200 && typeof aut.data.token === 'string', aut.data);
+    const comAut = await caixa2.req('POST', `/api/payments/${novo.id}/reverse`, { reason: 'Cliente pagou duas vezes' }, { 'x-autorizacao-dono': aut.data.token });
+    check('Com a autorização, o caixa estorna (e continua no próprio acesso)', comAut.status === 200 && (await caixa2.get('/api/auth/me')).data.user.role === 'CAIXA', comAut.data);
+    const reuso = await caixa2.req('POST', `/api/payments/${novo.id}/reverse`, { reason: 'De novo' }, { 'x-autorizacao-dono': aut.data.token });
+    check('O código vale uma vez só', reuso.status === 403);
+    void DIN;
     await db.end();
     console.log(`\nResultado auditoria: ${passed} verificações OK, ${failures.length} falhas.`);
     if (failures.length) {

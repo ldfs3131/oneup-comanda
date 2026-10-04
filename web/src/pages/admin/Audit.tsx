@@ -34,6 +34,7 @@ export default function Audit() {
         <button className={`btn${date ? '' : ' primary'}`} onClick={() => setDate('')}>Todos os dias</button>
         <input className="input" style={{ maxWidth: 300 }} placeholder="Buscar (ex.: #128, desconto, João)" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
+      {!date && search.trim() && <div className="small muted">Sem dia escolhido, a busca olha os últimos 30 dias. Para datas mais antigas, escolha o dia.</div>}
       {q.isLoading ? <Spinner /> : !logs.length ? <div className="card empty">Nada registrado{date ? ' neste dia' : ''}.</div> : (
         <div className="card" style={{ padding: '4px 16px' }}>
           {logs.map((l) => {

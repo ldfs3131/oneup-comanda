@@ -275,9 +275,11 @@ async function main() {
     check('Acompanhamento: confirmado', (await new Client('x').get(`/api/public/pedido/${qr.data.token}`)).data.etapa === 'confirmado');
     const qrRec = await new Client('cliente2').post('/api/public/orders', { customerName: 'Outra Pessoa', phone: '11987654321', mode: 'BALCAO', items: [{ productId: batata.id, quantity: 1 }] });
     const awRec = (await caixa.get('/api/cashier/board')).data.awaiting.find((o) => o.orderNumber === qrRec.data.orderNumber);
-    await caixa.post(`/api/orders/${awRec.orderId}/cancel`, { reason: 'Acabou a batata por hoje', returnStock: false });
+    await caixa.post(`/api/orders/${awRec.orderId}/cancel`, { reason: 'Produto em falta — cliente chato, já deu problema', motivoCliente: 'FALTA', returnStock: false });
     const rec = (await new Client('x').get(`/api/public/pedido/${qrRec.data.token}`)).data;
-    check('Pedido recusado mostra o motivo ao cliente', rec.etapa === 'recusado' && rec.motivo === 'Acabou a batata por hoje', rec);
+    check('Pedido recusado mostra ao cliente só o motivo da lista', rec.etapa === 'recusado' && rec.motivo === 'Um produto do pedido acabou.', rec);
+    check('A observação interna do caixa NUNCA aparece para o cliente', !JSON.stringify(rec).includes('chato'));
+    check('Acompanhamento informa o modo (para "pronto para retirar" × "vamos levar")', rec.modo === 'balcao');
     const semCons = (await db.query(`SELECT aceita_ofertas FROM customers WHERE name='Outra Pessoa'`)).rows[0];
     check('Sem a caixinha marcada, cliente NÃO aceita ofertas', semCons?.aceita_ofertas === false);
     await db.end();

@@ -122,6 +122,10 @@ async function analisar(tx, csv) {
             l.erros.push(`preço inválido ("${get('preco')}") — use 12,50`);
         else if (l.preco > 100_000_00)
             l.erros.push('preço acima de R$ 100.000');
+        else if (l.preco === 0)
+            l.erros.push('preço zero — produto sem preço trava no caixa; deixe a linha de fora ou informe o preço');
+        if (/^\s*(R\$\s*)?\d{1,3}(\.\d{3})+\s*$/.test(get('preco')))
+            l.avisos.push(`confira o preço: "${get('preco')}" foi lido como ${l.preco != null && !Number.isNaN(l.preco) ? brl(l.preco) : '?'}`);
         if (l.custo !== null && Number.isNaN(l.custo))
             l.erros.push(`custo inválido ("${get('custo')}") — use 4,30 ou deixe vazio`);
         if (l.preco != null && l.custo != null && !Number.isNaN(l.preco) && !Number.isNaN(l.custo) && l.custo > l.preco)
@@ -145,6 +149,8 @@ async function analisar(tx, csv) {
             l.acao = 'atualizar';
             if (l.preco != null && !Number.isNaN(l.preco) && l.preco !== atual.priceCents)
                 l.mudancas.push(`preço ${brl(atual.priceCents)} → ${brl(l.preco)}`);
+            if (l.preco != null && !Number.isNaN(l.preco) && atual.priceCents > 0 && (l.preco > atual.priceCents * 5 || l.preco * 5 < atual.priceCents))
+                l.avisos.push('preço mudou mais de 5 vezes — confira se não falta ou sobra um zero');
             if (l.custo != null && !Number.isNaN(l.custo) && l.custo !== atual.costCents)
                 l.mudancas.push(`custo ${atual.costCents == null ? 'sem custo' : brl(atual.costCents)} → ${brl(l.custo)}`);
             if (l.estoqueMinimo != null && !Number.isNaN(l.estoqueMinimo) && l.estoqueMinimo !== atual.lowStockAt)

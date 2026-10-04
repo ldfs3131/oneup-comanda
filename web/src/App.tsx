@@ -38,6 +38,7 @@ import Plataforma from './pages/admin/Plataforma';
 import Clientes from './pages/admin/Clientes';
 import Privacidade from './pages/public/Privacidade';
 import { ThemeApplier } from './components/brand';
+import { AutorizacaoDono } from './components/autorizacao';
 
 /** Carregando; sem internet, avisa que está tentando reconectar (não pede a senha de novo). */
 function Carregando() {
@@ -77,6 +78,7 @@ export default function App() {
   return (
     <>
     <ThemeApplier />
+    <AutorizacaoDono />
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />

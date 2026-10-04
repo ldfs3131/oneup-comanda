@@ -5,13 +5,33 @@ export class ApiError extends Error {
 const TIMEOUT_MS = 15_000;
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
+/**
+ * Ações que só o Dono faz (cancelar item pronto, desconto acima do limite, estorno…): em vez de só recusar,
+ * a tela pede a senha do Dono ali mesmo e refaz a mesma ação com o código de autorização (vale 2 min, uma vez).
+ */
+const CODIGOS_DONO = new Set(['CANCELAR_SO_DONO', 'DESCONTO_ACIMA_LIMITE', 'DESCONTO_FIADO_SO_DONO', 'AUTORIZACAO_DONO']);
+let pedirAutorizacao: ((motivo: string) => Promise<string | null>) | null = null;
+export function registrarAutorizacaoDono(fn: typeof pedirAutorizacao) { pedirAutorizacao = fn; }
+
 async function request<T>(method: string, path: string, body?: unknown, opts: { idem?: string | boolean; headers?: Record<string, string> } = {}): Promise<T> {
+  try {
+    return await requestUmaVez<T>(method, path, body, opts);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403 && e.code && CODIGOS_DONO.has(e.code) && pedirAutorizacao && !opts.headers?.['x-autorizacao-dono']) {
+      const token = await pedirAutorizacao(e.message);
+      if (token) return requestUmaVez<T>(method, path, body, { ...opts, headers: { ...(opts.headers ?? {}), 'x-autorizacao-dono': token } });
+    }
+    throw e;
+  }
+}
+
+async function requestUmaVez<T>(method: string, path: string, body?: unknown, opts: { idem?: string | boolean; headers?: Record<string, string> } = {}): Promise<T> {
   let res: Response;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   const headers: Record<string, string> = { ...(opts.headers ?? {}) };
   if (body !== undefined && !(body instanceof FormData)) headers['content-type'] = 'application/json';
-  if (opts.idem) headers['idempotency-key'] = typeof opts.idem === 'string' ? opts.idem : newKey();
+  if (opts.idem) headers['idempotency-key'] = typeof opts.idem === 'string' ? opts.idem : (opts.idem = newKey());
   try {
     res = await fetch(path, {
       method, credentials: 'same-origin', headers, signal: ctrl.signal,

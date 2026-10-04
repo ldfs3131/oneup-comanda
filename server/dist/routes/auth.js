@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { aparelhos, roles, users, restaurantSettings } from '../db/schema.js';
-import { COOKIE, COOKIE_APARELHO, HASH_FALSO, PIN_BLOQUEIO_MIN, PIN_MAX_ERROS, aparelhoValido, conferirPin, hashPin, lembrarAparelho, checkLoginRate, checkPassword, clearLoginRate, comVagaDeLogin, derrubarSessoesDoAparelho, vincularSessaoAoAparelho, createSession, derrubarSessoes, destroySession, esquecerSessoesDoUsuario, hashPassword, me, registerLoginFailure, requireRole, userFromToken, } from '../auth.js';
+import { COOKIE, COOKIE_APARELHO, HASH_FALSO, PIN_BLOQUEIO_MIN, PIN_MAX_ERROS, aparelhoValido, conferirPin, hashPin, lembrarAparelho, checkLoginRate, checkPassword, clearLoginRate, comVagaDeLogin, criarAutorizacao, derrubarSessoesDoAparelho, vincularSessaoAoAparelho, createSession, derrubarSessoes, destroySession, esquecerSessoesDoUsuario, hashPassword, me, registerLoginFailure, requireRole, userFromToken, } from '../auth.js';
 import { HttpError, bad, conflict, idParam, notFound, parse } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
 import { config } from '../config.js';
@@ -94,6 +94,22 @@ export async function authRoutes(app) {
         reply.setCookie(COOKIE, s.token, { path: '/', httpOnly: true, sameSite: 'lax', secure: config.cookieSecure, expires: s.expiresAt });
         await audit(db, { userId: row.u.id, action: 'auth.login', entityType: 'user', entityId: row.u.id, message: `${row.u.name} entrou com PIN (${ap.nome ?? 'aparelho da equipe'}).` });
         return { user: { id: row.u.id, name: row.u.name, username: row.u.username, role: row.role, oneup: false } };
+    }));
+    // Autorização do Dono no aparelho do caixa (senha do Dono, vale 2 min para uma ação; a sessão do caixa continua)
+    app.post('/api/auth/autorizar', { preHandler: requireRole() }, async (req) => comVagaDeLogin(async () => {
+        const b = parse(z.object({ username: z.string().trim().toLowerCase().min(1).max(60), password: z.string().min(1).max(200) }), req.body);
+        const empId = req.empresa?.id ?? 0;
+        checkLoginRate(empId, req.ip, `autorizar:${b.username}`);
+        const [row] = await db.select({ u: users, role: roles.code }).from(users).innerJoin(roles, eq(roles.id, users.roleId)).where(eq(users.username, b.username)).limit(1);
+        const ok = await checkPassword(b.password, row?.u.passwordHash ?? HASH_FALSO);
+        if (!row || !ok || !row.u.active || row.role !== 'ADMIN' || row.u.oneup) {
+            registerLoginFailure(empId, req.ip, `autorizar:${b.username}`);
+            throw bad('Usuário ou senha do Dono incorretos.');
+        }
+        clearLoginRate(empId, req.ip, `autorizar:${b.username}`);
+        const token = criarAutorizacao(row.u.id, row.u.name, me(req).id);
+        await audit(db, { userId: row.u.id, action: 'auth.autorizar', entityType: 'user', entityId: me(req).id, message: `${row.u.name} autorizou uma ação no aparelho de ${me(req).name}.` });
+        return { token, nome: row.u.name };
     }));
     // Aparelhos da equipe (Dono vê e tira o acesso de um aparelho perdido)
     app.get('/api/aparelhos', { preHandler: requireRole('ADMIN') }, async () => db.select({ id: aparelhos.id, nome: aparelhos.nome, createdAt: aparelhos.createdAt, ultimoUso: aparelhos.ultimoUso, criadoPor: users.name })

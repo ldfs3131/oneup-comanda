@@ -252,12 +252,32 @@ function AlertBar({ board, flash }: { board: Board; flash: number[] }) {
         </Modal>
       )}
       {modal}
-      {reject && (
-        <ReasonModal title="Recusar pedido do QR Code" confirmLabel="Recusar pedido" danger
-          suggestions={['Produto em falta', 'Pedido duplicado', 'Cliente não encontrado']}
-          onClose={() => setReject(null)}
-          onConfirm={(reason) => run(() => api.post(`/api/orders/${reject}/cancel`, { reason }), 'Pedido recusado.')} />
-      )}
+      {reject && <RecusarPedido orderId={reject} onClose={() => setReject(null)} onDone={() => setReject(null)} />}
     </>
+  );
+}
+
+/** O cliente vê só o motivo da lista; o que o caixa escreve fica interno. */
+const MOTIVOS_CLIENTE = [
+  ['FALTA', 'Produto em falta'], ['FECHANDO', 'Cozinha encerrando'], ['DUPLICADO', 'Pedido em duplicidade'], ['BALCAO', 'Fale com o balcão'],
+] as const;
+function RecusarPedido({ orderId, onClose, onDone }: { orderId: number; onClose: () => void; onDone: () => void }) {
+  const [motivo, setMotivo] = useState<(typeof MOTIVOS_CLIENTE)[number][0] | null>(null);
+  const [nota, setNota] = useState('');
+  const { busy, run } = useAction();
+  const rotulo = MOTIVOS_CLIENTE.find(([v]) => v === motivo)?.[1] ?? '';
+  return (
+    <Modal title="Recusar pedido do cardápio digital" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Voltar</button>
+      <button className="btn danger solid" disabled={!motivo || busy} onClick={async () => {
+        if (await run(() => api.post(`/api/orders/${orderId}/cancel`, { reason: nota.trim().length >= 3 ? `${rotulo} — ${nota.trim()}` : rotulo, motivoCliente: motivo, returnStock: false }), 'Pedido recusado.')) onDone();
+      }}>Recusar pedido</button>
+    </>}>
+      <div className="col gap-lg">
+        <div className="field"><span>Motivo que o cliente vai ver *</span>
+          <div className="seg wrap">{MOTIVOS_CLIENTE.map(([v, r]) => <button key={v} className={motivo === v ? 'on' : ''} onClick={() => setMotivo(v)}>{r}</button>)}</div></div>
+        <label className="field"><span>Observação interna (opcional — o cliente NÃO vê)</span><input className="input" value={nota} onChange={(e) => setNota(e.target.value)} maxLength={180} placeholder="Ex.: acabou a batata às 21h" /></label>
+      </div>
+    </Modal>
   );
 }

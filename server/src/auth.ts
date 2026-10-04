@@ -218,3 +218,32 @@ export const PIN_BLOQUEIO_MIN = 5;
 export const pinValido = (p: string) => /^\d{4}$/.test(p);
 export const hashPin = (p: string) => bcrypt.hash(p, 10);
 export const conferirPin = (p: string, h: string) => bcrypt.compare(p, h);
+
+// ---------------------------------------------------------------------------------------------
+// AUTORIZAÇÃO DO DONO NO APARELHO DO CAIXA
+// O Dono digita a senha no próprio tablet do caixa para UMA ação (cancelar item pronto, desconto acima do limite,
+// estorno…). Vira um código de 2 minutos, de uso único, preso à sessão do caixa — a sessão do caixa não muda.
+type Autorizacao = { empresaId: number; donoId: number; donoNome: string; usuarioId: number; ate: number };
+const autorizacoes = new Map<string, Autorizacao>();
+setInterval(() => { const now = Date.now(); for (const [k, a] of autorizacoes) if (a.ate < now) autorizacoes.delete(k); }, 60_000).unref();
+export function criarAutorizacao(donoId: number, donoNome: string, usuarioId: number) {
+  const token = randomBytes(24).toString('hex');
+  autorizacoes.set(token, { empresaId: currentContext()?.empresaId ?? 0, donoId, donoNome, usuarioId, ate: Date.now() + 120_000 });
+  return token;
+}
+/** Dono que autorizou esta requisição (consome o código), ou null. */
+export function autorizadoPeloDono(req: FastifyRequest): { id: number; name: string } | null {
+  const cache = (req as unknown as { _autorizacao?: { id: number; name: string } | null })._autorizacao;
+  if (cache !== undefined) return cache;
+  const h = req.headers['x-autorizacao-dono'];
+  let r: { id: number; name: string } | null = null;
+  if (typeof h === 'string') {
+    const a = autorizacoes.get(h);
+    if (a && a.ate > Date.now() && a.empresaId === (currentContext()?.empresaId ?? 0) && a.usuarioId === req.user?.id) {
+      autorizacoes.delete(h);
+      r = { id: a.donoId, name: a.donoNome };
+    }
+  }
+  (req as unknown as { _autorizacao?: { id: number; name: string } | null })._autorizacao = r;
+  return r;
+}

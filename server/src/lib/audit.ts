@@ -9,11 +9,14 @@ export async function audit(
   await tx.insert(auditLogs).values({
     userId: e.userId ?? null,
     // perfil do usuário no momento da ação
-    userRole: e.userId ? sql`(SELECT r.code::text FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ${e.userId})` : null,
+    // a ONE UP aparece como "Suporte ONE UP" para o Dono (perfil ONEUP e mensagem marcada)
+    userRole: e.userId ? sql`(SELECT CASE WHEN u.oneup THEN 'ONEUP' ELSE r.code::text END FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ${e.userId})` : null,
     action: e.action,
     entityType: e.entityType,
     entityId: e.entityId,
-    message: e.message,
+    message: e.userId
+      ? sql`(SELECT CASE WHEN u.oneup THEN 'Suporte ONE UP · ' ELSE '' END FROM users u WHERE u.id = ${e.userId}) || ${e.message}`
+      : e.message,
     data: e.data as object | undefined,
   });
 }

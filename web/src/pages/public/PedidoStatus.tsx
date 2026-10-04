@@ -5,9 +5,9 @@ import { brl, time } from '../../format';
 import { Spinner } from '../../components/ui';
 import { BrandLogo, usePageTitle } from '../../components/brand';
 
-type Etapa = 'aguardando' | 'confirmado' | 'preparo' | 'pronto' | 'entregue' | 'recusado';
+type Etapa = 'aguardando' | 'confirmado' | 'preparo' | 'pronto' | 'entregue' | 'recusado' | 'cancelado';
 type Pedido = {
-  numero: number; etapa: Etapa; motivo: string | null; cozinha: boolean; totalCents: number;
+  numero: number; etapa: Etapa; motivo: string | null; modo?: 'balcao' | 'local' | 'entrega'; cozinha: boolean; totalCents: number;
   horarios: { enviado: string; confirmado: string | null; preparo: string | null; pronto: string | null; entregue: string | null };
   itens: { nome: string; quantidade: number; opcoes: string[] }[];
 };
@@ -18,7 +18,7 @@ export default function PedidoStatus() {
   const { token = '' } = useParams();
   const { data, error, isLoading } = useQuery({
     queryKey: ['pedido-publico', token], queryFn: () => api.get<Pedido>(`/api/public/pedido/${encodeURIComponent(token)}`),
-    refetchInterval: (q) => (q.state.data && ['entregue', 'recusado'].includes(q.state.data.etapa) ? false : 8000), refetchOnWindowFocus: true, retry: 1,
+    refetchInterval: (q) => (q.state.data && ['entregue', 'recusado', 'cancelado'].includes(q.state.data.etapa) ? false : 8000), refetchOnWindowFocus: true, retry: 1,
   });
   const { data: menu } = useQuery({ queryKey: ['public-menu'], queryFn: () => api.get<{ name: string; config?: Record<string, any> }>('/api/public/menu'), staleTime: 60_000 });
   const logo = <div className="pub-logo-wrap"><BrandLogo className="pub-logo" height={80} logo={menu?.config?.logo ?? null} name={menu?.name} /></div>;
@@ -48,7 +48,7 @@ export default function PedidoStatus() {
     { id: 'aguardando', titulo: 'Aguardando confirmação', quando: data.horarios.enviado, texto: 'O caixa está conferindo o seu pedido.' },
     { id: 'confirmado', titulo: 'Confirmado', quando: data.horarios.confirmado, texto: data.cozinha ? 'Seu pedido entrou na fila da cozinha.' : 'Seu pedido foi confirmado.' },
     ...(data.cozinha ? [{ id: 'preparo' as Etapa, titulo: 'Em preparação', quando: data.horarios.preparo, texto: 'A cozinha começou a preparar.' }] : []),
-    { id: 'pronto', titulo: 'Pronto para retirar', quando: data.horarios.pronto ?? data.horarios.entregue, texto: 'Pode buscar no balcão. 😋' },
+    { id: 'pronto', titulo: data.modo === 'entrega' ? 'Pronto — saindo para entrega' : data.modo === 'local' ? 'Pronto — já vamos levar' : 'Pronto para retirar', quando: data.horarios.pronto ?? data.horarios.entregue, texto: data.modo === 'entrega' ? 'Seu pedido está a caminho.' : data.modo === 'local' ? 'Logo chega até você. 😋' : 'Pode buscar no balcão. 😋' },
   ];
   const ordem: Etapa[] = ['aguardando', 'confirmado', 'preparo', 'pronto', 'entregue'];
   const atual = data.etapa === 'entregue' ? ordem.indexOf('pronto') : ordem.indexOf(data.etapa);
@@ -62,9 +62,9 @@ export default function PedidoStatus() {
             <h2 style={{ margin: 0 }}>Pedido #{data.numero}</h2>
             <span className="num" style={{ fontWeight: 800 }}>{brl(data.totalCents)}</span>
           </div>
-          {data.etapa === 'recusado' ? (
+          {data.etapa === 'recusado' || data.etapa === 'cancelado' ? (
             <div className="problem-box">
-              <b>Pedido não aceito.</b>{data.motivo ? <> Motivo: {data.motivo}</> : null}
+              <b>{data.etapa === 'cancelado' ? 'Pedido cancelado.' : 'Pedido não aceito.'}</b>{data.motivo ? <> {data.motivo}</> : null}
               <div className="small" style={{ marginTop: 6 }}>Se quiser, fale com o caixa ou faça um novo pedido.</div>
             </div>
           ) : (

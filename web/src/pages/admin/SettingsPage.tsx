@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'qrcode';
 import { api } from '../../api';
+import { useAuth } from '../../auth';
 import { OneUpCredit, useSettings } from '../../components/layout';
 import { Modal, MoneyInput, Spinner, Toggle, useAction, useToast } from '../../components/ui';
 import { brl, dateTime } from '../../format';
@@ -72,6 +73,8 @@ export default function SettingsPage() {
       <input className="input cfg-search" placeholder="Buscar configuração (ex.: mesa, desconto, cor)…" value={busca} onChange={(e) => setBusca(e.target.value)} />
 
       {!busca && <nav className="cfg-nav">{tela.secoes.map((s) => <a key={s.id} href={`#sec-${s.id}`}>{s.titulo}</a>)}<a href="#sec-pagamentos">Formas de pagamento</a></nav>}
+
+      {!busca && <SuporteOneUp />}
 
       {!busca && <Operacao busy={busy} run={run} isOpen={settings.restaurant.isOpen} qrLigado={valorDe('cardapio_digital_ligado') === true} />}
 
@@ -357,5 +360,33 @@ function Historico({ chave, onClose }: { chave: string | null; onClose: () => vo
         </table>
       )}
     </Modal>
+  );
+}
+
+/** "Permitir suporte": a ONE UP só vê nome e telefone dos clientes quando o Dono libera (e expira sozinho). */
+function SuporteOneUp() {
+  const { user } = useAuth();
+  const { data, refetch } = useQuery({ queryKey: ['suporte'], queryFn: () => api.get<{ ativo: boolean; ate: string | null }>('/api/suporte'), refetchInterval: 60_000 });
+  const { busy, run } = useAction();
+  if (!data) return null;
+  const ate = data.ate ? new Date(data.ate) : null;
+  if (user?.oneup) return (
+    <div className={`info-box small${data.ativo ? '' : ''}`}>
+      {data.ativo ? <>🔓 O Dono permitiu o suporte até <b>{dateTime(data.ate)}</b>: dados de clientes visíveis.</> : <>🔒 Dados de clientes (nome e telefone) aparecem mascarados para a ONE UP. Para ver, o Dono libera aqui em Configurações → Suporte da ONE UP.</>}
+    </div>
+  );
+  return (
+    <section className="card" id="sec-suporte">
+      <div className="panel-title">Suporte da ONE UP</div>
+      <div className="small muted" style={{ marginBottom: 8 }}>Por padrão a ONE UP não vê nome e telefone dos seus clientes. Quando precisar de ajuda com uma conta, libere por um tempo; a permissão acaba sozinha e tudo fica registrado no Histórico.</div>
+      {data.ativo && ate
+        ? <div className="row wrap" style={{ gap: 8, alignItems: 'center' }}><span>🔓 Liberado até <b>{dateTime(data.ate)}</b></span>
+            <button className="btn sm danger" disabled={busy} onClick={() => run(async () => { await api.post('/api/suporte/encerrar'); await refetch(); }, 'Suporte encerrado.')}>Encerrar agora</button></div>
+        : <div className="row wrap" style={{ gap: 8 }}>
+            {([[30, '30 minutos'], [120, '2 horas'], [1440, '24 horas']] as const).map(([m, r]) => (
+              <button key={m} className="btn sm" disabled={busy} onClick={() => run(async () => { await api.post('/api/suporte/liberar', { minutos: m }); await refetch(); }, `Suporte liberado por ${r}.`)}>Permitir por {r}</button>
+            ))}
+          </div>}
+    </section>
   );
 }

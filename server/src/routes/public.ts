@@ -48,6 +48,15 @@ function registrar(chave: string) {
 }
 const LIMITE_APARELHO = { max: 6, janela: 10 * 60_000 };
 const LIMITE_IP = { max: 150, janela: 60_000 };
+// pedidos ENVIADOS por internet (o aparelho é informado pelo próprio cliente, então não basta). Todos os clientes no
+// Wi-Fi do restaurante saem pelo mesmo IP: 60 a cada 10 min cabe uma sexta cheia e ainda segura um robô.
+const LIMITE_IP_ENVIADOS = { max: 60, janela: 10 * 60_000 };
+// fila do caixa: com 40 pedidos aguardando confirmação, novos esperam (protege a sexta à noite de robôs)
+const MAX_AGUARDANDO = 40;
+const MOTIVO_CLIENTE: Record<string, string> = {
+  FALTA: 'Um produto do pedido acabou.', FECHANDO: 'A cozinha está encerrando os pedidos.',
+  DUPLICADO: 'O pedido chegou em duplicidade.', BALCAO: 'Fale com o balcão para combinar.',
+};
 
 // WhatsApp brasileiro normalizado: fica em lib/telefone.ts (o caixa usa a mesma regra para identificar o cliente)
 export { normalizarWhatsapp };
@@ -91,9 +100,13 @@ export async function publicRoutes(app: FastifyInstance) {
     const ap = req.headers['x-aparelho'];
     const chaveAparelho = `ap:${emp}:${typeof ap === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(ap) ? ap : req.ip}`;
     if (excedeu(chaveAparelho, LIMITE_APARELHO.max, LIMITE_APARELHO.janela)) throw new HttpError(429, 'Você já enviou vários pedidos agora há pouco. Aguarde a confirmação ou chame um atendente.');
+    const chaveEnviados = `env:${emp}:${req.ip}`;
+    if (excedeu(chaveEnviados, LIMITE_IP_ENVIADOS.max, LIMITE_IP_ENVIADOS.janela)) throw new HttpError(429, 'Muitos pedidos saindo desta rede agora. Aguarde alguns minutos ou peça no balcão.');
+    const [{ n }] = (await db.execute(sql`SELECT count(*)::int AS n FROM orders WHERE status = 'AWAITING_CONFIRMATION'`)).rows as { n: number }[];
+    if (Number(n) >= MAX_AGUARDANDO) throw new HttpError(429, 'O caixa está com muitos pedidos para confirmar. Tente de novo em alguns minutos ou peça no balcão.');
     return idempotent(req, 'public.order', async () => {
       const r = await criarPedidoPublico(req);
-      registrar(chaveAparelho);
+      registrar(chaveAparelho); registrar(chaveEnviados);
       return r;
     });
   });
@@ -167,12 +180,15 @@ export async function publicRoutes(app: FastifyInstance) {
     }
     const itens = await db.select({ nome: orderItems.productName, quantidade: orderItems.quantity, preco: orderItems.unitPriceCents, opcoes: orderItems.optionsSnapshot, status: orderItems.status })
       .from(orderItems).where(eq(orderItems.orderId, o.id));
+    // o cliente vê só o motivo da lista (o texto que o caixa escreveu é interno e nunca sai daqui)
     let motivo: string | null = null;
     if (o.status === 'CANCELLED') {
-      const [c] = await db.select({ reason: cancellations.reason }).from(cancellations).where(and(eq(cancellations.orderId, o.id), eq(cancellations.target, 'ORDER'))).orderBy(sql`id DESC`).limit(1);
-      motivo = c?.reason ?? null;
+      const [c] = await db.select({ m: cancellations.motivoCliente }).from(cancellations).where(and(eq(cancellations.orderId, o.id), eq(cancellations.target, 'ORDER'))).orderBy(sql`id DESC`).limit(1);
+      motivo = (c?.m && MOTIVO_CLIENTE[c.m]) || 'Fale com o balcão para saber mais.';
     }
-    const etapa = o.status === 'CANCELLED' ? 'recusado'
+    const [conta] = (await db.execute(sql`SELECT a.origin, a.note FROM accounts a JOIN orders o ON o.account_id = a.id WHERE o.id = ${o.id}`)).rows as { origin: string; note: string | null }[];
+    const modo = conta?.origin === 'DELIVERY' ? 'entrega' : /^Consumo no local/.test(conta?.note ?? '') ? 'local' : 'balcao';
+    const etapa = o.status === 'CANCELLED' ? (o.confirmedAt ? 'cancelado' : 'recusado')
       : o.status === 'AWAITING_CONFIRMATION' ? 'aguardando'
       : o.status === 'DELIVERED' ? 'entregue'
       : o.status === 'READY' ? 'pronto'
@@ -181,7 +197,7 @@ export async function publicRoutes(app: FastifyInstance) {
     const ativos = itens.filter((i) => i.status === 'ACTIVE' || o.status === 'CANCELLED');
     reply.header('Cache-Control', 'no-store');
     return {
-      numero: o.number, etapa, motivo, cozinha: o.goesToKitchen,
+      numero: o.number, etapa, motivo, modo, cozinha: o.goesToKitchen,
       horarios: { enviado: o.createdAt, confirmado: o.confirmedAt, preparo: o.startedAt, pronto: o.readyAt, entregue: o.deliveredAt },
       itens: ativos.map((i) => ({ nome: i.nome, quantidade: i.quantidade, opcoes: (i.opcoes ?? []).map((x) => x.name) })),
       totalCents: ativos.reduce((t, i) => t + i.preco * i.quantidade, 0),

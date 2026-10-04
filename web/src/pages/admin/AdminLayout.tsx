@@ -47,7 +47,7 @@ export default function AdminLayout() {
           {/* Leitura dos números: serviço da ONE UP (o Dono não vê) */}
           {user?.oneup && <>
             <div className="nav-sec">ONE UP</div>
-            {settings?.insightsEnabled && <NavLink to="/admin/insights">💡 Insights</NavLink>}
+            <NavLink to="/admin/oneup/analise">📊 Central de Análise</NavLink>
             <NavLink to="/admin/oneup/base">📈 Base de comparação</NavLink>
             <NavLink to="/admin/tempo">⏱ Tempo de preparo</NavLink>
           </>}

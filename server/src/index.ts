@@ -120,11 +120,16 @@ export async function buildApp() {
       description: tipo === 'cliente' ? `Cardápio e pedidos de ${nome}` : `${nome}: caixa, cozinha e gestão (${config.productName})`,
       start_url: tipo === 'cliente' ? '/cardapio?origem=app' : '/?origem=app', scope: tipo === 'cliente' ? '/cardapio' : '/',
       display: 'standalone', orientation: 'any', background_color: fundo, theme_color: fundo,
-      icons: icone && dim
-        ? [{ src: icone, sizes: `${dim.w}x${dim.h}`, type: /\.png$/i.test(icone) ? 'image/png' : /\.webp$/i.test(icone) ? 'image/webp' : 'image/jpeg', purpose: 'any' },
-           { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }]
-        : [{ src: '/comanda-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-           { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }],
+      // "any" e "maskable" em arquivos SEPARADOS: o maskable tem o desenho a ~70% sobre o fundo azul cheio, para o
+      // Android recortar em círculo/gota sem cortar o desenho (nunca "any maskable" no mesmo arquivo)
+      icons: [
+        ...(icone && dim
+          ? [{ src: icone, sizes: `${dim.w}x${dim.h}`, type: /\.png$/i.test(icone) ? 'image/png' : /\.webp$/i.test(icone) ? 'image/webp' : 'image/jpeg', purpose: 'any' }]
+          : [{ src: '/comanda-icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+             { src: '/comanda-icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' }]),
+        { src: '/comanda-icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+        { src: '/comanda-icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
     };
   };
   app.get('/manifest.webmanifest', manifesto('equipe'));

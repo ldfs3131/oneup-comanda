@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, chaveDoEnvio, idAparelho, type ChaveEnvio } from '../../api';
 import { brl } from '../../format';
-import { Modal, Spinner } from '../../components/ui';
+import { Modal, Seg, Spinner } from '../../components/ui';
 import { BrandLogo, usePageTitle } from '../../components/brand';
 import { BotaoBaixarApp } from '../../components/instalar';
 
@@ -82,7 +82,7 @@ export default function PublicMenu() {
         {cfg.boas_vindas && <p className="pub-welcome">{cfg.boas_vindas}</p>}
         {ultimo && <a className="btn sm ghost" href={`/cardapio/pedido/${ultimo}`} onClick={(e) => { e.preventDefault(); nav(`/cardapio/pedido/${ultimo}`); }}>📍 Acompanhar meu último pedido</a>}
         <div className={`pub-app${new URLSearchParams(location.search).has('instalar') ? ' destaque' : ''}`}><BotaoBaixarApp para="cliente" className="btn sm" texto="Baixar o app" /></div>
-        <nav className="pub-cats">{data.categories!.map((c) => <a key={c.id} href={`#cat-${c.id}`}>{c.name}</a>)}</nav>
+        <nav className="pub-cats" aria-label="Categorias do cardápio">{data.categories!.map((c) => <a key={c.id} href={`#cat-${c.id}`}>{c.name}</a>)}</nav>
       </header>
       <main className="pub-main">
         {data.categories!.map((c) => (
@@ -125,7 +125,7 @@ function PubOptions({ p, onClose, onAdd }: { p: PProduct; onClose: () => void; o
   return (
     <Modal title={p.name} onClose={onClose} footer={<>
       <div className="stepper lg" style={{ marginRight: 'auto' }}>
-        <button onClick={() => setQ(Math.max(1, q - 1))}>−</button><span className="num">{q}</span><button onClick={() => setQ(Math.min(20, q + 1))}>+</button>
+        <button type="button" aria-label="Diminuir quantidade" onClick={() => setQ(Math.max(1, q - 1))}>−</button><span className="num" aria-live="polite" aria-label={`Quantidade: ${q}`}>{q}</span><button type="button" aria-label="Aumentar quantidade" onClick={() => setQ(Math.min(20, q + 1))}>+</button>
       </div>
       <button className="btn go lg" disabled={missing} onClick={() => onAdd(ids, q)}>Adicionar · {brl(unit * q)}</button>
     </>}>
@@ -136,7 +136,7 @@ function PubOptions({ p, onClose, onAdd }: { p: PProduct; onClose: () => void; o
             <div className="opt-grid">
               {g.options.map((o) => {
                 const on = sel[g.id]?.includes(o.id);
-                return <button key={o.id} className={`opt-btn${on ? ' on' : ''}`} onClick={() => setSel((s) => ({ ...s, [g.id]: g.multiple ? (on ? s[g.id].filter((x) => x !== o.id) : [...(s[g.id] ?? []), o.id]) : on ? [] : [o.id] }))}>
+                return <button key={o.id} type="button" className={`opt-btn${on ? ' on' : ''}`} aria-pressed={!!on} onClick={() => setSel((s) => ({ ...s, [g.id]: g.multiple ? (on ? s[g.id].filter((x) => x !== o.id) : [...(s[g.id] ?? []), o.id]) : on ? [] : [o.id] }))}>
                   <span>{o.name}</span><span className="small">{o.priceDeltaCents ? `+ ${brl(o.priceDeltaCents)}` : ''}</span>
                 </button>;
               })}
@@ -237,18 +237,29 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
       <div className="col gap-lg">
         <div>
           {cart.map((l) => (
-            <div key={l.key} className="kv">
-              <span>{l.quantity}× {l.product.name}{l.labels.length > 0 && <span className="small muted"> · {l.labels.join(', ')}</span>}</span>
-              <span className="row"><span className="v">{brl(l.unit * l.quantity)}</span><button className="btn sm ghost icon" aria-label="Tirar do pedido" onClick={() => setCart((c) => c.filter((x) => x.key !== l.key))}>✕</button></span>
+            <div key={l.key} className="pub-cart-line">
+              <span className="pub-cart-name">{l.product.name}{l.labels.length > 0 && <span className="small muted"> · {l.labels.join(', ')}</span>}</span>
+              {/* − na quantidade 1 tira o item do pedido */}
+              <span className="stepper qty" role="group" aria-label={`Quantidade de ${l.product.name}`}>
+                <button type="button" aria-label={l.quantity <= 1 ? `Tirar ${l.product.name} do pedido` : `Diminuir ${l.product.name}`}
+                  onClick={() => setCart((c) => (l.quantity <= 1 ? c.filter((x) => x.key !== l.key) : c.map((x) => (x.key === l.key ? { ...x, quantity: x.quantity - 1 } : x))))}>
+                  {l.quantity <= 1 ? <span aria-hidden="true" style={{ fontSize: '1rem' }}>🗑</span> : '−'}
+                </button>
+                <span className="num" aria-live="polite">{l.quantity}</span>
+                <button type="button" aria-label={`Aumentar ${l.product.name}`} disabled={l.quantity >= 20}
+                  onClick={() => setCart((c) => c.map((x) => (x.key === l.key ? { ...x, quantity: Math.min(20, x.quantity + 1) } : x)))}>+</button>
+              </span>
+              <span className="pub-cart-price">{brl(l.unit * l.quantity)}</span>
             </div>
           ))}
+          {cart.length === 0 && <div className="muted">Seu pedido está vazio. Feche e toque nos itens do cardápio.</div>}
         </div>
         <label className="field"><span>Seu nome *</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoComplete="name" />
           {tentou && !nomeOk && <div className="small cancel-text">Informe o seu nome.</div>}</label>
         <label className="field"><span>Seu WhatsApp *</span><input className="input" inputMode="tel" autoComplete="tel-national" value={zap} onChange={(e) => setZap(mascaraZap(e.target.value))} placeholder="(11) 91234-5678" />
           {tentou && !zapOk && <div className="small cancel-text">Informe o WhatsApp com DDD, por exemplo (11) 91234-5678.</div>}
           <div className="small faint">Usado para este pedido e para o restaurante reconhecer você nos próximos. Sem ofertas, a não ser que você marque abaixo.</div></label>
-        <div className="seg">{modes.map((m) => <button key={m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)}>{MODO_LABEL[m]}</button>)}</div>
+        <Seg value={mode} onChange={setMode} label="Como você quer receber" options={modes.map((m) => ({ value: m, label: MODO_LABEL[m] }))} />
         <label className="field"><span>{mode === 'ENTREGA' ? 'Endereço / casa *' : 'Onde você está? (opcional)'}</span>
           <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={mode === 'ENTREGA' ? 'Ex.: casa 123' : 'Ex.: perto da piscina'} maxLength={120} />
           {tentou && mode === 'ENTREGA' && location.trim().length <= 2 && <div className="small cancel-text">Informe o endereço da entrega.</div>}</label>

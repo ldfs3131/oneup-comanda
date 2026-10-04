@@ -6,12 +6,21 @@ import type { Settings } from '../types';
 
 const useSettingsLite = () => useQuery({ queryKey: ['settings'], queryFn: () => api.get<Settings>('/api/settings'), staleTime: 30_000 });
 
-/** Tinta legível sobre a cor de destaque (texto escuro em cor clara e vice-versa). */
-function inkFor(hex: string) {
+/** Luminância relativa (WCAG 2) de uma cor #rrggbb. */
+function luminancia(hex: string) {
   const n = parseInt(hex.slice(1), 16);
   const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return lum > 0.35 ? '#1a1508' : '#ffffff';
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+/** Razão de contraste WCAG entre duas cores #rrggbb (1 a 21; texto normal pede 4,5). */
+export function contraste(a: string, b: string) {
+  const [x, y] = [luminancia(a), luminancia(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+const TINTAS = ['#1a1508', '#ffffff'];
+/** Tinta legível sobre a cor de destaque: a que der MAIOR contraste (escura ou branca), sem limiar fixo. */
+export function inkFor(hex: string) {
+  return TINTAS.reduce((melhor, t) => (contraste(t, hex) > contraste(melhor, hex) ? t : melhor), TINTAS[0]);
 }
 
 /** Aplica o tema (escuro/claro/automático) e a cor de destaque escolhidos pelo Dono em todas as telas. */

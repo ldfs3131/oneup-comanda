@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../auth';
 import { useRealtime } from '../realtime';
@@ -68,7 +68,7 @@ export function EstablishmentChip({ hasRegister }: { hasRegister: boolean }) {
 export function SoundToggle() {
   const [m, setM] = useState(isMuted());
   useEffect(() => onMuteChange(setM), []);
-  return <button className="btn icon ghost" title={m ? 'Som desligado — toque para ligar' : 'Som ligado — toque para silenciar'} aria-label="Som" onClick={() => setMuted(!m)}>{m ? '🔇' : '🔔'}</button>;
+  return <button className="btn icon ghost" title={m ? 'Som desligado — toque para ligar' : 'Som ligado — toque para silenciar'} aria-label="Som dos alertas" aria-pressed={!m} onClick={() => setMuted(!m)}>{m ? '🔇' : '🔔'}</button>;
 }
 
 /** Rodapé do produto: logotipo ONE UP Comanda + versão (desenvolvido pela ONE UP). */
@@ -131,10 +131,41 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function TopNav({ items }: { items: { to: string; label: ReactNode; end?: boolean }[] }) {
+/**
+ * Abas do topo (caixa). No celular elas não cabem: rolam para o lado, com esmaecido e seta na borda mostrando que há
+ * mais abas; a aba aberta é trazida para a vista.
+ */
+export function TopNav({ items, label = 'Navegação' }: { items: { to: string; label: ReactNode; end?: boolean }[]; label?: string }) {
+  const ref = useRef<HTMLElement>(null);
+  const [mais, setMais] = useState({ esq: false, dir: false });
+  const loc = useLocation();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const medir = () => {
+      const esq = el.scrollLeft > 2;
+      const dir = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+      setMais((m) => (m.esq === esq && m.dir === dir ? m : { esq, dir }));
+    };
+    medir();
+    el.addEventListener('scroll', medir, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(medir) : null;
+    ro?.observe(el);
+    window.addEventListener('resize', medir);
+    return () => { el.removeEventListener('scroll', medir); ro?.disconnect(); window.removeEventListener('resize', medir); };
+  }, [items.length]);
+  useEffect(() => {
+    const ativo = ref.current?.querySelector<HTMLElement>('a.active');
+    if (ativo && ref.current && ref.current.scrollWidth > ref.current.clientWidth) ativo.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [loc.pathname]);
+  const rolar = (lado: 1 | -1) => ref.current?.scrollBy({ left: lado * Math.max(120, ref.current.clientWidth * 0.7), behavior: 'smooth' });
   return (
-    <nav className="topnav">
-      {items.map((i) => <NavLink key={i.to} to={i.to} end={i.end}>{i.label}</NavLink>)}
-    </nav>
+    <div className={`topnav-wrap${mais.esq ? ' mais-esq' : ''}${mais.dir ? ' mais-dir' : ''}`}>
+      <button type="button" className="topnav-seta esq" aria-hidden="true" tabIndex={-1} onClick={() => rolar(-1)}>‹</button>
+      <nav className="topnav" ref={ref} aria-label={label}>
+        {items.map((i) => <NavLink key={i.to} to={i.to} end={i.end}>{i.label}</NavLink>)}
+      </nav>
+      <button type="button" className="topnav-seta dir" aria-hidden="true" tabIndex={-1} onClick={() => rolar(1)}>›</button>
+    </div>
   );
 }

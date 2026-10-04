@@ -92,10 +92,10 @@ export default function CashierLayout() {
   return (
     <div className="app">
       <Banners />
-      {!soundOn && <div className="banner sound" onClick={() => unlockAudio()}>🔇 Toque aqui para ativar o som dos alertas de pedido pronto</div>}
+      {!soundOn && <div className="banner sound" role="button" tabIndex={0} onClick={() => unlockAudio()} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') unlockAudio(); }}>🔇 Toque aqui para ativar o som dos alertas de pedido pronto</div>}
       <header className="topbar">
         <Logo to="/caixa" />
-        <TopNav items={[
+        <TopNav label="Abas do caixa" items={[
           { to: '/caixa', label: 'Contas', end: true },
           { to: '/caixa/pedidos', label: 'Pedidos do dia' },
           { to: '/caixa/receber', label: 'A receber' },

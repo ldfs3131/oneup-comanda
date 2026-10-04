@@ -21,7 +21,7 @@ export default function AdminLayout() {
       {user?.oneup && <LembreteBackup />}
       <header className="topbar">
         <Logo to="/admin" />
-        <div className="grow hide-mobile" style={{ fontWeight: 700, color: 'var(--muted)' }}>Painel do Dono</div>
+        <div className="grow hide-mobile" style={{ fontWeight: 700, color: 'var(--muted)' }}>{user?.oneup ? 'Painel · acesso ONE UP' : 'Painel do Dono'}</div>
         <EstablishmentChip hasRegister />
         <SoundToggle />
         <UserMenu />

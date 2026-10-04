@@ -7,11 +7,30 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 | 0. Auditoria e prompt mestre | ✅ 01/10 | `docs/ONE-UP-AUDITORIA.md`, `docs/PROMPT-MESTRE-ONE-UP.md` |
 | 1. ONE Base multi-empresa | ✅ 01/10 | 124 e2e + 30 insights + demo + **145 de vazamento** |
 | 2. Personalização pelo Dono | ✅ 01/10 | **54 de personalização** + telas no navegador (computador, tablet e celular) |
-| 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ✅ 04/10 (3.2.0) · falta o interruptor "Permitir suporte" (ONE UP só vê dados de clientes com o Dono liberando) | **67 da Leva 1** + às cegas no e2e |
+| 3. Perfis por pessoa, PIN, Dono × Admin ONE UP, fechamento às cegas total | ✅ 04/10 (3.3.0, com "Permitir suporte") | **67 da Leva 1** + às cegas no e2e |
 | 4. Ficha 5.3–5.10 (R3 Leva 1 restante) | ✅ 04/10 (3.2.0) | suíte `leva1` |
-| 5. Command Center fase 1 + Financeiro ONE UP + modo suporte | pendente | |
+| 5. Command Center fase 1 + Financeiro ONE UP + modo suporte | ✅ 04/10 (3.3.0) | suítes `plataforma`, `analise`, `auditoria` |
 | 6. Migração do Happy Alpha (paralelo e virada) | pendente | |
-| 7. Inteligência, Raio-X, Recuperador | pendente | |
+| 7. Inteligência, Raio-X, Recuperador | 🟡 3.3.0 sem IA (Central de Análise, Recuperação de vendas) | suítes `analise`, `crm` |
+
+## Versão 3.3.0 (04/10) — versão do Happy Alpha (decisões do comitê)
+
+- **Dono:** começa em Pedidos; Painel do dia sem ranking, movimento por hora e tempo de cozinha (só ONE UP);
+  Ritmo do mês só ONE UP. Trava do Dono em 2 minutos (cancelar com comida pronta, desconto acima do limite, fiado).
+- **Permitir suporte:** ONE UP vê telefones mascarados e nomes em iniciais até o Dono liberar 30 min, 2 h ou 24 h;
+  toda ação da ONE UP aparece na auditoria como "Suporte ONE UP".
+- **Caixa:** estornar pagamento (vira sangria se o dinheiro era de caixa fechado), trocar forma de pagamento,
+  pré-conta, recusar pedido com motivo que o cliente entende, caixa só para receber.
+- **Clientes e LGPD:** um cliente por telefone, juntar duplicados, exportar, apagar (anonimizar), parar ofertas,
+  retenção de 24 meses, página /privacidade, acompanhamento expira em 48 h.
+- **ONE UP:** Plataforma (licença por restaurante), Central de Análise, Recuperação de vendas (só com o serviço ligado),
+  base de comparação. Cobrança continua sempre manual (wa.me).
+- **Proteção:** 60 pedidos por IP a cada 10 min (Wi-Fi do restaurante é compartilhado); máximo de 40 aguardando.
+- **Servidor:** backup externo criptografado no Google Drive da ONE UP (`oneup backup-externo configurar`),
+  alertas por WhatsApp/e-mail (`oneup alertas configurar`), vigia a cada 5 min, `oneup versao`.
+- **Adiado pelo comitê:** virada do dia às 05:00 (só se o restaurante fechar depois da meia-noite); deploy por releases;
+  textos jurídicos de contrato.
+- Testes: 16 suítes, TUDO OK (auditoria 30, plataforma 87, análise 86, crm 114, caixa 38, clientes 64).
 
 ## Versão 3.2.1 (04/10) — correções da auditoria do comitê
 

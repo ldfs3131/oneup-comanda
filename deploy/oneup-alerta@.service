@@ -1,0 +1,7 @@
+[Unit]
+Description=ONE UP Comanda — aviso de falha do serviço %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/oneup alerta-falha %i
+TimeoutStartSec=5min

@@ -1,0 +1,11 @@
+[Unit]
+Description=ONE UP Comanda — vigia de hora em hora
+
+[Timer]
+OnBootSec=10min
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

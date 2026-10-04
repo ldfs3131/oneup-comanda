@@ -52,7 +52,10 @@ ONEUP_SO_FUNCOES=1 . "$APP/deploy/oneup"
 # senhas sem caracteres que confundem (0/O, 1/l/I); sem pipe que se interrompe (seguro com pipefail)
 senha() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'); echo "${s:0:${1:-24}}"; }
 pin() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc '0-9'); echo "${s:0:${1:-6}}"; }
-porta_ocupada() { ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q .; }
+# porta em uso agora OU reservada por outro sistema (proxy do Nginx, PM2), mesmo que ele esteja desligado neste momento
+porta_reservada() { grep -RhoE --exclude="zz-oneup*" "(127\.0\.0\.1|localhost):[0-9]+" /etc/nginx/sites-enabled /etc/nginx/conf.d 2>/dev/null | grep -qE ":$1\$"; }
+porta_pm2() { command -v pm2 >/dev/null 2>&1 && pm2 jlist 2>/dev/null | grep -qE "\"PORT\":\"?$1\"?[,}]"; }
+porta_ocupada() { ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q . || porta_reservada "$1" || porta_pm2 "$1"; }
 export DEBIAN_FRONTEND=noninteractive
 
 # Servidor web: o que já existe manda. Nginx instalado (ou alguém já usando a porta 80/443) = modo Nginx.

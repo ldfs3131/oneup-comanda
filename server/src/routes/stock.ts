@@ -48,11 +48,21 @@ export async function stockRoutes(app: FastifyInstance) {
     if (diasDeDados < 14) return { suficiente: false, diasDeDados, diasMinimos: 14, diasCobertura: dias, itens: [] };
     const janela = Math.min(30, diasDeDados);
     const rows = (await db.execute(sql`
-      SELECT p.id, p.name, p.stock_qty AS "stockQty",
-        COALESCE((SELECT SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id
-                  WHERE oi.product_id = p.id AND oi.status = 'ACTIVE' AND o.status NOT IN ('CANCELLED','AWAITING_CONFIRMATION')
-                    AND o.created_at >= now() - make_interval(days => ${janela})), 0)::int AS vendidos
-      FROM products p WHERE p.track_stock AND p.active ORDER BY p.name`)).rows as { id: number; name: string; stockQty: number; vendidos: number }[];
+      SELECT p.id, p.name, p.stock_qty AS "stockQty", COALESCE(v.qtd, 0)::int AS vendidos
+      FROM products p
+      LEFT JOIN (
+        -- vendas da janela somadas por produto numa passada só (antes: uma subconsulta por produto, que lia o histórico
+        -- inteiro de cada produto). Parte dos pedidos da janela (índice de data) e busca os itens de cada pedido pelo
+        -- índice do pedido; o OFFSET 0 impede o PostgreSQL de trocar isso por uma leitura de todos os itens.
+        SELECT oi.product_id, SUM(oi.quantity) AS qtd
+        FROM orders o
+        CROSS JOIN LATERAL (SELECT product_id, quantity FROM order_items
+                            WHERE order_id = o.id AND status = 'ACTIVE' AND product_id IS NOT NULL OFFSET 0) oi
+        WHERE o.created_at >= now() - make_interval(days => ${janela})
+          AND o.status NOT IN ('CANCELLED','AWAITING_CONFIRMATION')
+        GROUP BY oi.product_id
+      ) v ON v.product_id = p.id
+      WHERE p.track_stock AND p.active ORDER BY p.name`)).rows as { id: number; name: string; stockQty: number; vendidos: number }[];
     const itens = rows.map((r) => {
       const media = r.vendidos / janela;
       const precisa = Math.ceil(media * dias);

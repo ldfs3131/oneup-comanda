@@ -96,7 +96,7 @@ export async function accountRoutes(app: FastifyInstance) {
   });
 
   // Pedidos do dia (desde a abertura do caixa atual; sem caixa aberto: desde a meia-noite)
-  app.get('/api/orders/today', ops, async () => {
+  app.get('/api/orders/today', { preHandler: [requireRole('CAIXA'), respostaCompartilhada('pedidos-hoje', 'dados', 5000)] }, async () => {
     const reg = await currentRegister(db);
     const since = reg ? sql`${reg.openedAt}::timestamptz` : sql`date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`;
     const rows = (await db.execute(sql`
@@ -109,16 +109,38 @@ export async function accountRoutes(app: FastifyInstance) {
       FROM orders o JOIN accounts a ON a.id = o.account_id LEFT JOIN users u ON u.id = o.created_by
       WHERE o.created_at >= ${since}
       ORDER BY o.id DESC LIMIT 500`)).rows as any[];
-    // situação por pedido (pago/parcial/pendente) calculada por conta
-    const accIds = [...new Set(rows.map((r) => r.accountId))];
+    // situação por pedido (pago/parcial/pendente) calculada por conta — mesma regra de accountTotals + allocateOrders,
+    // mas em 2 consultas agrupadas para todas as contas do dia (antes eram 2 consultas POR conta).
+    const accIds = [...new Set(rows.map((r) => Number(r.accountId)))];
     const situation = new Map<number, string>();
-    for (const accId of accIds) {
-      const t = await accountTotals(db, accId);
-      const accOrders = (await db.execute(sql`
-        SELECT o.id, o.status, COALESCE((SELECT SUM(unit_price_cents*quantity) FROM order_items WHERE order_id = o.id AND status='ACTIVE'),0)::int AS total
-        FROM orders o WHERE o.account_id = ${accId} ORDER BY o.id`)).rows as any[];
-      const alloc = allocateOrders(accOrders.map((o) => ({ id: o.id, status: o.status, totalCents: Number(o.total) })), t.discounts, t.paid);
-      for (const [oid, v] of alloc) situation.set(oid, v.situation);
+    if (accIds.length) {
+      const ids = `{${accIds.join(',')}}`;
+      // descontos e pagamentos (não estornados) somados por conta
+      const totais = (await db.execute(sql`
+        SELECT 'd' AS k, account_id AS "accountId", SUM(amount_cents) AS v FROM discounts
+          WHERE account_id = ANY(${ids}::int[]) GROUP BY account_id
+        UNION ALL
+        SELECT 'p', account_id, SUM(amount_cents) FROM payments
+          WHERE account_id = ANY(${ids}::int[]) AND reversed_at IS NULL GROUP BY account_id`)).rows as { k: string; accountId: number; v: string }[];
+      const descontos = new Map<number, number>(), pagos = new Map<number, number>();
+      for (const t of totais) (t.k === 'd' ? descontos : pagos).set(Number(t.accountId), Number(t.v));
+      // todos os pedidos dessas contas com o total dos itens ativos, em ordem de conta e de pedido
+      const pedidos = (await db.execute(sql`
+        SELECT o.id, o.account_id AS "accountId", o.status,
+               COALESCE((SELECT SUM(unit_price_cents * quantity) FROM order_items WHERE order_id = o.id AND status = 'ACTIVE'), 0)::int AS total
+        FROM orders o
+        WHERE o.account_id = ANY(${ids}::int[])
+        ORDER BY o.account_id, o.id`)).rows as { id: number; accountId: number; status: string; total: number }[];
+      const porConta = new Map<number, { id: number; status: string; totalCents: number }[]>();
+      for (const o of pedidos) {
+        const acc = Number(o.accountId);
+        if (!porConta.has(acc)) porConta.set(acc, []);
+        porConta.get(acc)!.push({ id: o.id, status: o.status, totalCents: Number(o.total) });
+      }
+      for (const accId of accIds) {
+        const alloc = allocateOrders(porConta.get(accId) ?? [], descontos.get(accId) ?? 0, pagos.get(accId) ?? 0);
+        for (const [oid, v] of alloc) situation.set(oid, v.situation);
+      }
     }
     return rows.map((r) => ({ ...r, situation: situation.get(r.id) ?? '—' }));
   });

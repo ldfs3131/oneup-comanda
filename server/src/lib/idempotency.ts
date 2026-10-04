@@ -1,7 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 import { eq, lt } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { idempotencyKeys } from '../db/schema.js';
+import { db, runAsEmpresa, runAsSystem } from '../db/index.js';
+import { empresas, idempotencyKeys } from '../db/schema.js';
 import { HttpError } from './http.js';
 
 /**
@@ -33,7 +33,20 @@ export async function idempotent<T>(req: FastifyRequest, route: string, fn: () =
   }
 }
 
-/** Limpeza de chaves antigas (roda na inicialização). */
+/** Limpeza de chaves antigas da empresa do contexto atual (roda na inicialização e uma vez por dia). */
 export async function cleanupIdempotency() {
   await db.delete(idempotencyKeys).where(lt(idempotencyKeys.createdAt, new Date(Date.now() - 2 * 86400_000)));
+}
+
+/** Limpeza diária, empresa por empresa (servidor que fica semanas no ar sem reiniciar não acumula chaves). */
+export function iniciarLimpezaIdempotency(intervaloMs = 24 * 3600_000) {
+  const rodar = async () => {
+    try {
+      const lista = await runAsSystem(() => db.select({ id: empresas.id, status: empresas.status }).from(empresas));
+      for (const e of lista.filter((x) => x.status !== 'CANCELADA')) {
+        await runAsEmpresa(e.id, cleanupIdempotency).catch((err) => console.warn(`  Limpeza de chaves de repetição (empresa ${e.id}): ${(err as Error).message}`));
+      }
+    } catch (err) { console.warn('  Limpeza de chaves de repetição: ' + (err as Error).message); }
+  };
+  setInterval(rodar, intervaloMs).unref();
 }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, sql } from 'drizzle-orm';
-import { db, type Executor } from '../db/index.js';
+import { asc, eq, inArray, sql } from 'drizzle-orm';
+import { db, empresaAtual, type Executor } from '../db/index.js';
 import { categories, productCosts, products, stockMovements } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
 import { bad, brl, parse } from '../lib/http.js';
@@ -163,8 +163,14 @@ export async function importacaoRoutes(app: FastifyInstance) {
     const { csv } = parse(corpo, req.body);
     const user = me(req);
     const r = await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('importacao-produtos'))`);
+      // uma importação por vez POR RESTAURANTE (a trava antiga era global: um restaurante esperava o outro)
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${empresaAtual()}::int, hashtext('importacao-produtos'))`);
       const { linhas, resumo } = await analisar(tx, csv);
+      // trava de uma vez, em ordem de id, todos os produtos que vão mudar (ordem fixa = sem impasse com vendas/ajustes)
+      const idsAtualizar = linhas.filter((l) => l.acao === 'atualizar' && l.mudancas.length).map((l) => l.produtoId!);
+      const travados = new Map((idsAtualizar.length
+        ? await tx.select().from(products).where(inArray(products.id, idsAtualizar)).orderBy(asc(products.id)).for('update')
+        : []).map((p) => [p.id, p]));
       const catPorNome = new Map((await tx.select({ id: categories.id, name: categories.name }).from(categories)).map((c) => [semAcento(c.name), c.id]));
       const [{ maxCat }] = (await tx.execute(sql`SELECT COALESCE(MAX(sort_order), 0)::int AS "maxCat" FROM categories`)).rows as { maxCat: number }[];
       let ordemCat = maxCat;
@@ -191,7 +197,7 @@ export async function importacaoRoutes(app: FastifyInstance) {
           if (controla && l.estoqueInicial) await tx.insert(stockMovements).values({ productId: p.id, type: 'AJUSTE', quantity: l.estoqueInicial, before: 0, after: l.estoqueInicial, reason: 'Importação por planilha: estoque inicial', userId: user.id });
           criados++;
         } else {
-          const [p] = await tx.select().from(products).where(eq(products.id, l.produtoId!)).for('update');
+          const p = travados.get(l.produtoId!)!;
           const set: Partial<typeof products.$inferInsert> = { categoryId: catId, updatedAt: new Date() };
           if (l.preco != null) set.priceCents = l.preco;
           if (l.custo != null && l.custo !== p.costCents) { set.costCents = l.custo; await tx.insert(productCosts).values({ productId: p.id, costCents: l.custo, userId: user.id }); }

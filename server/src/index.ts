@@ -27,7 +27,7 @@ import { analiseRoutes } from './routes/analise.js';
 import { crmRoutes } from './routes/crm.js';
 import { iniciarSincronizacaoCrm } from './services/crm.js';
 import { plataformaRoutes } from './routes/plataforma.js';
-import { cleanupIdempotency } from './lib/idempotency.js';
+import { cleanupIdempotency, iniciarLimpezaIdempotency } from './lib/idempotency.js';
 import { registrarRespostaCompartilhada } from './lib/cacheRota.js';
 import { dimensoesDe, rotaUploads } from './lib/imagem.js';
 import { configuracoesPublicas } from './services/configuracoes.js';
@@ -252,6 +252,7 @@ async function main() {
   await app.ready();
   initRealtime(app.server);
   iniciarSincronizacaoCrm();
+  iniciarLimpezaIdempotency();
   await app.listen({ port: config.port, host: config.host });
   const ips = lanAddresses();
   console.log(`\n  ${config.productName} ${config.demoMode ? '(DEMONSTRAÇÃO) ' : ''}rodando · ${lista.length} empresa(s)`);

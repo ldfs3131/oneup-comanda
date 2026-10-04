@@ -238,7 +238,10 @@ export async function adminRoutes(app: FastifyInstance) {
       before: z.coerce.number().int().positive().optional(),
     }), req.query);
     const conds = [sql`TRUE`];
-    if (f.date) conds.push(sql`(l.created_at AT TIME ZONE ${TZ})::date = ${f.date}::date`);
+    // dia como intervalo de horário (usa o índice de data); busca textual sem dia fica limitada aos últimos 30 dias
+    // para não varrer o histórico inteiro a cada letra digitada
+    if (f.date) conds.push(inRange('l.created_at', { from: f.date, to: f.date }));
+    else if (f.search) conds.push(sql`l.created_at >= now() - interval '30 days'`);
     if (f.search) conds.push(sql`unaccent_lower(l.message) LIKE unaccent_lower(${'%' + f.search + '%'})`);
     if (f.before) conds.push(sql`l.id < ${f.before}`);
     const rows = await db.execute(sql`

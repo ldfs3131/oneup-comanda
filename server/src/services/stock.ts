@@ -17,8 +17,8 @@ export type StockShortage = { productId: number; name: string; stock: number; re
 /**
  * Baixa o estoque de uma venda confirmada. Nunca deixa negativo.
  * - estoque suficiente: baixa normal (VENDA);
- * - insuficiente sem decisão: VENDE assim mesmo e registra DIVERGÊNCIA automática (regra do produto: no caixa a falta
- *   de estoque nunca trava a venda; o Dono vê "ajustar estoque" no painel e corrige a contagem);
+ * - insuficiente sem decisão: recusa com STOCK_INSUFFICIENT (409) e a lista do que falta, para o caixa decidir na
+ *   primeira tentativa (a tela reenvia a mesma venda com a decisão; nada é gravado antes disso);
  * - CORRECT: registra AJUSTE para a contagem informada e vende;
  * - RELEASE: vende o que houver e registra DIVERGÊNCIA com o que faltou.
  */
@@ -44,7 +44,12 @@ export async function applyStockForSale(
     if (!p.trackStock) continue;
     if (p.stockQty >= qty) continue;
     const d = decisions?.find((x) => x.productId === pid);
-    if (!d) continue; // sem decisão do operador: vende e registra a divergência (abaixo)
+    if (!d) {
+      // sem decisão do operador: pergunta ANTES de vender (janela "Estoque insuficiente" no caixa:
+      // corrigir / liberar / cancelar). "Liberar" vende e registra a divergência — a venda nunca trava.
+      shortages.push({ productId: pid, name: p.name, stock: p.stockQty, requested: qty });
+      continue;
+    }
     if (d.action === 'CORRECT') {
       if (!Number.isInteger(d.newQty) || d.newQty < 0 || d.newQty > 100000) throw bad('Contagem de estoque inválida.');
       if (d.newQty < qty) {

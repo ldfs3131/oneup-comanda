@@ -72,7 +72,7 @@ function StockModal({ shortages, onDone }: { shortages: StockShortage[]; onDone:
       <button className="btn danger" onClick={() => onDone(null)}>Cancelar venda</button>
       <button className="btn go lg" disabled={!valid} onClick={submit}>Continuar e vender</button>
     </>}>
-      <p className="muted" style={{ marginTop: 0 }}>O sistema registra menos unidades do que o pedido. Escolha o que fazer com cada produto — tudo fica no histórico com seu nome.</p>
+      <p className="muted" style={{ marginTop: 0 }}>O sistema registra menos unidades do que o pedido. Nada foi lançado ainda: escolha o que fazer com cada produto — tudo fica no histórico com seu nome.</p>
       <div className="col gap-lg">
         {shortages.map((s) => {
           const c = choices[s.productId];
@@ -95,6 +95,11 @@ function StockModal({ shortages, onDone }: { shortages: StockShortage[]; onDone:
                   <label className="field" style={{ paddingLeft: 32 }}>
                     <span>Motivo (obrigatório)</span>
                     <input className="input" value={c.reason} onChange={(e) => set(s.productId, { reason: e.target.value })} placeholder="Ex.: tinha no freezer, contagem atrasada" maxLength={300} />
+                    <span className="row wrap" style={{ gap: 6 }}>
+                      {['Tinha no freezer', 'Contagem atrasada', 'Chegou mercadoria'].map((m) => (
+                        <button key={m} type="button" className="btn sm" onClick={() => set(s.productId, { reason: m })}>{m}</button>
+                      ))}
+                    </span>
                   </label>
                 )}
               </div>

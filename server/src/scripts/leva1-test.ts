@@ -144,6 +144,7 @@ async function main() {
   const cur = (await caixa.get('/api/register/current')).data;
   const txt = JSON.stringify(cur.summary);
   check('Caixa: nada de esperado, PIX, cartão ou total', cur.summary.expectedCashCents === null && cur.summary.salesCents === null && cur.summary.byMethod.length === 0 && cur.summary.receivedCents === null, txt.slice(0, 200));
+  check('Caixa: sem 1ª contagem e sem recontagem pendente no começo do fechamento', cur.recontagem === false && cur.summary.primeiraContagemCents === null, { recontagem: cur.recontagem });
 
   console.log('\n[M7] Estoque do Dono');
   const pe = prods.find((p: any) => p.trackStock) ?? prods.find((p: any) => p.active);

@@ -1,0 +1,27 @@
+/* Clientes (LGPD) e política de privacidade */
+.clientes-tabela .nowrap { white-space: nowrap; }
+.clientes-tabela th.num, .clientes-tabela td.num { text-align: right; }
+.clientes-tabela .chk-juntar { width: 22px; height: 22px; accent-color: var(--lime); }
+.clientes-tabela td:first-child, .clientes-tabela th:first-child { width: 36px; padding-right: 0; }
+label.card.check.on { border-color: var(--brand); }
+
+.privacidade { max-width: 680px; margin: 0 auto; padding: 16px 16px 48px; line-height: 1.55; }
+.privacidade h1 { font-size: 1.5rem; margin: 8px 0 4px; }
+.privacidade h2 { font-size: 1.05rem; margin: 18px 0 4px; }
+.privacidade p { margin: 0; color: var(--text); }
+.privacidade .rodape { margin-top: 24px; }
+.pub-rodape-privacidade { text-align: center; padding: 18px 16px 28px; font-size: 0.85rem; }
+.pub-rodape-privacidade a, .pub-link-privacidade { color: var(--muted); text-decoration: underline; }
+
+/* celular: cada cliente vira um cartão (sem rolar para o lado para achar o botão) */
+@media (max-width: 640px) {
+  .clientes-tabela thead { display: none; }
+  .clientes-tabela, .clientes-tabela tbody { display: block; }
+  .clientes-tabela tr { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 0; border-bottom: 1px solid var(--border); align-items: start; width: 100%; }
+  .table.clientes-tabela td { border: 0; padding: 0; grid-column: 2; text-align: left !important; min-width: 0; font-size: 0.92rem; }
+  .table.clientes-tabela td.nowrap { white-space: normal; }
+  .table.clientes-tabela td:first-child { grid-column: 1; grid-row: 1 / span 6; width: auto; }
+  .table.clientes-tabela td:last-child { grid-column: 3; grid-row: 1 / span 2; }
+  .clientes-tabela td[data-label]::before { content: attr(data-label) ': '; color: var(--muted); font-size: 0.85rem; }
+  .table.clientes-tabela td.vazio { display: none; }
+}

@@ -195,8 +195,10 @@ async function main() {
         const cerveja = menu.flatMap((c) => c.products).find((p) => p.name === 'Corona');
         const estoque = async () => (await db.query(`SELECT stock_qty FROM products WHERE id=$1`, [cerveja.id])).rows[0].stock_qty;
         await dono.post(`/api/stock/${cerveja.id}`, { type: 'AJUSTE', newQty: 1, reason: 'Teste oneup' });
-        const v = await caixa.post('/api/accounts', { customerName: 'Sem estoque', items: [{ productId: cerveja.id, quantity: 3 }] });
-        check('Vende 3 com só 1 no estoque, sem travar', v.status === 200, v.data);
+        const v0 = await caixa.post('/api/accounts', { customerName: 'Sem estoque', items: [{ productId: cerveja.id, quantity: 3 }] });
+        check('Sem decisão: o caixa recebe "Estoque insuficiente" (corrigir / liberar / cancelar)', v0.status === 409 && v0.data.code === 'STOCK_INSUFFICIENT', v0.data);
+        const v = await caixa.post('/api/accounts', { customerName: 'Sem estoque', items: [{ productId: cerveja.id, quantity: 3 }], stockDecisions: [{ productId: cerveja.id, action: 'RELEASE', reason: 'Tinha no freezer' }] });
+        check('Vende 3 com só 1 no estoque ("liberar"), sem travar', v.status === 200, v.data);
         check('Estoque fica 0 (nunca negativo)', (await estoque()) === 0);
         const conta = (await caixa.get(`/api/accounts/${v.data.id}`)).data;
         const item = conta.orders[0].items[0];

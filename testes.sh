@@ -39,6 +39,15 @@ roda plataforma env DATABASE_URL=$PG/of_plat node dist/scripts/plataforma-test.j
 # 4) Central de Análise e Recuperação de vendas (cada uma recria o próprio banco e sobe o próprio servidor: 3501 e 3502)
 roda analise node dist/scripts/analise-test.js
 roda crm node dist/scripts/crm-test.js
+roda caixa node dist/scripts/caixa-test.js
+
+# 5) Clientes e LGPD (servidor próprio na porta 3508)
+novo of_cli
+DATABASE_URL=$PG/of_cli node dist/scripts/setup.js --empresa=cli --nome="Restaurante Teste" --admin-pass=cli-admin --caixa-pass=cli-caixa --cozinha-pass=cli-coz --cardapio=piloto >/dev/null
+DATABASE_URL=$PG/of_cli EMPRESA_HEADER=true PORT=3508 node dist/index.js > /tmp/srv-3508.log 2>&1 & S5=$!
+espera 3508
+roda clientes env DATABASE_URL=$PG/of_cli BASE_URL=http://localhost:3508 node dist/scripts/clientes-test.js
+kill $S5 2>/dev/null; wait $S5 2>/dev/null
 
 echo; [ $falhas -eq 0 ] && echo "TUDO OK" || echo "$falhas suíte(s) falharam"
 exit $falhas

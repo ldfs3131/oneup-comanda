@@ -81,7 +81,7 @@ export default function NewAccount() {
           <div className="col" style={{ gap: 8 }}>
             <div className="new-acc-fields">
               <CustomerField value={customerName} label={cfg.exigir_nome ? 'Cliente *' : 'Cliente'} onChange={(v) => { setName(v); setCustomerId(null); }} autoFocus
-                onPick={(c) => { setCustomerId(c.id); if (c.phone) setPhone(c.phone); }} />
+                onPick={(c) => { setCustomerId(c.id); if (c.phone && !c.phone.includes('*')) setPhone(c.phone); }} />
               <label className="field" style={{ width: 120 }}>
                 <span>{cfg.rotulo_mesa ?? 'Mesa'}{cfg.exigir_mesa ? ' *' : ''}</span>
                 <input className="input" value={tableLabel} onChange={(e) => setTable(e.target.value)} placeholder="Ex.: 7" maxLength={20} />

@@ -35,6 +35,8 @@ import PedidoStatus from './pages/public/PedidoStatus';
 import Pendencias from './pages/admin/Pendencias';
 import Recuperacao from './pages/admin/Recuperacao';
 import Plataforma from './pages/admin/Plataforma';
+import Clientes from './pages/admin/Clientes';
+import Privacidade from './pages/public/Privacidade';
 import { ThemeApplier } from './components/brand';
 
 /** Carregando; sem internet, avisa que está tentando reconectar (não pede a senha de novo). */
@@ -81,6 +83,7 @@ export default function App() {
       <Route path="/cardapio" element={<PublicMenu />} />
       <Route path="/cardapio/pedido/:token" element={<PedidoStatus />} />
       <Route path="/app" element={<AppPage />} />
+      <Route path="/privacidade" element={<Privacidade />} />
       <Route path="/cozinha" element={<Guard roles={['COZINHA']}><Kitchen /></Guard>} />
       <Route path="/caixa" element={<Guard roles={['CAIXA']}><CashierLayout /></Guard>}>
         <Route index element={<Board />} />
@@ -115,6 +118,7 @@ export default function App() {
         <Route path="oneup/plataforma" element={<SoOneUp><Plataforma /></SoOneUp>} />
         <Route path="estoque" element={<StockPage />} />
         <Route path="pendencias" element={<Pendencias />} />
+        <Route path="clientes" element={<Clientes />} />
       </Route>
       <Route path="*" element={<Home />} />
     </Routes>

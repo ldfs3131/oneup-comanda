@@ -1,7 +1,7 @@
 import { respostaCompartilhada } from '../lib/cacheRota.js';
 import { z } from 'zod';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { db, nextNumber } from '../db/index.js';
+import { currentContext, db, nextNumber } from '../db/index.js';
 import { accounts, cancellations, customers, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users, } from '../db/schema.js';
 import { me, requireRole } from '../auth.js';
 import { HttpError, bad, brl, centsSchema, conflict, hojeSP, idParam, notFound, parse, reasonSchema } from '../lib/http.js';
@@ -11,6 +11,25 @@ import { idempotent } from '../lib/idempotency.js';
 import { notify } from '../realtime.js';
 import { accountDetail, accountTotals, assertAccountEditable, assertAccountInScope, currentRegister, getAccount, insertOrder, listAccountsWithTotals, recomputeStatus, requireOpenRegister, requireTakingOrders, stockNeedsForOrder, upsertCustomer, estimateReady, allocateOrders, } from '../services/accounts.js';
 import { applyStockForSale, itemHasStock, linkStockToItem, returnStockForItem } from '../services/stock.js';
+import { formatarTelefone, mascararTelefone } from '../lib/telefone.js';
+/** Busca de clientes do caixa: no máximo 60 buscas por usuário a cada 5 minutos (evita "varrer" a base). */
+const LIMITE_BUSCA = { max: 60, janela: 5 * 60_000 };
+const buscas = new Map();
+setInterval(() => { const t = Date.now(); for (const [k, l] of buscas)
+    if (!l.some((x) => t - x < LIMITE_BUSCA.janela))
+        buscas.delete(k); }, 10 * 60_000).unref();
+function buscaExcedida(userId) {
+    const chave = `${currentContext()?.empresaId ?? 0}:${userId}`;
+    const t = Date.now();
+    const l = (buscas.get(chave) ?? []).filter((x) => t - x < LIMITE_BUSCA.janela);
+    if (l.length >= LIMITE_BUSCA.max) {
+        buscas.set(chave, l);
+        return true;
+    }
+    l.push(t);
+    buscas.set(chave, l);
+    return false;
+}
 export const ORDER_STATUS_PT = {
     NEW: 'Novo', AWAITING_CONFIRMATION: 'Aguardando confirmação', CONFIRMED: 'Novo (cozinha)', IN_PREPARATION: 'Em preparo',
     READY: 'Pronto', DELIVERED: 'Entregue', CANCELLED: 'Cancelado',
@@ -37,7 +56,8 @@ const stockDecisionsSchema = z.array(z.union([
     z.object({ productId: z.number().int().positive(), action: z.literal('CORRECT'), newQty: z.number().int().min(0).max(100000) }),
     z.object({ productId: z.number().int().positive(), action: z.literal('RELEASE'), reason: reasonSchema }),
 ])).max(30).optional();
-const label = (a) => `conta #${a.number}${a.customerName ? ` (${a.customerName})` : ''}`;
+// Auditoria sem dados pessoais (LGPD): só o número da conta — nunca nome, telefone ou casa do cliente
+const label = (a) => `conta #${a.number}`;
 async function orderWithAccount(tx, id, lock = false) {
     const q = tx.select().from(orders).where(eq(orders.id, id));
     const [o] = lock ? await q.for('update') : await q;
@@ -63,12 +83,18 @@ export async function accountRoutes(app) {
         const live = await listAccountsWithTotals(db, sql `a.status IN ('OPEN','PARTIALLY_PAID','PAID')
       AND (a.origin = 'CAIXA' OR EXISTS (SELECT 1 FROM orders o WHERE o.account_id = a.id AND o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED')))`, 2000);
         // (antes: só as 200 mais recentes — numa casa cheia, a conta esquecida mais antiga sumia do painel)
+        // prontos com os itens resumidos ("2× Jantinha, 1× Coca"); problema de dia anterior não volta para a barra
+        // (aparece no "Encerrar o dia")
+        const reg0 = await currentRegister(db);
+        const desde = reg0 ? sql `${reg0.openedAt}::timestamptz` : sql `date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`;
         const ready = await db.execute(sql `
       SELECT o.id AS "orderId", o.number AS "orderNumber", o.sequence, o.ready_at AS "readyAt", o.problem_note AS "problemNote",
              o.status, o.consumption_type AS "consumptionType", a.id AS "accountId", a.number AS "accountNumber",
-             a.customer_name AS "customerName", a.note, a.table_label AS "tableLabel"
+             a.customer_name AS "customerName", a.note, a.table_label AS "tableLabel",
+             (SELECT string_agg(quantity || '× ' || product_name, ', ' ORDER BY id) FROM order_items WHERE order_id = o.id AND status = 'ACTIVE') AS "itemsText",
+             (o.created_at < ${desde}) AS "anterior"
       FROM orders o JOIN accounts a ON a.id = o.account_id
-      WHERE o.status = 'READY' OR (o.problem_note IS NOT NULL AND o.status IN ('CONFIRMED','IN_PREPARATION','READY'))
+      WHERE o.status = 'READY' OR (o.problem_note IS NOT NULL AND o.status IN ('CONFIRMED','IN_PREPARATION','READY') AND o.created_at >= ${desde})
       ORDER BY o.ready_at NULLS LAST, o.id`);
         const awaiting = await db.execute(sql `
       SELECT o.id AS "orderId", o.number AS "orderNumber", o.note, o.created_at AS "createdAt",
@@ -76,11 +102,10 @@ export async function accountRoutes(app) {
              COALESCE((SELECT SUM(unit_price_cents*quantity) FROM order_items WHERE order_id = o.id AND status='ACTIVE'),0) AS "totalCents"
       FROM orders o JOIN accounts a ON a.id = o.account_id
       WHERE o.status = 'AWAITING_CONFIRMATION' ORDER BY o.id`);
-        const reg = await currentRegister(db);
-        return { accounts: live, ready: ready.rows, awaiting: awaiting.rows, register: reg ? { id: reg.id, openedAt: reg.openedAt } : null };
+        return { accounts: live, ready: ready.rows, awaiting: awaiting.rows, register: reg0 ? { id: reg0.id, openedAt: reg0.openedAt } : null };
     });
     // Pedidos do dia (desde a abertura do caixa atual; sem caixa aberto: desde a meia-noite)
-    app.get('/api/orders/today', ops, async () => {
+    app.get('/api/orders/today', { preHandler: [requireRole('CAIXA'), respostaCompartilhada('pedidos-hoje', 'dados', 5000)] }, async () => {
         const reg = await currentRegister(db);
         const since = reg ? sql `${reg.openedAt}::timestamptz` : sql `date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`;
         const rows = (await db.execute(sql `
@@ -93,17 +118,41 @@ export async function accountRoutes(app) {
       FROM orders o JOIN accounts a ON a.id = o.account_id LEFT JOIN users u ON u.id = o.created_by
       WHERE o.created_at >= ${since}
       ORDER BY o.id DESC LIMIT 500`)).rows;
-        // situação por pedido (pago/parcial/pendente) calculada por conta
-        const accIds = [...new Set(rows.map((r) => r.accountId))];
+        // situação por pedido (pago/parcial/pendente) calculada por conta — mesma regra de accountTotals + allocateOrders,
+        // mas em 2 consultas agrupadas para todas as contas do dia (antes eram 2 consultas POR conta).
+        const accIds = [...new Set(rows.map((r) => Number(r.accountId)))];
         const situation = new Map();
-        for (const accId of accIds) {
-            const t = await accountTotals(db, accId);
-            const accOrders = (await db.execute(sql `
-        SELECT o.id, o.status, COALESCE((SELECT SUM(unit_price_cents*quantity) FROM order_items WHERE order_id = o.id AND status='ACTIVE'),0)::int AS total
-        FROM orders o WHERE o.account_id = ${accId} ORDER BY o.id`)).rows;
-            const alloc = allocateOrders(accOrders.map((o) => ({ id: o.id, status: o.status, totalCents: Number(o.total) })), t.discounts, t.paid);
-            for (const [oid, v] of alloc)
-                situation.set(oid, v.situation);
+        if (accIds.length) {
+            const ids = `{${accIds.join(',')}}`;
+            // descontos e pagamentos (não estornados) somados por conta
+            const totais = (await db.execute(sql `
+        SELECT 'd' AS k, account_id AS "accountId", SUM(amount_cents) AS v FROM discounts
+          WHERE account_id = ANY(${ids}::int[]) GROUP BY account_id
+        UNION ALL
+        SELECT 'p', account_id, SUM(amount_cents) FROM payments
+          WHERE account_id = ANY(${ids}::int[]) AND reversed_at IS NULL GROUP BY account_id`)).rows;
+            const descontos = new Map(), pagos = new Map();
+            for (const t of totais)
+                (t.k === 'd' ? descontos : pagos).set(Number(t.accountId), Number(t.v));
+            // todos os pedidos dessas contas com o total dos itens ativos, em ordem de conta e de pedido
+            const pedidos = (await db.execute(sql `
+        SELECT o.id, o.account_id AS "accountId", o.status,
+               COALESCE((SELECT SUM(unit_price_cents * quantity) FROM order_items WHERE order_id = o.id AND status = 'ACTIVE'), 0)::int AS total
+        FROM orders o
+        WHERE o.account_id = ANY(${ids}::int[])
+        ORDER BY o.account_id, o.id`)).rows;
+            const porConta = new Map();
+            for (const o of pedidos) {
+                const acc = Number(o.accountId);
+                if (!porConta.has(acc))
+                    porConta.set(acc, []);
+                porConta.get(acc).push({ id: o.id, status: o.status, totalCents: Number(o.total) });
+            }
+            for (const accId of accIds) {
+                const alloc = allocateOrders(porConta.get(accId) ?? [], descontos.get(accId) ?? 0, pagos.get(accId) ?? 0);
+                for (const [oid, v] of alloc)
+                    situation.set(oid, v.situation);
+            }
         }
         return rows.map((r) => ({ ...r, situation: situation.get(r.id) ?? '—' }));
     });
@@ -205,7 +254,7 @@ export async function accountRoutes(app) {
             if (acc.status !== 'PENDING')
                 throw conflict('Só contas a receber podem ser cobradas.');
             await tx.update(accounts).set({ ultimaCobrancaEm: new Date(), ultimaCobrancaPor: user.id }).where(eq(accounts.id, id));
-            await audit(tx, { userId: user.id, action: 'account.cobranca', entityType: 'account', entityId: id, message: `${user.name} abriu a cobrança pelo WhatsApp da conta #${acc.number} (${acc.customerName ?? 'sem nome'}).` });
+            await audit(tx, { userId: user.id, action: 'account.cobranca', entityType: 'account', entityId: id, message: `${user.name} abriu a cobrança pelo WhatsApp da conta #${acc.number}.` });
         });
         notify.accountsChanged(id);
         return { ok: true };
@@ -215,10 +264,16 @@ export async function accountRoutes(app) {
         await scoped(me(req), id);
         return accountDetail(db, id);
     });
-    // Sugestão de clientes (cadastro leve) com alerta de pendência
+    // Sugestão de clientes (cadastro leve) com alerta de pendência.
+    // LGPD: 3+ letras, sem anonimizados/juntados, telefone mascarado para o Caixa (o vínculo é pelo id) e limite de buscas.
     app.get('/api/customers/suggest', ops, async (req) => {
-        const { q } = parse(z.object({ q: z.string().trim().min(2).max(60) }), req.query);
+        const { q } = parse(z.object({ q: z.string().trim().min(3, 'digite pelo menos 3 letras').max(60) }), req.query);
+        const user = me(req);
+        if (buscaExcedida(user.id))
+            throw new HttpError(429, 'Muitas buscas de clientes em pouco tempo. Aguarde alguns minutos.');
         const like = '%' + q + '%';
+        const digitos = q.replace(/\D/g, '');
+        const porTelefone = digitos.length >= 3 ? sql `OR regexp_replace(coalesce(c.phone,''), '\\D', '', 'g') LIKE ${'%' + digitos + '%'}` : sql ``;
         const rows = await db.execute(sql `
       SELECT c.id, c.name, c.contact, c.phone,
         COALESCE(p.pending, 0)::int AS "pendingCents", p.since AS "pendingSince", COALESCE(p.n,0)::int AS "pendingCount"
@@ -231,10 +286,12 @@ export async function accountRoutes(app) {
           MIN(a.pending_at) AS since, COUNT(*) AS n
         FROM accounts a WHERE a.customer_id = c.id AND a.status = 'PENDING'
       ) p ON TRUE
-      WHERE unaccent_lower(c.name) LIKE unaccent_lower(${like}) OR unaccent_lower(coalesce(c.contact,'')) LIKE unaccent_lower(${like})
-         OR coalesce(c.phone,'') LIKE ${like}
+      WHERE c.anonimizado_em IS NULL AND c.juntado_em IS NULL
+        AND (unaccent_lower(c.name) LIKE unaccent_lower(${like}) OR unaccent_lower(coalesce(c.contact,'')) LIKE unaccent_lower(${like})
+         ${porTelefone})
       ORDER BY p.pending DESC NULLS LAST, c.name LIMIT 8`);
-        return rows.rows;
+        const lista = rows.rows;
+        return lista.map((c) => ({ ...c, phone: user.role === 'ADMIN' ? formatarTelefone(c.phone) : mascararTelefone(c.phone) }));
     });
     // Nova conta (opcionalmente já com o primeiro pedido)
     app.post('/api/accounts', ops, async (req) => {
@@ -263,10 +320,22 @@ export async function accountRoutes(app) {
             throw bad('Para abrir o pedido, preencha pelo menos um: nome, telefone, mesa ou observação.');
         }
         if (b.customerId) {
-            const [c] = await db.select({ id: customers.id }).from(customers).where(eq(customers.id, b.customerId));
-            if (!c)
+            // cliente escolhido na sugestão: a conta leva o nome/telefone do cadastro (o caixa só viu o telefone mascarado)
+            const [c] = await db.select({ id: customers.id, name: customers.name, phone: customers.phone, anonimizadoEm: customers.anonimizadoEm, juntadoEm: customers.juntadoEm })
+                .from(customers).where(eq(customers.id, b.customerId));
+            if (!c || c.anonimizadoEm)
                 throw bad('Cliente não encontrado.');
+            if (c.juntadoEm)
+                b.customerId = c.juntadoEm;
+            if (b.phone?.includes('*'))
+                b.phone = null;
+            if (!b.customerName)
+                b.customerName = c.name;
+            if (!b.phone && c.phone && !c.juntadoEm)
+                b.phone = formatarTelefone(c.phone);
         }
+        else if (b.phone?.includes('*'))
+            b.phone = null;
         const result = await idempotent(req, 'accounts.create', () => db.transaction(async (tx) => {
             const reg = await requireTakingOrders(tx);
             const customerId = b.customerId ?? await upsertCustomer(tx, b.customerName, b.contact, b.phone);
@@ -321,14 +390,18 @@ export async function accountRoutes(app) {
             if (acc.status === 'PENDING' && (!nextName || (!nextContact && !nextPhone))) {
                 throw bad('Conta pendente precisa de nome e casa/telefone.');
             }
-            const cid = await upsertCustomer(tx, nextName, nextContact, nextPhone);
+            // corrigir o telefone/nome na conta corrige o cliente dela (não cria outro)
+            const cid = await upsertCustomer(tx, nextName, nextContact, nextPhone, acc.customerId);
             if (cid)
                 set.customerId = cid;
             await tx.update(accounts).set(set).where(eq(accounts.id, id));
+            // auditoria sem dados pessoais: diz O QUE mudou, não os valores de nome/telefone/casa
+            const NOMES = { customerName: 'nome', note: 'observação', contact: 'contato', phone: 'telefone', tableLabel: 'mesa' };
+            const mudou = ['customerName', 'note', 'contact', 'phone', 'tableLabel'].filter((k) => set[k] !== undefined && set[k] !== acc[k]);
             await audit(tx, {
                 userId: user.id, action: 'account.update', entityType: 'account', entityId: id,
-                message: `${user.name} alterou a identificação da ${label(acc)}${nextName !== acc.customerName ? ` → cliente "${nextName ?? 'sem nome'}"` : ''}.`,
-                data: { before: { customerName: acc.customerName, note: acc.note, contact: acc.contact, phone: acc.phone, tableLabel: acc.tableLabel }, after: set },
+                message: `${user.name} alterou a identificação da ${label(acc)}${mudou.length ? ` (${mudou.map((k) => NOMES[k]).join(', ')})` : ''}${cid ? ` — cliente #${cid}` : ''}.`,
+                data: { campos: mudou, ...(mudou.includes('tableLabel') ? { mesa: { antes: acc.tableLabel, depois: set.tableLabel } } : {}), clienteAntes: acc.customerId, clienteDepois: cid ?? acc.customerId },
             });
         });
         notify.accountsChanged(id);
@@ -509,14 +582,14 @@ export async function accountRoutes(app) {
             const t = await accountTotals(tx, id);
             if (t.balance <= 0)
                 throw conflict('Esta conta não tem saldo em aberto.');
-            const customerId = await upsertCustomer(tx, b.customerName, b.contact, acc.phone);
+            const customerId = await upsertCustomer(tx, b.customerName, b.contact, acc.phone, acc.customerId);
             await tx.update(accounts).set({
                 status: 'PENDING', customerName: b.customerName, contact: b.contact, note: b.note ?? acc.note, customerId,
                 pendingAt: new Date(), pendingBy: user.id, promisedDate: b.promisedDate ?? null,
             }).where(eq(accounts.id, id));
             await audit(tx, {
                 userId: user.id, action: 'account.pending', entityType: 'account', entityId: id,
-                message: `${user.name} marcou a conta #${acc.number} (${b.customerName}, ${b.contact}) como PENDENTE — saldo ${brl(t.balance)}${b.promisedDate ? `, combinado para ${b.promisedDate.split('-').reverse().join('/')}` : ''}.`,
+                message: `${user.name} marcou a conta #${acc.number}${customerId ? ` (cliente #${customerId})` : ''} como PENDENTE — saldo ${brl(t.balance)}${b.promisedDate ? `, combinado para ${b.promisedDate.split('-').reverse().join('/')}` : ''}.`,
             });
         });
         notify.accountsChanged(id);

@@ -24,6 +24,16 @@ export default function PedidoStatus() {
   const logo = <div className="pub-logo-wrap"><BrandLogo className="pub-logo" height={80} logo={menu?.config?.logo ?? null} name={menu?.name} /></div>;
 
   if (isLoading) return <Spinner />;
+  // o link vale até 48 h depois de o pedido ser entregue ou recusado (depois, os dados não ficam mais à mostra)
+  if ((error as ApiError)?.status === 410) return (
+    <div className="pub">{logo}
+      <div className="card center col gap-lg" style={{ margin: 16 }}>
+        <h2>Acompanhamento encerrado</h2>
+        <p className="muted">Este link vale até 48 horas depois de o pedido ser entregue. Para um novo pedido, use o cardápio.</p>
+        <a className="btn primary block" href="/cardapio">Ver o cardápio</a>
+      </div>
+    </div>
+  );
   if (error || !data) return (
     <div className="pub">{logo}
       <div className="card center col gap-lg" style={{ margin: 16 }}>

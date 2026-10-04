@@ -2,7 +2,7 @@ import { respostaCompartilhada } from '../lib/cacheRota.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { db, nextNumber, type Executor } from '../db/index.js';
+import { currentContext, db, nextNumber, type Executor } from '../db/index.js';
 import {
   accounts, cancellations, customers, discounts, orderItems, orders, orderTimeCorrections, paymentMethods, payments, users,
 } from '../db/schema.js';
@@ -18,6 +18,20 @@ import {
   estimateReady, allocateOrders,
 } from '../services/accounts.js';
 import { applyStockForSale, itemHasStock, linkStockToItem, returnStockForItem } from '../services/stock.js';
+import { formatarTelefone, mascararTelefone } from '../lib/telefone.js';
+
+/** Busca de clientes do caixa: no máximo 60 buscas por usuário a cada 5 minutos (evita "varrer" a base). */
+const LIMITE_BUSCA = { max: 60, janela: 5 * 60_000 };
+const buscas = new Map<string, number[]>();
+setInterval(() => { const t = Date.now(); for (const [k, l] of buscas) if (!l.some((x) => t - x < LIMITE_BUSCA.janela)) buscas.delete(k); }, 10 * 60_000).unref();
+function buscaExcedida(userId: number) {
+  const chave = `${currentContext()?.empresaId ?? 0}:${userId}`;
+  const t = Date.now();
+  const l = (buscas.get(chave) ?? []).filter((x) => t - x < LIMITE_BUSCA.janela);
+  if (l.length >= LIMITE_BUSCA.max) { buscas.set(chave, l); return true; }
+  l.push(t); buscas.set(chave, l);
+  return false;
+}
 
 export const ORDER_STATUS_PT: Record<string, string> = {
   NEW: 'Novo', AWAITING_CONFIRMATION: 'Aguardando confirmação', CONFIRMED: 'Novo (cozinha)', IN_PREPARATION: 'Em preparo',
@@ -47,8 +61,8 @@ const stockDecisionsSchema = z.array(z.union([
   z.object({ productId: z.number().int().positive(), action: z.literal('RELEASE'), reason: reasonSchema }),
 ])).max(30).optional();
 
-const label = (a: { number: number; customerName: string | null }) =>
-  `conta #${a.number}${a.customerName ? ` (${a.customerName})` : ''}`;
+// Auditoria sem dados pessoais (LGPD): só o número da conta — nunca nome, telefone ou casa do cliente
+const label = (a: { number: number }) => `conta #${a.number}`;
 
 async function orderWithAccount(tx: Executor, id: number, lock = false) {
   const q = tx.select().from(orders).where(eq(orders.id, id));
@@ -246,7 +260,7 @@ export async function accountRoutes(app: FastifyInstance) {
       const acc = await getAccount(tx, id, true);
       if (acc.status !== 'PENDING') throw conflict('Só contas a receber podem ser cobradas.');
       await tx.update(accounts).set({ ultimaCobrancaEm: new Date(), ultimaCobrancaPor: user.id }).where(eq(accounts.id, id));
-      await audit(tx, { userId: user.id, action: 'account.cobranca', entityType: 'account', entityId: id, message: `${user.name} abriu a cobrança pelo WhatsApp da conta #${acc.number} (${acc.customerName ?? 'sem nome'}).` });
+      await audit(tx, { userId: user.id, action: 'account.cobranca', entityType: 'account', entityId: id, message: `${user.name} abriu a cobrança pelo WhatsApp da conta #${acc.number}.` });
     });
     notify.accountsChanged(id);
     return { ok: true };
@@ -258,10 +272,15 @@ export async function accountRoutes(app: FastifyInstance) {
     return accountDetail(db, id);
   });
 
-  // Sugestão de clientes (cadastro leve) com alerta de pendência
+  // Sugestão de clientes (cadastro leve) com alerta de pendência.
+  // LGPD: 3+ letras, sem anonimizados/juntados, telefone mascarado para o Caixa (o vínculo é pelo id) e limite de buscas.
   app.get('/api/customers/suggest', ops, async (req) => {
-    const { q } = parse(z.object({ q: z.string().trim().min(2).max(60) }), req.query);
+    const { q } = parse(z.object({ q: z.string().trim().min(3, 'digite pelo menos 3 letras').max(60) }), req.query);
+    const user = me(req);
+    if (buscaExcedida(user.id)) throw new HttpError(429, 'Muitas buscas de clientes em pouco tempo. Aguarde alguns minutos.');
     const like = '%' + q + '%';
+    const digitos = q.replace(/\D/g, '');
+    const porTelefone = digitos.length >= 3 ? sql`OR regexp_replace(coalesce(c.phone,''), '\\D', '', 'g') LIKE ${'%' + digitos + '%'}` : sql``;
     const rows = await db.execute(sql`
       SELECT c.id, c.name, c.contact, c.phone,
         COALESCE(p.pending, 0)::int AS "pendingCents", p.since AS "pendingSince", COALESCE(p.n,0)::int AS "pendingCount"
@@ -274,10 +293,12 @@ export async function accountRoutes(app: FastifyInstance) {
           MIN(a.pending_at) AS since, COUNT(*) AS n
         FROM accounts a WHERE a.customer_id = c.id AND a.status = 'PENDING'
       ) p ON TRUE
-      WHERE unaccent_lower(c.name) LIKE unaccent_lower(${like}) OR unaccent_lower(coalesce(c.contact,'')) LIKE unaccent_lower(${like})
-         OR coalesce(c.phone,'') LIKE ${like}
+      WHERE c.anonimizado_em IS NULL AND c.juntado_em IS NULL
+        AND (unaccent_lower(c.name) LIKE unaccent_lower(${like}) OR unaccent_lower(coalesce(c.contact,'')) LIKE unaccent_lower(${like})
+         ${porTelefone})
       ORDER BY p.pending DESC NULLS LAST, c.name LIMIT 8`);
-    return rows.rows;
+    const lista = rows.rows as { phone: string | null }[];
+    return lista.map((c) => ({ ...c, phone: user.role === 'ADMIN' ? formatarTelefone(c.phone) : mascararTelefone(c.phone) }));
   });
 
   // Nova conta (opcionalmente já com o primeiro pedido)
@@ -303,9 +324,15 @@ export async function accountRoutes(app: FastifyInstance) {
       throw bad('Para abrir o pedido, preencha pelo menos um: nome, telefone, mesa ou observação.');
     }
     if (b.customerId) {
-      const [c] = await db.select({ id: customers.id }).from(customers).where(eq(customers.id, b.customerId));
-      if (!c) throw bad('Cliente não encontrado.');
-    }
+      // cliente escolhido na sugestão: a conta leva o nome/telefone do cadastro (o caixa só viu o telefone mascarado)
+      const [c] = await db.select({ id: customers.id, name: customers.name, phone: customers.phone, anonimizadoEm: customers.anonimizadoEm, juntadoEm: customers.juntadoEm })
+        .from(customers).where(eq(customers.id, b.customerId));
+      if (!c || c.anonimizadoEm) throw bad('Cliente não encontrado.');
+      if (c.juntadoEm) b.customerId = c.juntadoEm;
+      if (b.phone?.includes('*')) b.phone = null;
+      if (!b.customerName) b.customerName = c.name;
+      if (!b.phone && c.phone && !c.juntadoEm) b.phone = formatarTelefone(c.phone);
+    } else if (b.phone?.includes('*')) b.phone = null;
     const result = await idempotent(req, 'accounts.create', () => db.transaction(async (tx) => {
       const reg = await requireTakingOrders(tx);
       const customerId = b.customerId ?? await upsertCustomer(tx, b.customerName, b.contact, b.phone);
@@ -356,13 +383,17 @@ export async function accountRoutes(app: FastifyInstance) {
       if (acc.status === 'PENDING' && (!nextName || (!nextContact && !nextPhone))) {
         throw bad('Conta pendente precisa de nome e casa/telefone.');
       }
-      const cid = await upsertCustomer(tx, nextName, nextContact, nextPhone);
+      // corrigir o telefone/nome na conta corrige o cliente dela (não cria outro)
+      const cid = await upsertCustomer(tx, nextName, nextContact, nextPhone, acc.customerId);
       if (cid) set.customerId = cid;
       await tx.update(accounts).set(set).where(eq(accounts.id, id));
+      // auditoria sem dados pessoais: diz O QUE mudou, não os valores de nome/telefone/casa
+      const NOMES: Record<string, string> = { customerName: 'nome', note: 'observação', contact: 'contato', phone: 'telefone', tableLabel: 'mesa' };
+      const mudou = (['customerName', 'note', 'contact', 'phone', 'tableLabel'] as const).filter((k) => set[k] !== undefined && set[k] !== acc[k]);
       await audit(tx, {
         userId: user.id, action: 'account.update', entityType: 'account', entityId: id,
-        message: `${user.name} alterou a identificação da ${label(acc)}${nextName !== acc.customerName ? ` → cliente "${nextName ?? 'sem nome'}"` : ''}.`,
-        data: { before: { customerName: acc.customerName, note: acc.note, contact: acc.contact, phone: acc.phone, tableLabel: acc.tableLabel }, after: set },
+        message: `${user.name} alterou a identificação da ${label(acc)}${mudou.length ? ` (${mudou.map((k) => NOMES[k]).join(', ')})` : ''}${cid ? ` — cliente #${cid}` : ''}.`,
+        data: { campos: mudou, ...(mudou.includes('tableLabel') ? { mesa: { antes: acc.tableLabel, depois: set.tableLabel } } : {}), clienteAntes: acc.customerId, clienteDepois: cid ?? acc.customerId },
       });
     });
     notify.accountsChanged(id); notify.ordersChanged();
@@ -528,14 +559,14 @@ export async function accountRoutes(app: FastifyInstance) {
       if (!['OPEN', 'PARTIALLY_PAID'].includes(acc.status)) throw conflict('Só contas abertas com saldo podem virar pendentes.');
       const t = await accountTotals(tx, id);
       if (t.balance <= 0) throw conflict('Esta conta não tem saldo em aberto.');
-      const customerId = await upsertCustomer(tx, b.customerName, b.contact, acc.phone);
+      const customerId = await upsertCustomer(tx, b.customerName, b.contact, acc.phone, acc.customerId);
       await tx.update(accounts).set({
         status: 'PENDING', customerName: b.customerName, contact: b.contact, note: b.note ?? acc.note, customerId,
         pendingAt: new Date(), pendingBy: user.id, promisedDate: b.promisedDate ?? null,
       }).where(eq(accounts.id, id));
       await audit(tx, {
         userId: user.id, action: 'account.pending', entityType: 'account', entityId: id,
-        message: `${user.name} marcou a conta #${acc.number} (${b.customerName}, ${b.contact}) como PENDENTE — saldo ${brl(t.balance)}${b.promisedDate ? `, combinado para ${b.promisedDate.split('-').reverse().join('/')}` : ''}.`,
+        message: `${user.name} marcou a conta #${acc.number}${customerId ? ` (cliente #${customerId})` : ''} como PENDENTE — saldo ${brl(t.balance)}${b.promisedDate ? `, combinado para ${b.promisedDate.split('-').reverse().join('/')}` : ''}.`,
       });
     });
     notify.accountsChanged(id); notify.registerChanged();

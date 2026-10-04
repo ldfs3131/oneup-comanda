@@ -28,6 +28,9 @@ import { crmRoutes } from './routes/crm.js';
 import { iniciarSincronizacaoCrm } from './services/crm.js';
 import { plataformaRoutes } from './routes/plataforma.js';
 import { cleanupIdempotency, iniciarLimpezaIdempotency } from './lib/idempotency.js';
+import { clientesRoutes } from './routes/clientes.js';
+import { privacidadeRoutes } from './routes/privacidade.js';
+import { iniciarRetencaoClientes } from './services/clientes.js';
 import { registrarRespostaCompartilhada } from './lib/cacheRota.js';
 import { dimensoesDe, rotaUploads } from './lib/imagem.js';
 import { configuracoesPublicas } from './services/configuracoes.js';
@@ -90,6 +93,8 @@ export async function buildApp() {
   await app.register(analiseRoutes);
   await app.register(crmRoutes);
   await app.register(plataformaRoutes);
+  await app.register(clientesRoutes);
+  await app.register(privacidadeRoutes);
   // Saúde de verdade: confere o banco (com o Postgres parado responde 503, não "ok")
   app.get('/api/health', async (_req, reply) => {
     try {
@@ -216,13 +221,14 @@ async function buildPublicApp() {
   registrarRespostaCompartilhada(app);
   rotaUploads(app);
   await app.register(publicRoutes);
+  await app.register(privacidadeRoutes);
   app.get('/api/meta', async () => ({ demoMode: config.demoMode, public: true }));
   if (existsSync(config.webDist)) {
     await app.register(fastifyStatic, { root: config.webDist, prefix: '/', index: false, serve: true });
     app.get('/', async (_req, reply) => reply.redirect('/cardapio'));
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/')) return reply.status(404).send({ error: 'Rota não encontrada.' });
-      if (!req.url.startsWith('/cardapio')) return reply.redirect('/cardapio');
+      if (!req.url.startsWith('/cardapio') && !req.url.startsWith('/privacidade')) return reply.redirect('/cardapio');
       return reply.type('text/html').sendFile('index.html');
     });
   }
@@ -253,6 +259,7 @@ async function main() {
   initRealtime(app.server);
   iniciarSincronizacaoCrm();
   iniciarLimpezaIdempotency();
+  iniciarRetencaoClientes();
   await app.listen({ port: config.port, host: config.host });
   const ips = lanAddresses();
   console.log(`\n  ${config.productName} ${config.demoMode ? '(DEMONSTRAÇÃO) ' : ''}rodando · ${lista.length} empresa(s)`);

@@ -1,9 +1,10 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, nextNumber } from '../db/index.js';
-import { accounts, cancellations, cashRegisters, customers, discounts, optionGroups, options, orderItems, orders, paymentMethods, payments, products, restaurantSettings, users, } from '../db/schema.js';
+import { accounts, cancellations, cashRegisters, discounts, optionGroups, options, orderItems, orders, paymentMethods, payments, products, restaurantSettings, users, } from '../db/schema.js';
 import { HttpError, bad, conflict, notFound } from '../lib/http.js';
 import { MSG_SO_RECEBER, erroSoConsulta, licencaAtual } from '../lib/licenca.js';
 import { applyStockForSale } from './stock.js';
+import { identificarCliente } from './clientes.js';
 export const LIVE_ACCOUNT = ['OPEN', 'PARTIALLY_PAID', 'PAID'];
 export const DEFAULT_PREP = 15;
 /**
@@ -106,23 +107,13 @@ export function assertAccountEditable(status) {
         throw conflict('Esta conta foi juntada a outra. Use a conta de destino.');
 }
 // ---------- Cliente (cadastro leve) ----------
-export async function upsertCustomer(tx, name, contact, phone) {
-    const n = name?.trim();
-    if (!n || (!contact?.trim() && !phone?.trim()))
-        return null;
-    const found = await tx.execute(sql `
-    SELECT id FROM customers
-    WHERE lower(name) = lower(${n})
-      AND (${contact?.trim() || null}::text IS NULL OR lower(coalesce(contact,'')) = lower(${contact?.trim() || ''}))
-      AND (${phone?.trim() || null}::text IS NULL OR coalesce(phone,'') = ${phone?.trim() || ''})
-    ORDER BY id LIMIT 1`);
-    const row = found.rows[0];
-    if (row) {
-        await tx.update(customers).set({ contact: contact?.trim() || undefined, phone: phone?.trim() || undefined, updatedAt: new Date() }).where(eq(customers.id, row.id));
-        return row.id;
-    }
-    const [c] = await tx.insert(customers).values({ name: n, contact: contact?.trim() || null, phone: phone?.trim() || null }).returning({ id: customers.id });
-    return c.id;
+/**
+ * Cliente da conta: identificado pelo telefone normalizado (mesmo telefone = mesmo cliente; o nome é atributo).
+ * `atual` = cliente que a conta já tinha: corrigir o telefone corrige esse cliente (não cria outro).
+ * Regras completas em services/clientes.ts.
+ */
+export async function upsertCustomer(tx, name, contact, phone, atual) {
+    return identificarCliente(tx, { atual, nome: name, contato: contact, telefone: phone });
 }
 export async function priceItems(tx, items) {
     if (!items.length)

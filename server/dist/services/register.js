@@ -35,7 +35,14 @@ export async function registerSummary(tx, registerId) {
        - COALESCE((SELECT SUM(amount_cents) FROM payments WHERE account_id=a.id AND reversed_at IS NULL),0)) AS balance
     FROM accounts a
     WHERE a.status = 'PENDING' AND a.pending_at >= ${reg.opened_at} AND (${reg.closed_at}::timestamptz IS NULL OR a.pending_at <= ${reg.closed_at})`);
-    const [stillOpen] = await q(sql `SELECT COUNT(*) AS count FROM accounts WHERE status IN ('OPEN','PARTIALLY_PAID','PAID')`);
+    // "contas abertas" = só as que ainda devem algo (paga não encerrada e conta vazia não contam)
+    const [stillOpen] = await q(sql `
+    SELECT COUNT(*) AS count FROM accounts a
+    WHERE a.status IN ('OPEN','PARTIALLY_PAID','PAID')
+      AND (COALESCE((SELECT SUM(oi.unit_price_cents*oi.quantity) FROM order_items oi JOIN orders o ON o.id=oi.order_id
+                     WHERE o.account_id=a.id AND oi.status='ACTIVE' AND o.status <> 'AWAITING_CONFIRMATION'),0)
+           - COALESCE((SELECT SUM(amount_cents) FROM discounts WHERE account_id=a.id),0)
+           - COALESCE((SELECT SUM(amount_cents) FROM payments WHERE account_id=a.id AND reversed_at IS NULL),0)) > 0`);
     const movements = await q(sql `
     SELECT m.type, m.amount_cents, m.reason, m.created_at, u.name AS user_name
     FROM cash_movements m JOIN users u ON u.id = m.user_id WHERE m.cash_register_id = ${registerId} ORDER BY m.id`);
@@ -48,6 +55,7 @@ export async function registerSummary(tx, registerId) {
         openedAt: reg.opened_at,
         closedAt: reg.closed_at,
         openingCashCents: n(reg.opening_cash_cents),
+        primeiraContagemCents: reg.primeira_contagem_cents == null ? null : n(reg.primeira_contagem_cents),
         salesCents: n(sales.cents),
         ordersCount: n(sales.orders),
         accountsCount: n(sales.accounts),
@@ -83,6 +91,52 @@ export function resumoCego(s) {
         ...s,
         salesCents: null, receivedCents: null, byMethod: [], fromPreviousPendingCents: null, partialPaymentsCents: null,
         discountsCents: null, discountsByUser: [], cancellationsCents: null, lossCents: null, pendingCreatedCents: null,
-        cashReceivedCents: null, expectedCashCents: null, cego: true,
+        cashReceivedCents: null, expectedCashCents: null, primeiraContagemCents: null, cego: true,
+    };
+}
+/**
+ * O que ainda está pendurado antes de encerrar o dia (mostrado ANTES da contagem da gaveta):
+ * contas com saldo, contas pagas não encerradas, contas vazias, pedidos na cozinha/prontos sem entrega,
+ * pedidos do QR esperando confirmação e problemas da cozinha em aberto. Sem valores do caixa (só o saldo de cada conta,
+ * que o caixa já vê no painel).
+ */
+export async function pendenciasDoFechamento(tx) {
+    const q = async (s) => (await tx.execute(s)).rows;
+    const contas = await q(sql `
+    SELECT a.id, a.number, a.customer_name, a.table_label, a.note, a.status,
+           t.subtotal, t.paid, (t.subtotal - t.discounts - t.paid) AS balance,
+           (SELECT COUNT(*) FROM order_items oi JOIN orders o ON o.id = oi.order_id
+             WHERE o.account_id = a.id AND oi.status = 'ACTIVE') AS itens
+    FROM accounts a
+    CROSS JOIN LATERAL (
+      SELECT
+        COALESCE((SELECT SUM(oi.unit_price_cents*oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                  WHERE o.account_id = a.id AND oi.status = 'ACTIVE' AND o.status <> 'AWAITING_CONFIRMATION'), 0) AS subtotal,
+        COALESCE((SELECT SUM(amount_cents) FROM discounts d WHERE d.account_id = a.id), 0) AS discounts,
+        COALESCE((SELECT SUM(amount_cents) FROM payments p WHERE p.account_id = a.id AND p.reversed_at IS NULL), 0) AS paid
+    ) t
+    WHERE a.status IN ('OPEN','PARTIALLY_PAID','PAID')
+    ORDER BY a.number`);
+    const conta = (r) => ({ id: r.id, number: r.number, customerName: r.customer_name, tableLabel: r.table_label, note: r.note, balance: n(r.balance) });
+    const comSaldo = contas.filter((r) => n(r.balance) > 0).map(conta);
+    const pagas = contas.filter((r) => n(r.balance) <= 0 && n(r.subtotal) > 0).map(conta);
+    // vazia = nenhum item ativo (nem esperando confirmação) e nenhum pagamento
+    const vazias = contas.filter((r) => n(r.itens) === 0 && n(r.paid) === 0).map(conta);
+    const pedidos = await q(sql `
+    SELECT o.id, o.number, o.status, o.problem_note, o.created_at, a.id AS account_id, a.number AS account_number,
+           a.customer_name, a.table_label,
+           (SELECT string_agg(quantity || '× ' || product_name, ', ' ORDER BY id) FROM order_items WHERE order_id = o.id AND status = 'ACTIVE') AS itens
+    FROM orders o JOIN accounts a ON a.id = o.account_id
+    WHERE o.status IN ('CONFIRMED','IN_PREPARATION','READY','AWAITING_CONFIRMATION') OR (o.problem_note IS NOT NULL AND o.status <> 'CANCELLED' AND o.status <> 'DELIVERED')
+    ORDER BY o.id`);
+    const pedido = (r) => ({
+        id: r.id, number: r.number, status: r.status, problemNote: r.problem_note, createdAt: r.created_at, accountId: r.account_id,
+        accountNumber: r.account_number, customerName: r.customer_name, tableLabel: r.table_label, itemsText: r.itens,
+    });
+    return {
+        comSaldo, pagas, vazias,
+        naCozinha: pedidos.filter((r) => ['CONFIRMED', 'IN_PREPARATION', 'READY'].includes(r.status)).map(pedido),
+        aguardando: pedidos.filter((r) => r.status === 'AWAITING_CONFIRMATION').map(pedido),
+        problemas: pedidos.filter((r) => r.problem_note).map(pedido),
     };
 }

@@ -259,7 +259,7 @@ async function evento(tx: Executor, cobrancaId: number, e: Ev) {
 async function auditar(tx: Executor, user: AuthUser | null, l: Pick<Linha, 'accountId' | 'numero' | 'nome'>, acao: string, oQue: string) {
   await audit(tx, {
     userId: user?.id ?? null, action: `crm.${acao}`, entityType: 'account', entityId: l.accountId,
-    message: `${user ? `ONE UP (${user.name})` : 'Serviço de recuperação'} ${oQue} — conta a receber #${l.numero} (${l.nome}); acesso delegado pelo contrato.`,
+    message: `${user ? `ONE UP (${user.name})` : 'Serviço de recuperação'} ${oQue} — conta a receber #${l.numero}; acesso delegado pelo contrato.`,
   });
 }
 

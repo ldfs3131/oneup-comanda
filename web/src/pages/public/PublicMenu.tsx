@@ -6,6 +6,7 @@ import { brl } from '../../format';
 import { Modal, Seg, Spinner } from '../../components/ui';
 import { BrandLogo, usePageTitle } from '../../components/brand';
 import { BotaoBaixarApp } from '../../components/instalar';
+import '../../styles/clientes.css';
 
 type PGroup = { id: number; name: string; required: boolean; multiple: boolean; options: { id: number; name: string; priceDeltaCents: number }[] };
 type PProduct = { id: number; name: string; description: string; priceCents: number; imageUrl: string | null; soldOut?: boolean; groups: PGroup[] };
@@ -101,7 +102,8 @@ export default function PublicMenu() {
             ))}
           </section>
         ))}
-        <div className="col gap-lg" style={{ padding: '16px 0 120px' }}>{wa}{links}</div>
+        <div className="col gap-lg" style={{ padding: '16px 0 0' }}>{wa}{links}</div>
+        <footer className="pub-rodape-privacidade" style={{ paddingBottom: 120 }}><a href="/privacidade">Privacidade e seus dados</a></footer>
       </main>
 
       {count > 0 && (
@@ -150,6 +152,13 @@ function PubOptions({ p, onClose, onAdd }: { p: PProduct; onClose: () => void; o
 
 const lerLocal = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
 const gravarLocal = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* sem armazenamento: segue sem lembrar */ } };
+const apagarLocal = (...ks: string[]) => { try { for (const k of ks) localStorage.removeItem(k); } catch { /* sem armazenamento */ } };
+/** Nome/WhatsApp só ficam no aparelho se a pessoa marcou "Lembrar meus dados neste aparelho" (tablet compartilhado). */
+const LEMBRAR = 'oneup:lembrar-dados';
+function dadosLembrados() {
+  if (lerLocal(LEMBRAR) !== '1') { apagarLocal('oneup:cliente-nome', 'oneup:cliente-zap'); return { nome: '', zap: '', lembrar: false }; }
+  return { nome: lerLocal('oneup:cliente-nome'), zap: lerLocal('oneup:cliente-zap'), lembrar: true };
+}
 
 /** (11) 91234-5678 enquanto digita */
 function mascaraZap(v: string) {
@@ -171,8 +180,11 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
   cart: Line[]; setCart: (f: (c: Line[]) => Line[]) => void; total: number; deliveryOpen: boolean; restaurante: string;
   onClose: () => void; onDone: (r: { orderNumber: number; totalCents: number; token: string }) => void;
 }) {
-  const [name, setName] = useState(lerLocal('oneup:cliente-nome'));
-  const [zap, setZap] = useState(mascaraZap(lerLocal('oneup:cliente-zap')));
+  const [salvos] = useState(dadosLembrados);
+  const [name, setName] = useState(salvos.nome);
+  const [zap, setZap] = useState(mascaraZap(salvos.zap));
+  const [lembrar, setLembrar] = useState(salvos.lembrar); // desmarcada por padrão
+
   const [ofertas, setOfertas] = useState(false);
   const [mode, setMode] = useState<Mode>('BALCAO');
   const [location, setLocation] = useState('');
@@ -201,7 +213,8 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
       // a mesma chave num novo toque depois de falha de internet: o restaurante não recebe o pedido duas vezes
       const r = await api.post<{ orderNumber: number; totalCents: number; token: string }>('/api/public/orders', corpo, chaveDoEnvio(envio, corpo), { 'x-aparelho': idAparelho() });
       envio.current = null;
-      gravarLocal('oneup:cliente-nome', name.trim()); gravarLocal('oneup:cliente-zap', zap.replace(/\D/g, ''));
+      if (lembrar) { gravarLocal(LEMBRAR, '1'); gravarLocal('oneup:cliente-nome', name.trim()); gravarLocal('oneup:cliente-zap', zap.replace(/\D/g, '')); }
+      else apagarLocal(LEMBRAR, 'oneup:cliente-nome', 'oneup:cliente-zap');
       onDone(r);
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
@@ -265,7 +278,9 @@ function Checkout({ cart, setCart, total, deliveryOpen, restaurante, onClose, on
           {tentou && mode === 'ENTREGA' && location.trim().length <= 2 && <div className="small cancel-text">Informe o endereço da entrega.</div>}</label>
         <label className="field"><span>Observação</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: sem cebola" maxLength={200} /></label>
         <label className="check small"><input type="checkbox" checked={ofertas} onChange={(e) => setOfertas(e.target.checked)} />
-          Aceito receber ofertas e novidades do {restaurante} pelo WhatsApp. Posso pedir para parar quando quiser. (opcional)</label>
+          <span>Aceito receber ofertas e novidades do {restaurante} pelo WhatsApp. Posso pedir para parar quando quiser. (opcional) <a className="pub-link-privacidade" href="/privacidade" target="_blank" rel="noreferrer">Como usamos seus dados</a></span></label>
+        <label className="check small"><input type="checkbox" checked={lembrar} onChange={(e) => setLembrar(e.target.checked)} />
+          <span>Lembrar meus dados neste aparelho <span className="faint">(não marque em aparelho compartilhado)</span></span></label>
         {err && <div className="cancel-text" role="alert">{err}</div>}
       </div>
     </Modal>

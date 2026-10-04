@@ -13,6 +13,7 @@ import { currentRegister, insertOrder, upsertCustomer } from '../services/accoun
 import { loadMenu } from './menu.js';
 import { configuracoesPublicas, lerConfig } from '../services/configuracoes.js';
 import { licencaAtual } from '../lib/licenca.js';
+import { normalizarWhatsapp } from '../lib/telefone.js';
 
 /**
  * Cardápio online no ar? Licença ATIVA: sim. SUSPENSA: não. SÓ CONSULTA: só enquanto durar um dia que já estava
@@ -48,17 +49,13 @@ function registrar(chave: string) {
 const LIMITE_APARELHO = { max: 6, janela: 10 * 60_000 };
 const LIMITE_IP = { max: 150, janela: 60_000 };
 
-/** WhatsApp brasileiro: DDD + número (10 ou 11 dígitos), aceita +55. Devolve só dígitos ou null. */
-export function normalizarWhatsapp(bruto: string): string | null {
-  let d = bruto.replace(/\D/g, '');
-  if ((d.length === 12 || d.length === 13) && d.startsWith('55')) d = d.slice(2);
-  if (d.length !== 10 && d.length !== 11) return null;
-  if (Number(d.slice(0, 2)) < 11) return null;
-  if (d.length === 11 && d[2] !== '9') return null;
-  return d;
-}
+// WhatsApp brasileiro normalizado: fica em lib/telefone.ts (o caixa usa a mesma regra para identificar o cliente)
+export { normalizarWhatsapp };
 export const textoConsentimento = (restaurante: string) =>
   `Aceito receber ofertas e novidades do ${restaurante} pelo WhatsApp. Posso pedir para parar quando quiser.`;
+
+/** Horas que o link de acompanhamento continua respondendo depois de o pedido terminar (LGPD: dado só enquanto precisa). */
+export const ACOMPANHAMENTO_HORAS = 48;
 
 async function settings() {
   const [r] = await db.select().from(restaurantSettings).limit(1);
@@ -132,7 +129,7 @@ export async function publicRoutes(app: FastifyInstance) {
       const customerId = await upsertCustomer(tx, b.customerName, null, phone);
       // Consentimento: só grava quando o cliente marca a caixinha (texto exato e momento). Desmarcar num pedido não apaga um "sim" anterior.
       if (customerId && b.aceitaOfertas) {
-        await tx.update(customers).set({ aceitaOfertas: true, aceitaOfertasEm: new Date(), aceitaOfertasTexto: textoConsentimento(r.name) }).where(eq(customers.id, customerId));
+        await tx.update(customers).set({ aceitaOfertas: true, aceitaOfertasEm: new Date(), aceitaOfertasTexto: textoConsentimento(r.name), ofertasRevogadasEm: null }).where(eq(customers.id, customerId));
       }
       const [acc] = await tx.insert(accounts).values({
         number, customerName: b.customerName, phone, customerId, note: accNote, origin: b.mode === 'ENTREGA' ? 'DELIVERY' : 'QR_CODE',
@@ -142,7 +139,7 @@ export async function publicRoutes(app: FastifyInstance) {
       // Código aleatório para o cliente acompanhar o pedido (não dá para adivinhar o de outra pessoa)
       const token = randomBytes(12).toString('base64url');
       await tx.update(orders).set({ publicToken: token }).where(eq(orders.id, o.order.id));
-      await audit(tx, { action: 'qr.order', entityType: 'order', entityId: o.order.id, message: `Cliente${b.customerName ? ` ${b.customerName}` : ''} enviou pelo QR Code o pedido #${o.order.number} (${brl(o.totalCents)}, ${modeLabel}). Aguardando confirmação do caixa.` });
+      await audit(tx, { action: 'qr.order', entityType: 'order', entityId: o.order.id, message: `Cliente${customerId ? ` #${customerId}` : ''} enviou pelo QR Code o pedido #${o.order.number} da conta #${acc.number} (${brl(o.totalCents)}, ${modeLabel}). Aguardando confirmação do caixa.` });
       return { acc, o, token };
     });
     notify.qrNew({ orderNumber: res.o.order.number, accountNumber: res.acc.number, customerName: res.acc.customerName });
@@ -156,6 +153,18 @@ export async function publicRoutes(app: FastifyInstance) {
     const [o] = await db.select({ id: orders.id, number: orders.number, status: orders.status, origin: orders.origin, goesToKitchen: orders.goesToKitchen, createdAt: orders.createdAt, confirmedAt: orders.confirmedAt, startedAt: orders.startedAt, readyAt: orders.readyAt, deliveredAt: orders.deliveredAt })
       .from(orders).where(eq(orders.publicToken, token));
     if (!o) return reply.code(404).send({ error: 'Pedido não encontrado.' });
+    // o código de acompanhamento vale até 48 h depois de o pedido ser entregue ou recusado
+    if (o.status === 'DELIVERED' || o.status === 'CANCELLED') {
+      let fim = o.deliveredAt;
+      if (o.status === 'CANCELLED') {
+        const [c] = await db.select({ em: cancellations.createdAt }).from(cancellations).where(eq(cancellations.orderId, o.id)).orderBy(sql`id DESC`).limit(1);
+        fim = c?.em ?? o.createdAt;
+      }
+      if (fim && Date.now() - new Date(fim).getTime() > ACOMPANHAMENTO_HORAS * 3600_000) {
+        reply.header('Cache-Control', 'no-store');
+        return reply.code(410).send({ error: 'Acompanhamento encerrado. Este link vale até 48 horas depois de o pedido ser entregue.', encerrado: true });
+      }
+    }
     const itens = await db.select({ nome: orderItems.productName, quantidade: orderItems.quantity, preco: orderItems.unitPriceCents, opcoes: orderItems.optionsSnapshot, status: orderItems.status })
       .from(orderItems).where(eq(orderItems.orderId, o.id));
     let motivo: string | null = null;

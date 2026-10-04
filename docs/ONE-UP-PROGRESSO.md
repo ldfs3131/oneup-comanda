@@ -17,7 +17,7 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 
 - **Dono:** começa em Pedidos; Painel do dia sem ranking, movimento por hora e tempo de cozinha (só ONE UP);
   Ritmo do mês só ONE UP. Trava do Dono em 2 minutos (cancelar com comida pronta, desconto acima do limite, fiado).
-- **Permitir suporte:** ONE UP vê telefones mascarados e nomes em iniciais até o Dono liberar 30 min, 2 h ou 24 h;
+- **Acesso ONE UP com dados completos** (decisão do Lucas, 04/10, no lugar do "Permitir suporte" mascarado);
   toda ação da ONE UP aparece na auditoria como "Suporte ONE UP".
 - **Caixa:** estornar pagamento (vira sangria se o dinheiro era de caixa fechado), trocar forma de pagamento,
   pré-conta, recusar pedido com motivo que o cliente entende, caixa só para receber.

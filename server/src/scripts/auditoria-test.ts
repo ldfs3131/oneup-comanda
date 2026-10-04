@@ -146,17 +146,11 @@ async function main() {
   check('Ritmo do mês (projeção) não abre para o Dono', (await dono.get('/api/finance/ritmo')).status === 404);
 
 
-  console.log('\n[Happy Alpha 3.3] "Permitir suporte": a ONE UP só vê dados de clientes com o Dono liberando');
+  console.log('\n[Happy Alpha 3.3] Acesso ONE UP: dados completos e ações marcadas');
   execFileSync('node', ['dist/scripts/plataforma.js', 'oneup-usuario', '--empresa=beta', '--login=lucas.beta', '--nome=Lucas', '--senha=segredo-beta-1'], { cwd: SERVER, env: { ...process.env, DATABASE_URL: DB_URL }, stdio: 'ignore' });
   const one = new C(); await one.login('lucas.beta', 'segredo-beta-1');
   const recOne = JSON.stringify((await one.get('/api/accounts/receivable')).data);
-  check('Sem liberação: telefone/contato do cliente chegam mascarados para a ONE UP', !/casa 7/.test(recOne) && /\*\*\*\*|••••/.test(recOne), recOne.slice(0, 300));
-  check('A ONE UP não consegue se liberar sozinha', (await one.post('/api/suporte/liberar', { minutos: 30 })).status === 403);
-  check('O Dono libera por 30 minutos', (await dono.post('/api/suporte/liberar', { minutos: 30 })).status === 200);
-  await new Promise((r) => setTimeout(r, 30));
-  const recLib = JSON.stringify((await one.get('/api/accounts/receivable?x=1')).data);
-  check('Com liberação: a ONE UP vê os dados', /casa 7/.test(recLib), recLib.slice(0, 200));
-  await dono.post('/api/suporte/encerrar');
+  check('A ONE UP vê nome e telefone completos, sem depender de liberação', /casa 7/.test(recOne) && !/\*\*\*\*|••••/.test(recOne), recOne.slice(0, 300));
   const audS = (await db.query(`SELECT message, user_role FROM audit_logs WHERE empresa_id=$1 AND user_id=(SELECT id FROM users WHERE empresa_id=$1 AND username='lucas.beta') ORDER BY id DESC LIMIT 1`, [BETA])).rows[0];
   check('Ações da ONE UP aparecem como "Suporte ONE UP" para o Dono', audS?.user_role === 'ONEUP' && /^Suporte ONE UP · /.test(audS.message), audS);
 

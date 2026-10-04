@@ -19,7 +19,6 @@ export default function AdminLayout() {
       <Banners />
       <AvisoLicenca />
       {user?.oneup && <LembreteBackup />}
-      {user?.oneup && <AvisoDadosProtegidos />}
       <header className="topbar">
         <Logo to="/admin" />
         <div className="grow hide-mobile" style={{ fontWeight: 700, color: 'var(--muted)' }}>{user?.oneup ? 'Painel · acesso ONE UP' : 'Painel do Dono'}</div>
@@ -108,14 +107,3 @@ function AvisoLicenca() {
   );
 }
 
-/** Acesso ONE UP sem liberação do Dono: explica por que nomes e telefones aparecem incompletos. */
-function AvisoDadosProtegidos() {
-  const { data } = useQuery({ queryKey: ['suporte-estado'], queryFn: () => api.get<{ ativo: boolean; ate: string | null }>('/api/suporte'), refetchInterval: 60_000 });
-  if (!data) return null;
-  if (data.ativo) return (
-    <div className="banner" role="status">🔓 <b>Suporte liberado pelo Dono.</b>{' '}<span>Você vê nomes e telefones completos{data.ate ? ` até ${new Date(data.ate).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}.</span></div>
-  );
-  return (
-    <div className="banner" role="status">🔒 <b>Dados dos clientes protegidos.</b>{' '}<span>Por isso aparecem só as iniciais e parte do telefone. Para ver completo, o Dono libera em Configurações → Permitir suporte.</span></div>
-  );
-}

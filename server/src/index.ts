@@ -29,7 +29,7 @@ import { iniciarSincronizacaoCrm } from './services/crm.js';
 import { plataformaRoutes } from './routes/plataforma.js';
 import { cleanupIdempotency, iniciarLimpezaIdempotency } from './lib/idempotency.js';
 import { clientesRoutes } from './routes/clientes.js';
-import { mascaramentoSuporte, suporteRoutes } from './routes/suporte.js';
+import { suporteRoutes } from './routes/suporte.js';
 import { privacidadeRoutes } from './routes/privacidade.js';
 import { iniciarRetencaoClientes } from './services/clientes.js';
 import { registrarRespostaCompartilhada } from './lib/cacheRota.js';
@@ -72,7 +72,7 @@ export async function buildApp() {
   securityHeaders(app);
   mesmaOrigem(app);
   empresaPorRequisicao(app);
-  mascaramentoSuporte(app);
+  // acesso ONE UP vê os dados completos (decisão do Lucas, 04/10): sem mascaramento
   registrarRespostaCompartilhada(app);
   await app.register(cookie);
   await app.register(multipart);

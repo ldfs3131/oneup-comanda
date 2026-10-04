@@ -66,11 +66,12 @@ function useLargura() {
   return { ref, w };
 }
 
-export default function RitmoMes() {
+/** `mes` (AAAA-MM) opcional: sem ele, o mês atual (a Central de Análise passa o mês escolhido). */
+export default function RitmoMes({ mes }: { mes?: string } = {}) {
   const [modo, setModo] = useState<'liquido' | 'bruto'>('liquido');
   const { data, isLoading, error } = useQuery({
-    queryKey: ['finance', 'ritmo', modo],
-    queryFn: () => api.get<Resp>(`/api/finance/ritmo${qs({ modo })}`),
+    queryKey: ['finance', 'ritmo', modo, mes ?? ''],
+    queryFn: () => api.get<Resp>(`/api/finance/ritmo${qs({ modo, mes })}`),
   });
   const celular = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 720px)').matches;
   const [ligadas, setLigadas] = useState<Record<Chave, boolean>>(() =>

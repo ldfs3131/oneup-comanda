@@ -24,7 +24,8 @@ import Audit from './pages/admin/Audit';
 import Cancellations from './pages/admin/Cancellations';
 import SettingsPage from './pages/admin/SettingsPage';
 import PublicMenu from './pages/public/PublicMenu';
-import InsightsPage from './pages/admin/InsightsPage';
+import CentralAnalise from './pages/admin/analise/CentralAnalise';
+import RelatorioImpressao from './pages/admin/analise/RelatorioImpressao';
 import FinancePage from './pages/admin/FinancePage';
 import TimingPage from './pages/admin/TimingPage';
 import OrdersHistory from './pages/admin/OrdersHistory';
@@ -100,7 +101,10 @@ export default function App() {
         <Route path="cancelamentos" element={<Cancellations />} />
         <Route path="usuarios" element={<Users />} />
         <Route path="configuracoes" element={<SettingsPage />} />
-        <Route path="insights" element={<InsightsPage />} />
+        {/* Insights viraram parte da Central de Análise (aba "Leituras do dia") */}
+        <Route path="insights" element={<SoOneUp><Navigate to="/admin/oneup/analise" replace /></SoOneUp>} />
+        <Route path="oneup/analise" element={<SoOneUp><CentralAnalise /></SoOneUp>} />
+        <Route path="oneup/analise/relatorio/:mes" element={<SoOneUp><RelatorioImpressao /></SoOneUp>} />
         <Route path="financeiro" element={<FinancePage />} />
         <Route path="tempo" element={<SoOneUp><TimingPage /></SoOneUp>} />
         <Route path="pedidos" element={<OrdersHistory />} />

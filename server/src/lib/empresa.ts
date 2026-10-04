@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import { db, runAsSystem } from '../db/index.js';
 import { empresas } from '../db/schema.js';
 
-export type EmpresaInfo = { id: number; slug: string; nome: string; status: string };
+export type EmpresaInfo = { id: number; slug: string; nome: string; status: string; licencaStatus: string; licencaVenceEm: string | null };
 
 const SLUG_RE = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/;
 const cache = new Map<string, { at: number; info: EmpresaInfo | null }>();
@@ -29,7 +29,9 @@ export async function empresaPorSlug(slug: string | undefined): Promise<EmpresaI
   const hit = cache.get(slug);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.info;
   const [row] = await runAsSystem(() => db.select().from(empresas).where(eq(empresas.slug, slug)).limit(1));
-  const info = row && row.status !== 'CANCELADA' ? { id: row.id, slug: row.slug, nome: row.nome, status: row.status } : null;
+  const info = row && row.status !== 'CANCELADA'
+    ? { id: row.id, slug: row.slug, nome: row.nome, status: row.status, licencaStatus: row.licencaStatus, licencaVenceEm: row.licencaVenceEm }
+    : null;
   if (cache.size > 2000) cache.clear(); // endereços aleatórios não enchem a memória
   cache.set(slug, { at: Date.now(), info });
   return info;

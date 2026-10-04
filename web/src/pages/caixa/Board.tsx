@@ -83,6 +83,7 @@ export function OpenDay() {
   const { data: settings } = useSettings();
   // troco sugerido pelo Dono em Configurações (o caixa pode mudar)
   const sugerido = settings?.config?.abertura_sugerida as number | undefined;
+  const soConsulta = settings?.licenca?.status === 'SO_CONSULTA';
   useEffect(() => { if (cash == null && sugerido) setCash(sugerido); }, [sugerido]); // eslint-disable-line react-hooks/exhaustive-deps
   const hour = new Date().getHours();
   const hello = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
@@ -94,15 +95,23 @@ export function OpenDay() {
           <h1 style={{ marginTop: 12 }}>{hello}{user ? `, ${user.name.split(' ')[0]}` : ''}!</h1>
           <p className="muted">Para começar a lançar pedidos, abra o dia informando o dinheiro que está na gaveta. O estabelecimento fica <b>ABERTO</b> automaticamente.</p>
         </div>
+        {soConsulta && (
+          <div className="banner licenca bloqueio" role="alert" style={{ borderRadius: 10 }}>
+            🔒 <b>Sistema em só consulta</b>
+            <span>A licença do restaurante não está ativa: não dá para abrir o dia nem lançar pedidos. Você ainda pode abrir o caixa <b>só para receber contas abertas</b>. Fale com a ONE UP.</span>
+          </div>
+        )}
         <label className="field">
           <span>Dinheiro inicial na gaveta (troco)</span>
           <MoneyInput value={cash} onChange={setCash} autoFocus />
         </label>
-        <button className="btn go xl block" disabled={busy || cash == null} onClick={async () => {
-          if (await run(() => api.post('/api/day/open', { openingCashCents: cash }), 'Dia aberto. Bom trabalho!')) {
+        <button className={`btn ${soConsulta ? 'primary' : 'go'} xl block`} disabled={busy || cash == null} onClick={async () => {
+          const ok = await run(() => api.post('/api/day/open', { openingCashCents: cash, somenteReceber: soConsulta }), soConsulta ? 'Caixa aberto só para receber contas.' : 'Dia aberto. Bom trabalho!',
+            (e) => { if (e?.code === 'LICENCA_SO_CONSULTA') qc.invalidateQueries({ queryKey: ['settings'] }); return false; });
+          if (ok) {
             qc.invalidateQueries({ queryKey: ['board'] }); qc.invalidateQueries({ queryKey: ['register'] }); qc.invalidateQueries({ queryKey: ['settings'] });
           }
-        }}>☀ Abrir o dia</button>
+        }}>{soConsulta ? '💳 Abrir caixa só para receber contas' : '☀ Abrir o dia'}</button>
         <div className="small muted center">
           Estabelecimento agora: <b>{settings?.restaurant.isOpen ? 'ABERTO' : 'FECHADO'}</b> · Contas pendentes de outros dias continuam em “A receber”.
         </div>

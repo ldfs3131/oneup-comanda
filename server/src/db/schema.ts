@@ -14,6 +14,27 @@ export const empresas = pgTable('empresas', {
   produto: text('produto').notNull().default('restaurante'),
   status: text('status').notNull().default('ATIVA'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // Licença online (0015): ATIVO | SO_CONSULTA | SUSPENSO, definida pela ONE UP. Vencimento nulo = sem vencimento.
+  licencaStatus: text('licenca_status').notNull().default('ATIVO'),
+  licencaVenceEm: date('licenca_vence_em', { mode: 'string' }),
+  mensalidadeCents: integer('mensalidade_cents').notNull().default(0),
+  plano: text('plano'),
+  donoNome: text('dono_nome'),
+  donoWhatsapp: text('dono_whatsapp'),
+  cobrancaEnviadaEm: timestamp('cobranca_enviada_em', { withTimezone: true }),
+  observacao: text('observacao'),
+});
+
+/** Histórico de licença e cobrança (só a plataforma lê e grava; sem RLS). */
+export const plataformaHistorico = pgTable('plataforma_historico', {
+  id: serial('id').primaryKey(),
+  empresaId: integer('empresa_id').notNull().references(() => empresas.id),
+  tipo: text('tipo').notNull(),
+  antes: jsonb('antes'),
+  depois: jsonb('depois'),
+  mensagem: text('mensagem').notNull(),
+  usuario: text('usuario'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // ---------- Enums ----------
@@ -153,6 +174,8 @@ export const cashRegisters = pgTable('cash_registers', {
   differenceCents: integer('difference_cents'),
   closingNote: text('closing_note'),
   summary: jsonb('summary'),
+  /** aberto em "só consulta" apenas para receber contas abertas (0015) */
+  somenteReceber: boolean('somente_receber').notNull().default(false),
 });
 
 export const cashMovements = pgTable('cash_movements', {

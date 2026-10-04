@@ -223,7 +223,7 @@ EXISTE=$(sudo -u postgres psql -d oneup -tAc "SELECT 1 FROM empresas e WHERE e.s
 if [ "$EXISTE" != 1 ]; then
   P_DONO=$(senha 10); P_CAIXA=$(pin 6); P_COZ=$(pin 6); P_ONEUP=$(senha 16)
   node dist/scripts/setup.js --empresa="$EMPRESA" --nome="$NOME" --admin-name="Rafael" --admin-user=rafael --admin-pass="$P_DONO" \
-    --caixa-pass="$P_CAIXA" --cozinha-pass="$P_COZ" --cardapio=exemplo
+    --caixa-pass="$P_CAIXA" --cozinha-pass="$P_COZ" --cardapio=piloto
   # senhas guardadas JÁ (se algo abaixo falhar, elas não se perdem)
   ( umask 077; cat >> "$ACESSOS" <<TXT
 ==================== $NOME — criado em $(date '+%d/%m/%Y %H:%M') ====================

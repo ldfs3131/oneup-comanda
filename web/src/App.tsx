@@ -32,6 +32,7 @@ import BaseComparacao from './pages/admin/BaseComparacao';
 import AppPage from './pages/public/AppPage';
 import PedidoStatus from './pages/public/PedidoStatus';
 import Pendencias from './pages/admin/Pendencias';
+import Plataforma from './pages/admin/Plataforma';
 import { ThemeApplier } from './components/brand';
 
 /** Carregando; sem internet, avisa que está tentando reconectar (não pede a senha de novo). */
@@ -105,6 +106,7 @@ export default function App() {
         <Route path="tempo" element={<SoOneUp><TimingPage /></SoOneUp>} />
         <Route path="pedidos" element={<OrdersHistory />} />
         <Route path="oneup/base" element={<SoOneUp><BaseComparacao /></SoOneUp>} />
+        <Route path="oneup/plataforma" element={<SoOneUp><Plataforma /></SoOneUp>} />
         <Route path="estoque" element={<StockPage />} />
         <Route path="pendencias" element={<Pendencias />} />
       </Route>

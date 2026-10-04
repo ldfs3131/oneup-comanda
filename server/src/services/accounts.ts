@@ -6,6 +6,7 @@ import {
   paymentMethods, payments, products, restaurantSettings, users,
 } from '../db/schema.js';
 import { HttpError, bad, conflict, notFound } from '../lib/http.js';
+import { MSG_SO_RECEBER, erroSoConsulta, licencaAtual } from '../lib/licenca.js';
 import type { AuthUser } from '../auth.js';
 import { applyStockForSale, type StockDecision, type StockNeed } from './stock.js';
 
@@ -25,12 +26,17 @@ export async function currentRegister(tx: Executor, modo: 'auto' | 'fechar' = 'a
 }
 export async function requireOpenRegister(tx: Executor, modo: 'auto' | 'fechar' = 'auto') {
   const r = await currentRegister(tx, modo);
-  if (!r) throw conflict('O dia ainda não foi aberto. Clique em "Abrir o dia" (caixa) antes de continuar.');
+  if (!r) {
+    // sem dia aberto e licença fora do ar: explica o motivo (o botão "Abrir o dia" também está bloqueado)
+    if ((await licencaAtual()).efetivo !== 'ATIVO') throw erroSoConsulta();
+    throw conflict('O dia ainda não foi aberto. Clique em "Abrir o dia" (caixa) antes de continuar.');
+  }
   return r;
 }
 /** Pedidos novos só com o dia aberto: caixa aberto + estabelecimento ABERTO. */
 export async function requireTakingOrders(tx: Executor) {
   const reg = await requireOpenRegister(tx);
+  if (reg.somenteReceber) throw conflict(MSG_SO_RECEBER);
   const [s] = await tx.select({ isOpen: restaurantSettings.isOpen }).from(restaurantSettings).limit(1);
   if (!s?.isOpen) throw conflict('Estabelecimento FECHADO: não é possível lançar pedidos. Reabra os pedidos para continuar.');
   return reg;

@@ -6,6 +6,7 @@ import { currentContext, db } from './db/index.js';
 import { aparelhos, roles, sessions, users } from './db/schema.js';
 import { HttpError } from './lib/http.js';
 import { config } from './config.js';
+import { erroSuspenso } from './lib/licenca.js';
 
 export type Role = 'ADMIN' | 'CAIXA' | 'COZINHA';
 export type AuthUser = { id: number; name: string; username: string; role: Role; /** ONE UP (Administrador da plataforma) */ oneup: boolean };
@@ -98,6 +99,8 @@ export function requireRole(...allowed: Role[]) {
   return async (req: FastifyRequest, _reply: FastifyReply) => {
     const user = await userFromToken(req.cookies[COOKIE]);
     if (!user) throw new HttpError(401, 'Sessão expirada. Faça login novamente.');
+    // licença SUSPENSA pela ONE UP: a equipe do restaurante não usa o sistema (o acesso ONE UP continua)
+    if (!user.oneup && req.empresa?.licencaStatus === 'SUSPENSO') throw erroSuspenso();
     if (allowed.length && user.role !== 'ADMIN' && !allowed.includes(user.role)) {
       throw new HttpError(403, 'Seu perfil não tem acesso a esta função.');
     }
@@ -110,8 +113,10 @@ export const me = (req: FastifyRequest) => req.user as AuthUser;
 /** Guard: só o usuário da ONE UP (Administrador da plataforma). Para os demais a rota "não existe" (404). */
 export function requireOneup() {
   return async (req: FastifyRequest, reply: FastifyReply) => {
-    await requireRole('ADMIN')(req, reply);
-    if (!(req.user as AuthUser).oneup) throw new HttpError(404, 'Recurso não disponível.');
+    // Caixa e Cozinha também recebem 404 (não 403): para quem não é da ONE UP, a rota não existe
+    await requireRole()(req, reply);
+    const u = req.user as AuthUser;
+    if (!u.oneup || u.role !== 'ADMIN') throw new HttpError(404, 'Recurso não disponível.');
   };
 }
 

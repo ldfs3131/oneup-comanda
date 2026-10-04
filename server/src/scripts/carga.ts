@@ -8,7 +8,7 @@
  *   node dist/scripts/carga.js --base=http://localhost:3400 --dominio=carga.local --empresas=r001 \
  *        --caixas=6 --cozinhas=3 --donos=1 --clientes=90 --minutos=3 --ritmo=pico --ips=wifi --pid=<pid do servidor>
  *   (várias empresas: --empresas=r001..r100)
- * Pré-requisito: empresas criadas com setup.js (--cardapio=exemplo) e senhas <slug>-admin / <slug>-caixa / <slug>-coz.
+ * Pré-requisito: empresas criadas com setup.js (--cardapio=piloto) e senhas <slug>-admin / <slug>-caixa / <slug>-coz.
  * O nome de cada cliente/conta leva a marca da empresa (ex.: "R037 Mesa 4") para provar que nada vaza.
  */
 import http from 'node:http';

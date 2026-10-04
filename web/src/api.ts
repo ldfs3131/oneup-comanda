@@ -28,6 +28,8 @@ async function request<T>(method: string, path: string, body?: unknown, opts: { 
   try { data = text ? JSON.parse(text) : null; } catch { data = null; }
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/login')) window.dispatchEvent(new Event('ha:unauthorized'));
+    // restaurante suspenso pela ONE UP: volta para a tela de entrada, que mostra "Acesso suspenso — fale com a ONE UP"
+    if (data?.code === 'LICENCA_SUSPENSA' && !path.startsWith('/api/auth/login')) window.dispatchEvent(new Event('ha:unauthorized'));
     throw new ApiError(res.status, data?.error ?? 'Erro inesperado.', data?.code, data?.details);
   }
   return data as T;

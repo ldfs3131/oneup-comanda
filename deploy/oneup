@@ -1,27 +1,617 @@
 #!/usr/bin/env bash
 # ONE UP Comanda — comandos do servidor. Digite: oneup ajuda
+# (Também é carregado pelo instalador para reaproveitar as funções: ONEUP_SO_FUNCOES=1 . deploy/oneup)
+# shellcheck disable=SC2015  # "teste && verde || vermelho": as mensagens (echo) nunca falham
 set -uo pipefail
-APP=/opt/oneup/app
-BASE=/opt/oneup
-ENVF=$BASE/.env
+BASE=${ONEUP_BASE:-/opt/oneup}
+APP=${ONEUP_APP:-$BASE/app}
+ENVF=${ONEUP_ENV:-$BASE/.env}
 BKP=$BASE/backups
-GUARDAR_DIAS=${GUARDAR_DIAS:-14}
+ESTADO=$BASE/estado                 # datas do último envio, avisos já mandados (só o root lê)
+CHAVE=$BASE/.chave-backup           # frase que cifra as cópias externas (600, root)
+RCLONE_CONF=$BASE/rclone.conf       # conexão com o Google Drive (600, root)
+GUARDAR_DIAS=${GUARDAR_DIAS:-14}    # cópias locais
+EXT_DIARIAS=${EXT_DIARIAS:-30}      # cópias externas diárias
+EXT_MENSAIS=${EXT_MENSAIS:-12}      # cópias externas mensais (a primeira de cada mês)
+ALERTA_REPETIR_H=${ALERTA_REPETIR_H:-6}
+ALERTA_DISCO=${ALERTA_DISCO:-85}
+ATRASO_MAX_H=${ATRASO_MAX_H:-26}
+CERT_DIAS_MIN=${CERT_DIAS_MIN:-14}
+CERT_LE=${CERT_LE:-/etc/letsencrypt/live/oneup-comanda/cert.pem}
+LOG_ALERTAS=${LOG_ALERTAS:-/var/log/oneup-alertas.log}
+REMOTO_PADRAO=oneup-drive
+PASTA_PADRAO=ONEUP-backups
+# {"scope":"drive.file"} em base64: o rclone só enxerga os arquivos que ele mesmo criou no Drive (nada mais da conta)
+ESCOPO_DRIVE=eyJzY29wZSI6ImRyaXZlLmZpbGUifQ
 export PATH="$BASE/node/bin:$PATH"   # Node próprio do ONE UP Comanda (o dos outros sistemas não muda)
 
 verde() { printf '\033[1;32m%s\033[0m\n' "$*"; }
+amarelo() { printf '\033[1;33m%s\033[0m\n' "$*"; }
 vermelho() { printf '\033[1;31m%s\033[0m\n' "$*"; }
-[ "$(id -u)" = 0 ] || { vermelho "Use como root."; exit 1; }
 senha() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'); echo "${s:0:${1:-10}}"; }
 pin() { local s; s=$(head -c 600 /dev/urandom | LC_ALL=C tr -dc '0-9'); echo "${s:0:${1:-6}}"; }
+# shellcheck disable=SC1090
 carregar_env() { set -a; . "$ENVF"; set +a; }
-porta() { grep '^PORT=' "$ENVF" 2>/dev/null | cut -d= -f2 || echo 3010; }
-saude() { local p; p=$(porta); for i in $(seq 1 "${1:-60}"); do curl -fsS "http://127.0.0.1:${p:-3010}/api/health" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
+porta() { local p; p=$(envget PORT); echo "${p:-3010}"; }
+saude() { local p i; p=$(porta); for i in $(seq 1 "${1:-60}"); do curl -fsS "http://127.0.0.1:$p/api/health" >/dev/null 2>&1 && return 0; sleep 1; done; return 1; }
+codigo_saude() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$(porta)/api/health" 2>/dev/null || true; }
+agora() { date +%s; }
+horas_desde() { echo $(( ( $(agora) - $1 ) / 3600 )); }
+quando_txt() { date -d "@$1" '+%d/%m/%Y %H:%M'; }
+
+# ------------------------------------------------------------------------------------------------
+# .env: ler e mudar UMA chave sem reescrever o arquivo (as outras linhas e senhas ficam como estão)
+# ------------------------------------------------------------------------------------------------
+envget() {  # chave [arquivo] → valor sem aspas
+  local f=${2:-$ENVF} v
+  [ -f "$f" ] || return 0
+  v=$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-) || true
+  case "$v" in \'*\') v=${v#\'}; v=${v%\'} ;; \"*\") v=${v#\"}; v=${v%\"} ;; esac
+  printf '%s' "$v"
+}
+env_tem() { [ -f "${2:-$ENVF}" ] && grep -q "^$1=" "${2:-$ENVF}"; }
+env_citar() {  # valores com & ? = espaço etc. vão entre aspas simples (o bash e o systemd leem igual)
+  if [[ "$1" =~ ^[A-Za-z0-9_./:@,+%-]*$ ]]; then printf '%s' "$1"
+  elif [[ "$1" == *"'"* ]]; then return 1
+  else printf "'%s'" "$1"; fi
+}
+env_definir() {  # chave valor [arquivo] — troca só a linha da chave (ou acrescenta no fim)
+  local k=$1 f=${3:-$ENVF} linha tmp
+  linha="$k=$(env_citar "$2")" || { vermelho "Valor de $k não pode ter aspas simples."; return 1; }
+  if [ -f "$f" ] && grep -q "^$k=" "$f"; then
+    tmp=$(mktemp "$f.XXXXXX") || return 1
+    L="$linha" K="$k" awk 'index($0, ENVIRON["K"] "=") == 1 && !feito { print ENVIRON["L"]; feito = 1; next } { print }' "$f" > "$tmp" \
+      && chmod --reference="$f" "$tmp" && chown --reference="$f" "$tmp" 2>/dev/null; mv -f "$tmp" "$f"
+  else
+    [ ! -s "$f" ] || [ -z "$(tail -c1 "$f")" ] || echo >> "$f"
+    printf '%s\n' "$linha" >> "$f"
+  fi
+}
+env_completar() {  # chave valor [arquivo] — só acrescenta se a chave ainda não existe (nunca troca)
+  env_tem "$1" "${3:-$ENVF}" || env_definir "$1" "$2" "${3:-$ENVF}"
+}
+
+# ------------------------------------------------------------------------------------------------
+# Avisos (WhatsApp pelo CallMeBot, Telegram, ntfy ou e-mail)
+# ------------------------------------------------------------------------------------------------
+urlencode() {
+  local LC_ALL=C s=$1 i c h out=''
+  for (( i = 0; i < ${#s}; i++ )); do
+    c=${s:i:1}
+    case "$c" in [a-zA-Z0-9.~_-]) out+=$c ;; *) printf -v h '%02X' "'$c"; out+="%${h: -2}" ;; esac
+  done
+  printf '%s' "$out"
+}
+montar_url_alerta() {  # modelo-com-{msg} texto → URL pronta (texto codificado)
+  local m; m=$(urlencode "$2")
+  printf '%s' "${1//\{msg\}/$m}"
+}
+nome_servidor() { local d; d=$(envget BASE_DOMAIN); echo "${d:-$(hostname)}"; }
+log_alerta() { ( umask 077; printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG_ALERTAS" ) 2>/dev/null || true; }
+enviar_email() {  # endereço texto
+  local assunto="ONE UP Comanda: aviso do servidor"
+  if command -v sendmail >/dev/null 2>&1; then
+    printf 'To: %s\nSubject: %s\nContent-Type: text/plain; charset=UTF-8\n\n%s\n' "$1" "$assunto" "$2" | sendmail -t
+  elif command -v msmtp >/dev/null 2>&1; then
+    printf 'To: %s\nSubject: %s\nContent-Type: text/plain; charset=UTF-8\n\n%s\n' "$1" "$assunto" "$2" | msmtp -t
+  elif command -v mail >/dev/null 2>&1; then
+    printf '%s\n' "$2" | mail -s "$assunto" "$1"
+  else
+    return 3
+  fi
+}
+# Devolve 0 = enviado; 2 = nenhum destino configurado; 1 = falhou o envio
+enviar_alerta() {
+  local texto url mail ok=0 tentou=0
+  texto="ONE UP Comanda ($(nome_servidor)): $1"
+  url=$(envget ALERTA_URL); mail=$(envget ALERTA_EMAIL)
+  if [ -z "$url" ] && [ -z "$mail" ]; then log_alerta "SEM DESTINO: $texto"; return 2; fi
+  if [ -n "$url" ]; then
+    tentou=1
+    if [[ "$url" == *"{msg}"* ]]; then
+      curl -fsS --max-time 30 -o /dev/null "$(montar_url_alerta "$url" "$texto")" || ok=1
+    else  # ntfy e parecidos: a mensagem vai no corpo
+      curl -fsS --max-time 30 -o /dev/null -H "Title: ONE UP Comanda" --data-binary "$texto" "$url" || ok=1
+    fi
+  fi
+  if [ -n "$mail" ]; then
+    tentou=1
+    enviar_email "$mail" "$texto" || ok=1
+  fi
+  [ "$tentou" = 1 ] || return 2
+  log_alerta "$([ "$ok" = 0 ] && echo ENVIADO || echo FALHOU): $texto"
+  return "$ok"
+}
+# Mesmo aviso no máximo 1 vez a cada ALERTA_REPETIR_H horas (arquivo de estado por assunto)
+pode_avisar() {
+  local f="$ESTADO/alertas/$1" t
+  [ -f "$f" ] || return 0
+  t=$(cat "$f" 2>/dev/null); [[ "$t" =~ ^[0-9]+$ ]] || return 0
+  [ $(( $(agora) - t )) -ge $(( ALERTA_REPETIR_H * 3600 )) ]
+}
+marcar_aviso() { mkdir -p "$ESTADO/alertas" && agora > "$ESTADO/alertas/$1"; }
+limpar_aviso() { rm -f "$ESTADO/alertas/$1"; }
+avisar_uma_vez() {  # assunto mensagem
+  pode_avisar "$1" || { log_alerta "repetido (não reenviado): $2"; return 0; }
+  local r=0; enviar_alerta "$2" || r=$?
+  # enviado ou sem destino: marca (não repete); falha de rede: tenta de novo na próxima vez
+  [ "$r" = 1 ] || marcar_aviso "$1"
+  return 0
+}
+
+# ------------------------------------------------------------------------------------------------
+# Cópia de segurança local
+# ------------------------------------------------------------------------------------------------
+# shellcheck disable=SC2012  # nomes nossos, sem espaços
+ultimo_dump() { ls -1t "$BKP"/oneup-*.dump 2>/dev/null | head -1; }
+ULTIMO_DUMP=''
+backup() {
+  mkdir -p "$BKP"; chmod 750 "$BKP"
+  local quando arq
+  quando=$(date +%Y-%m-%d_%H%M%S)
+  arq="$BKP/oneup-$quando.dump"
+  # shellcheck disable=SC2024  # de propósito: o arquivo é do root, o postgres só lê o banco
+  # o arquivo é criado pelo root já fechado (600): ninguém mais no servidor lê nem a cópia parcial
+  if ( umask 077; sudo -u postgres pg_dump -Fc -d oneup > "$arq.parcial" ) && mv "$arq.parcial" "$arq"; then
+    ( umask 077; tar -czf "$BKP/imagens-$quando.tar.gz" -C "$BASE" uploads 2>/dev/null ) || true
+    find "$BKP" -maxdepth 1 -name 'oneup-*.dump' -mtime +"$GUARDAR_DIAS" -delete
+    find "$BKP" -maxdepth 1 -name 'imagens-*.tar.gz' -mtime +"$GUARDAR_DIAS" -delete
+    ULTIMO_DUMP=$arq
+    verde "Cópia salva: $arq ($(du -h "$arq" | cut -f1)). Guardando os últimos $GUARDAR_DIAS dias."
+  else
+    rm -f "$arq.parcial"; vermelho "Falhou a cópia do banco."; return 1
+  fi
+}
+
+restaurar_banco() {  # arquivo .dump (pede confirmação)
+  local arq=$1 ok r
+  vermelho "ATENÇÃO: o banco inteiro (todos os restaurantes) volta para o momento desta cópia: $(basename "$arq")"
+  read -r -p "Para continuar digite RESTAURAR: " ok; [ "$ok" = RESTAURAR ] || { echo "Cancelado."; return 1; }
+  backup || { vermelho "Não consegui fazer a cópia do estado atual antes; cancelado."; return 1; }
+  systemctl stop oneup
+  ( umask 077; cp "$arq" /tmp/oneup-restaurar.dump ) && chown postgres /tmp/oneup-restaurar.dump
+  if sudo -u postgres pg_restore --clean --if-exists --no-owner --role=oneup_dono --single-transaction --exit-on-error -d oneup /tmp/oneup-restaurar.dump; then r=0; else r=$?; fi
+  rm -f /tmp/oneup-restaurar.dump
+  systemctl start oneup
+  if [ "$r" != 0 ]; then
+    vermelho "A restauração FALHOU (nada foi mudado no banco: tudo ou nada). O sistema voltou com os dados de antes."
+    saude 90 || vermelho "E o sistema não respondeu: oneup logs"
+    return 1
+  fi
+  saude 90 && verde "Restaurado e no ar." || { vermelho "Restaurado, mas o sistema não voltou: oneup logs"; return 1; }
+}
+
+# ------------------------------------------------------------------------------------------------
+# Cópia externa cifrada (Google Drive da ONE UP, pelo rclone)
+# ------------------------------------------------------------------------------------------------
+externo_remoto() { envget BACKUP_EXTERNO; }   # ex.: oneup-drive:ONEUP-backups (vazio = não configurada)
+rc() { RCLONE_CONFIG="$RCLONE_CONF" rclone --contimeout 60s --timeout 5m --retries 3 --low-level-retries 10 "$@"; }
+gerar_frase() {  # 8 grupos de 5 letras/números (≈ 230 bits), fácil de anotar
+  local s out='' i; s=$(senha 40)
+  for i in 0 5 10 15 20 25 30 35; do out+="${s:i:5}"; [ "$i" = 35 ] || out+='-'; done
+  echo "$out"
+}
+_gpg() {  # gpg sem chaveiro do root e sem guardar a frase na memória
+  local h r=0; h=$(mktemp -d)
+  GNUPGHOME=$h gpg --batch --yes --quiet --pinentry-mode loopback --no-symkey-cache "$@" || r=$?
+  GNUPGHOME=$h gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+  rm -rf "$h"; return "$r"
+}
+cifrar() { _gpg --passphrase-file "${3:-$CHAVE}" --symmetric --cipher-algo AES256 --compress-algo none -o "$2" "$1"; }  # entrada saída [frase]
+decifrar() { _gpg --passphrase-file "${3:-$CHAVE}" --decrypt -o "$2" "$1"; }                                         # entrada saída [frase]
+eh_nome_externo() { [[ "$1" =~ ^oneup-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}\.tar\.gpg$ ]]; }
+# lista de nomes (stdin) → os que passam dos N mais novos (os nomes são em ordem de data). Ignora arquivos que não são nossos.
+nomes_para_apagar() {
+  local n; while IFS= read -r n; do eh_nome_externo "$n" && echo "$n"; done | sort -r | tail -n +$(( $1 + 1 ))
+}
+mes_ja_tem_mensal() {  # lista (stdin) AAAA-MM → 0 se já existe cópia mensal daquele mês
+  local n; while IFS= read -r n; do eh_nome_externo "$n" && [[ "$n" == "oneup-$1-"* ]] && return 0; done; return 1
+}
+externo_pronto() {
+  local r; r=$(externo_remoto)
+  [ -n "$r" ] || { amarelo "Cópia externa NÃO configurada. Para ligar: oneup backup-externo configurar"; return 3; }
+  command -v rclone >/dev/null 2>&1 || { vermelho "O programa rclone não está instalado. Rode: oneup backup-externo configurar"; return 1; }
+  [ -s "$CHAVE" ] || { vermelho "Falta a frase de cifragem ($CHAVE). Rode: oneup backup-externo configurar"; return 1; }
+}
+# Cifra a cópia local (banco + imagens) e envia; confere; guarda 30 diárias + 12 mensais
+enviar_externo() {  # [arquivo .dump] (padrão: o mais novo)
+  externo_pronto || return $?
+  local remoto dump quando nome dir mes r=0
+  remoto=$(externo_remoto)
+  dump=${1:-$(ultimo_dump)}
+  [ -f "$dump" ] || { vermelho "Nenhuma cópia local para enviar."; return 1; }
+  quando=$(basename "$dump" .dump); quando=${quando#oneup-}
+  nome="oneup-$quando.tar.gpg"
+  eh_nome_externo "$nome" || { vermelho "Nome de cópia inesperado: $dump"; return 1; }
+  dir=$(mktemp -d "$BKP/.envio.XXXXXX") || return 1
+  chmod 700 "$dir"
+  (
+    set -e
+    umask 077
+    itens=("$(basename "$dump")"); [ -f "$BKP/imagens-$quando.tar.gz" ] && itens+=("imagens-$quando.tar.gz")
+    tar -cf "$dir/pacote.tar" -C "$BKP" "${itens[@]}"
+    cifrar "$dir/pacote.tar" "$dir/$nome"
+    rm -f "$dir/pacote.tar"
+  ) || { rm -rf "$dir"; vermelho "Não consegui cifrar a cópia."; return 1; }
+  echo "Enviando $nome ($(du -h "$dir/$nome" | cut -f1)) para $remoto …"
+  if ! rc copyto "$dir/$nome" "$remoto/diarias/$nome"; then rm -rf "$dir"; vermelho "O envio para $remoto falhou (internet ou autorização do Google)."; return 1; fi
+  # conferência: o arquivo lá tem o mesmo tamanho e a mesma assinatura (md5) do daqui
+  if ! rc check --one-way "$dir" "$remoto/diarias" >/dev/null 2>&1; then rm -rf "$dir"; vermelho "O arquivo enviado não confere com o original. Rode de novo: oneup backup-externo agora"; return 1; fi
+  rm -rf "$dir"
+  mkdir -p "$ESTADO"; agora > "$ESTADO/ultimo-envio-externo"; echo "$nome" > "$ESTADO/ultimo-envio-externo.nome"
+  verde "Cópia cifrada enviada e conferida: $remoto/diarias/$nome"
+  # a primeira cópia de cada mês fica também em mensais/ (guardadas 12 meses)
+  mes=${quando:0:7}
+  local mensais; mensais=$(rc lsf --files-only "$remoto/mensais" 2>/dev/null || true)
+  if ! mes_ja_tem_mensal "$mes" <<< "$mensais"; then
+    rc copyto "$remoto/diarias/$nome" "$remoto/mensais/$nome" && verde "Guardada também como cópia do mês ($mes)." || r=1
+  fi
+  local sub max n
+  for sub in diarias mensais; do
+    [ "$sub" = diarias ] && max=$EXT_DIARIAS || max=$EXT_MENSAIS
+    while IFS= read -r n; do
+      [ -n "$n" ] && { rc deletefile "$remoto/$sub/$n" || r=1; }
+    done < <(rc lsf --files-only "$remoto/$sub" 2>/dev/null | nomes_para_apagar "$max")
+  done
+  [ "$r" = 0 ] || amarelo "Aviso: a cópia foi enviada, mas a limpeza das antigas no Drive teve erro (tenta de novo amanhã)."
+  return 0
+}
+listar_externo() {
+  externo_pronto || return $?
+  local remoto sub; remoto=$(externo_remoto)
+  for sub in diarias mensais; do
+    echo; verde "Cópias $sub em $remoto/$sub:"
+    rc lsl "$remoto/$sub" 2>/dev/null | sort -k4 -r | awk '{ printf "  %-36s %8.1f MB   %s %s\n", $4, $1/1048576, $2, substr($3,1,5) }' || echo "  (nenhuma)"
+  done
+  echo; echo "Para voltar uma delas: oneup restaurar-externo <nome-do-arquivo>"
+}
+instalar_rclone() {
+  command -v rclone >/dev/null 2>&1 && return 0
+  echo "Instalando o rclone (programa que conversa com o Google Drive)…"
+  NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rclone >/dev/null 2>&1 \
+    || { curl -fsSL https://rclone.org/install.sh | bash >/dev/null 2>&1; } \
+    || { vermelho "Não consegui instalar o rclone. Tente: apt-get install rclone"; return 1; }
+  command -v rclone >/dev/null 2>&1
+}
+garantir_chave() {  # cria a frase se faltar; pergunta se o Lucas já tem uma de outra instalação
+  [ -s "$CHAVE" ] && return 0
+  local f
+  echo
+  echo "Falta a FRASE que tranca as cópias. Se você já tem uma frase de uma instalação anterior (servidor antigo),"
+  read -r -p "cole aqui; se não tem, só aperte Enter para eu criar uma nova: " f
+  ( umask 077; if [ -n "$f" ]; then printf '%s\n' "$f" > "$CHAVE"; else gerar_frase > "$CHAVE"; fi )
+  chown root:root "$CHAVE"; chmod 600 "$CHAVE"
+  if [ -z "$f" ]; then
+    echo; vermelho "ANOTE ESTA FRASE AGORA (ela aparece só esta vez):"; echo; echo "    $(cat "$CHAVE")"; echo
+    echo "Guarde num lugar seguro FORA do servidor (gerenciador de senhas ou papel). Sem ela, as cópias do Google Drive"
+    echo "não abrem — nem a ONE UP consegue recuperar."
+    read -r -p "Depois de anotar, aperte Enter para continuar… " _
+  fi
+}
+configurar_externo() {
+  echo; verde "Cópia de segurança no Google Drive da ONE UP (cifrada) — passo a passo"
+  instalar_rclone || return 1
+  garantir_chave
+  mkdir -p "$ESTADO"; touch "$RCLONE_CONF"; chmod 600 "$RCLONE_CONF"
+  local usar=s token alvo="$REMOTO_PADRAO:$PASTA_PADRAO"
+  if grep -q "^\[$REMOTO_PADRAO\]" "$RCLONE_CONF"; then
+    read -r -p "Já existe uma conexão com o Google Drive. Usar a mesma? (S/n) " usar
+  else usar=n; fi
+  if [ "${usar,,}" = n ]; then
+    cat <<TXT
+
+O servidor não tem navegador, então a autorização do Google é feita no SEU computador:
+
+  1. No seu computador, baixe o rclone: https://rclone.org/downloads/  (Windows: "Intel/AMD - 64 Bit"),
+     descompacte e abra a pasta. Clique com o botão direito num espaço vazio → "Abrir no Terminal".
+  2. Cole este comando e dê Enter:
+
+       ./rclone authorize "drive" "$ESCOPO_DRIVE"
+
+  3. O navegador abre: entre com a conta Google da ONE UP e clique em "Permitir".
+     (O rclone só vai enxergar a pasta de cópias que ele mesmo criar; o resto do seu Drive fica invisível.)
+  4. Volte ao terminal do seu computador: aparece um texto entre "Paste the following into your remote machine --->"
+     e "<---End paste". Copie SÓ o pedaço que começa com {"access_token" e termina com }  e cole aqui embaixo.
+
+TXT
+    read -r -p "Cole aqui e aperte Enter: " token
+    token=$(printf '%s' "$token" | tr -d '\r\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [[ "$token" == "{"*"access_token"*"}" ]] || { vermelho "Isso não parece a autorização (deve começar com {\"access_token\"). Rode de novo: oneup backup-externo configurar"; return 1; }
+    # grava a conexão (troca uma anterior com o mesmo nome)
+    awk -v r="[$REMOTO_PADRAO]" '$0 == r { pula = 1; next } /^\[/ { pula = 0 } !pula' "$RCLONE_CONF" > "$RCLONE_CONF.novo" \
+      && printf '[%s]\ntype = drive\nscope = drive.file\ntoken = %s\n\n' "$REMOTO_PADRAO" "$token" >> "$RCLONE_CONF.novo" \
+      && chmod 600 "$RCLONE_CONF.novo" && mv -f "$RCLONE_CONF.novo" "$RCLONE_CONF"
+  fi
+  testar_e_usar_remoto "$alvo"
+}
+testar_e_usar_remoto() {  # remoto:pasta
+  local alvo=$1 teste
+  echo "Testando a conexão com $alvo …"
+  teste=$(mktemp); echo "teste ONE UP $(date)" > "$teste"
+  if rc mkdir "$alvo" && rc copyto "$teste" "$alvo/teste-de-conexao.txt" && rc deletefile "$alvo/teste-de-conexao.txt"; then
+    rm -f "$teste"
+    env_definir BACKUP_EXTERNO "$alvo"
+    mkdir -p "$ESTADO"
+    [ -f "$ESTADO/externo-configurado-em" ] || agora > "$ESTADO/externo-configurado-em"
+    verde "Conectado! As cópias vão para a pasta \"${alvo#*:}\" do Google Drive, todo dia depois das 03:30."
+    local ja; read -r -p "Enviar a primeira cópia agora? (S/n) " ja
+    [ "${ja,,}" = n ] || { backup && enviar_externo "$ULTIMO_DUMP"; }
+  else
+    rm -f "$teste"; vermelho "Não consegui gravar no Drive. Confira a autorização e rode de novo: oneup backup-externo configurar"; return 1
+  fi
+}
+restaurar_externo() {  # nome do arquivo no Drive
+  externo_pronto || return $?
+  local remoto arq sub='' dir
+  remoto=$(externo_remoto); arq=$(basename "${1:-}")
+  if ! eh_nome_externo "$arq"; then
+    echo "Uso: oneup restaurar-externo oneup-AAAA-MM-DD_HHMMSS.tar.gpg   (veja os nomes com: oneup backup-externo listar)"; return 1
+  fi
+  if rc lsf --files-only "$remoto/diarias" 2>/dev/null | grep -qx "$arq"; then sub=diarias
+  elif rc lsf --files-only "$remoto/mensais" 2>/dev/null | grep -qx "$arq"; then sub=mensais
+  else vermelho "Não achei $arq no Drive. Veja os nomes com: oneup backup-externo listar"; return 1; fi
+  dir=$(mktemp -d "$BKP/.restaurar.XXXXXX") && chmod 700 "$dir" || return 1
+  local r=0
+  _restaurar_externo_em "$dir" "$remoto/$sub/$arq" || r=$?
+  rm -rf "$dir"
+  return "$r"
+}
+_restaurar_externo_em() {  # pasta-temporária caminho-no-remoto
+  local dir=$1 origem=$2 arq frase dump img resp
+  arq=$(basename "$origem")
+  echo "Baixando $arq …"
+  rc copyto "$origem" "$dir/$arq" || { vermelho "Não consegui baixar."; return 1; }
+  if ! decifrar "$dir/$arq" "$dir/pacote.tar" 2>/dev/null; then
+    amarelo "A frase deste servidor não abre esta cópia (ela foi feita com outra frase, de outra instalação)."
+    read -r -s -p "Cole a frase antiga (não aparece na tela) e aperte Enter: " frase; echo
+    ( umask 077; printf '%s\n' "$frase" > "$dir/frase" )
+    decifrar "$dir/$arq" "$dir/pacote.tar" "$dir/frase" 2>/dev/null || { vermelho "Frase errada: não consegui abrir a cópia."; return 1; }
+  fi
+  tar -xf "$dir/pacote.tar" -C "$dir" || { vermelho "Cópia danificada."; return 1; }
+  dump=$(find "$dir" -maxdepth 1 -name 'oneup-*.dump' | head -1)
+  img=$(find "$dir" -maxdepth 1 -name 'imagens-*.tar.gz' | head -1)
+  [ -n "$dump" ] || { vermelho "A cópia não tem o banco."; return 1; }
+  restaurar_banco "$dump" || return 1
+  if [ -n "$img" ]; then
+    read -r -p "Voltar também as fotos dos produtos desta cópia? (s/N) " resp
+    if [ "${resp,,}" = s ]; then
+      # as fotos de agora já foram guardadas na cópia feita antes de restaurar
+      rm -rf "$BASE/uploads.restaurando" && mkdir -p "$BASE/uploads.restaurando" \
+        && tar -xzf "$img" -C "$BASE/uploads.restaurando" \
+        && rm -rf "$BASE/uploads" && mv "$BASE/uploads.restaurando/uploads" "$BASE/uploads" && rm -rf "$BASE/uploads.restaurando" \
+        && chown -R oneup:oneup "$BASE/uploads" && verde "Fotos restauradas." || vermelho "Não consegui restaurar as fotos (o banco já voltou)."
+    fi
+  fi
+}
+
+# ------------------------------------------------------------------------------------------------
+# Vigia (de hora em hora) e aviso de falha dos serviços
+# ------------------------------------------------------------------------------------------------
+dias_para_vencer() {  # certificado.pem → dias inteiros até vencer (negativo = vencido)
+  local fim; fim=$(openssl x509 -enddate -noout -in "$1" 2>/dev/null | cut -d= -f2) || return 1
+  [ -n "$fim" ] || return 1
+  echo $(( ( $(date -d "$fim" +%s) - $(agora) ) / 86400 ))
+}
+ultimo_envio_externo() {  # epoch do último envio OK (ou da configuração, se nunca enviou)
+  local t
+  t=$(cat "$ESTADO/ultimo-envio-externo" 2>/dev/null) || t=$(cat "$ESTADO/externo-configurado-em" 2>/dev/null) || t=''
+  [[ "$t" =~ ^[0-9]+$ ]] && echo "$t"
+}
+em_manutencao() { [ -n "$(find "$ESTADO/manutencao" -mmin -30 2>/dev/null)" ]; }
+vigia() {
+  mkdir -p "$ESTADO"
+  local pct ult h t d c
+  # 1) disco
+  pct=$(df -P "$BASE" 2>/dev/null | awk 'NR == 2 { gsub("%", "", $5); print $5 }')
+  if [[ "$pct" =~ ^[0-9]+$ ]] && [ "$pct" -gt "$ALERTA_DISCO" ]; then
+    avisar_uma_vez disco "Disco do servidor com ${pct}% ocupado. Se encher, o sistema e as cópias param. No terminal da VPS rode 'oneup status' e chame o suporte para liberar espaço ou aumentar o plano."
+  else limpar_aviso disco; fi
+  # 2) cópia local
+  ult=$(ultimo_dump)
+  if [ -z "$ult" ]; then
+    avisar_uma_vez backup-local "Não existe nenhuma cópia de segurança no servidor. Rode 'oneup backup' no terminal da VPS."
+  else
+    h=$(horas_desde "$(stat -c %Y "$ult")")
+    if [ "$h" -gt "$ATRASO_MAX_H" ]; then
+      avisar_uma_vez backup-local "A última cópia de segurança é de ${h} h atrás (deveria ser diária). Rode 'oneup backup' e veja a mensagem; se der erro, mande a tela para o suporte."
+    else limpar_aviso backup-local; fi
+  fi
+  # 3) cópia no Google Drive (só se configurada)
+  if [ -n "$(externo_remoto)" ]; then
+    t=$(ultimo_envio_externo)
+    if [ -n "$t" ] && [ "$(horas_desde "$t")" -gt "$ATRASO_MAX_H" ]; then
+      avisar_uma_vez backup-externo "Faz $(horas_desde "$t") h que nenhuma cópia chega no Google Drive. Rode 'oneup backup-externo agora'. Se pedir autorização, rode 'oneup backup-externo configurar'."
+    else limpar_aviso backup-externo; fi
+  fi
+  # 4) certificado HTTPS (modo Nginx; no Caddy a renovação é dele)
+  if [ "$(envget ONEUP_WEB)" = nginx ] && [ -f "$CERT_LE" ]; then
+    d=$(dias_para_vencer "$CERT_LE" || echo '')
+    if [[ "$d" =~ ^-?[0-9]+$ ]] && [ "$d" -lt "$CERT_DIAS_MIN" ]; then
+      avisar_uma_vez certificado "O cadeado (HTTPS) dos restaurantes vence em ${d} dias e não renovou sozinho. Rode 'oneup certificado' no terminal da VPS; se der erro, mande a tela para o suporte."
+    else limpar_aviso certificado; fi
+  fi
+  # 5) sistema no ar (2 falhas seguidas, 1 minuto entre elas; pula durante 'oneup atualizar')
+  if ! em_manutencao; then
+    c=$(codigo_saude)
+    if [ "$c" != 200 ]; then sleep "${VIGIA_ESPERA:-60}"; c=$(codigo_saude); fi
+    if [ "$c" != 200 ]; then
+      avisar_uma_vez fora-do-ar "O sistema está FORA DO AR (resposta: ${c:-nenhuma}). Rode 'oneup reiniciar' no terminal da VPS. Se não voltar, rode 'oneup logs' e mande a tela para o suporte."
+      [ -f "$ESTADO/fora-do-ar" ] || agora > "$ESTADO/fora-do-ar"
+    elif [ -f "$ESTADO/fora-do-ar" ]; then
+      rm -f "$ESTADO/fora-do-ar"; limpar_aviso fora-do-ar
+      enviar_alerta "O sistema voltou a responder normalmente." || true
+    fi
+  fi
+  return 0
+}
+alerta_falha() {  # unidade do systemd que falhou (sem .service)
+  case "$1" in
+    oneup)
+      # o systemd religa sozinho em 3 s: só avisa se continuar fora
+      sleep "${FALHA_ESPERA:-45}"
+      if saude 5; then log_alerta "o sistema caiu e voltou sozinho (sem aviso)"; return 0; fi
+      avisar_uma_vez fora-do-ar "O sistema CAIU e não conseguiu religar sozinho. Rode 'oneup status' e 'oneup logs' no terminal da VPS e mande a tela para o suporte."
+      [ -f "$ESTADO/fora-do-ar" ] || { mkdir -p "$ESTADO"; agora > "$ESTADO/fora-do-ar"; }
+      ;;
+    oneup-backup)
+      local motivo; motivo=$(cat "$ESTADO/backup-falha.txt" 2>/dev/null || echo "A cópia de segurança de hoje falhou.")
+      avisar_uma_vez backup-falhou "$motivo Rode 'oneup backup' (e 'oneup backup-externo agora') no terminal da VPS e veja a mensagem; se der erro, mande a tela para o suporte."
+      ;;
+    *) avisar_uma_vez "falha-$1" "O serviço $1 falhou. Rode 'oneup status' no terminal da VPS e mande a tela para o suporte." ;;
+  esac
+}
+backup_diario() {  # usado pelo oneup-backup.service: local + Drive; falha = aviso (OnFailure)
+  mkdir -p "$ESTADO"; rm -f "$ESTADO/backup-falha.txt"
+  if ! backup; then echo "A cópia de segurança do banco FALHOU hoje (nada foi salvo)." > "$ESTADO/backup-falha.txt"; return 1; fi
+  [ -n "$(externo_remoto)" ] || { amarelo "Cópia externa NÃO configurada (só a cópia local foi feita)."; return 0; }
+  if ! enviar_externo "$ULTIMO_DUMP"; then
+    echo "A cópia local foi feita, mas o envio para o Google Drive FALHOU." > "$ESTADO/backup-falha.txt"; return 1
+  fi
+}
+
+# ------------------------------------------------------------------------------------------------
+# Configurar os avisos
+# ------------------------------------------------------------------------------------------------
+configurar_alertas() {
+  local op url='' tel key token chat topico email
+  cat <<'TXT'
+
+Avisos do servidor (backup que falhou, disco cheio, cadeado vencendo, sistema fora do ar).
+Para onde mandar?
+  1) WhatsApp (CallMeBot — grátis, recomendado)
+  2) Telegram (um robô seu)
+  3) Aplicativo ntfy (celular)
+  4) Tenho uma URL pronta (com {msg} onde vai o texto)
+  5) Só e-mail (precisa de programa de e-mail configurado no servidor)
+TXT
+  read -r -p "Escolha 1 a 5: " op
+  case "$op" in
+    1)
+      cat <<'TXT'
+
+WhatsApp pelo CallMeBot — faça no SEU celular (leva 2 minutos):
+  a) Abra https://www.callmebot.com/blog/free-api-whatsapp-messages/ e veja o número do CallMeBot
+     (ele muda de vez em quando: use o que estiver na página). Salve esse número nos contatos.
+  b) Mande pelo WhatsApp para esse contato exatamente:  I allow callmebot to send me messages
+  c) Em instantes chega a resposta com a sua "apikey" (um número). Volte aqui.
+TXT
+      read -r -p "Seu WhatsApp com país e DDD, só números (ex.: 5561999998888): " tel
+      tel=${tel//[^0-9]/}
+      [[ "$tel" =~ ^[0-9]{10,15}$ ]] || { vermelho "Número inválido."; return 1; }
+      read -r -p "A apikey que o CallMeBot mandou: " key
+      key=${key//[^0-9A-Za-z]/}
+      [ -n "$key" ] || { vermelho "Faltou a apikey."; return 1; }
+      url="https://api.callmebot.com/whatsapp.php?phone=+$tel&text={msg}&apikey=$key"
+      ;;
+    2)
+      cat <<'TXT'
+
+Telegram:
+  a) No Telegram, fale com @BotFather → /newbot → escolha um nome. Ele responde com um "token".
+  b) Abra a conversa com o seu robô novo e mande qualquer mensagem (ex.: oi).
+TXT
+      read -r -p "Cole o token do robô: " token
+      token=${token//[[:space:]]/}
+      chat=$(curl -fsS --max-time 20 "https://api.telegram.org/bot$token/getUpdates" 2>/dev/null | grep -o '"chat":{"id":-\?[0-9]*' | tail -1 | grep -o -- '-\?[0-9]*$')
+      [ -n "$chat" ] || read -r -p "Não achei a conversa automaticamente. Digite o chat_id: " chat
+      [[ "$chat" =~ ^-?[0-9]+$ ]] || { vermelho "chat_id inválido."; return 1; }
+      url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text={msg}"
+      ;;
+    3)
+      topico="oneup-$(senha 16)"
+      echo; echo "Instale o app ntfy no celular, toque em + e assine o tópico:  $topico  (servidor ntfy.sh)"
+      read -r -p "Depois de assinar, aperte Enter… " _
+      url="https://ntfy.sh/$topico"
+      ;;
+    4)
+      read -r -p "Cole a URL (use {msg} onde entra o texto): " url
+      [[ "$url" == http*://* ]] || { vermelho "URL inválida."; return 1; }
+      ;;
+    5) ;;
+    *) echo "Cancelado."; return 1 ;;
+  esac
+  read -r -p "E-mail para receber também (opcional; Enter para pular): " email
+  if [ -n "$email" ] && ! command -v sendmail >/dev/null 2>&1 && ! command -v msmtp >/dev/null 2>&1 && ! command -v mail >/dev/null 2>&1; then
+    amarelo "Este servidor não tem programa de e-mail (sendmail/msmtp/mail). Guardei o e-mail, mas ele só funciona depois que o suporte configurar."
+  fi
+  [ -n "$url$email" ] || { vermelho "Nenhum destino informado."; return 1; }
+  [ -z "$url" ] || env_definir ALERTA_URL "$url" || return 1
+  env_definir ALERTA_EMAIL "$email"
+  echo "Mandando uma mensagem de teste…"
+  if enviar_alerta "Teste: os avisos do ONE UP Comanda estão funcionando."; then verde "Mensagem enviada. Confira o celular/e-mail."
+  else vermelho "O envio falhou. Confira os dados e rode de novo: oneup alertas configurar"; return 1; fi
+}
+
+# ------------------------------------------------------------------------------------------------
+# Atualização: conferências depois de trocar a versão
+# ------------------------------------------------------------------------------------------------
+instalar_unidades() {  # copia as unidades do systemd; devolve 0 se alguma mudou
+  local u mudou=1
+  for u in "$APP"/deploy/*.service "$APP"/deploy/*.timer; do
+    cmp -s "$u" "/etc/systemd/system/$(basename "$u")" && continue
+    install -m 644 "$u" "/etc/systemd/system/$(basename "$u")"; mudou=0
+  done
+  return "$mudou"
+}
+conferir_versao() {  # versão no ar = versão baixada? compilado (dist) junto com o código-fonte?
+  local esperada no_ar ok=0 parte src dist
+  esperada=$(node -p "require('$APP/server/package.json').version" 2>/dev/null)
+  no_ar=$(curl -fsS --max-time 10 "http://127.0.0.1:$(porta)/api/health" 2>/dev/null | grep -o '"versao":"[^"]*"' | cut -d'"' -f4)
+  if [ -n "$esperada" ] && [ "$no_ar" != "$esperada" ]; then
+    vermelho "Atenção: o sistema no ar diz versão ${no_ar:-?}, mas o código baixado é $esperada."
+    echo "  Rode 'oneup reiniciar'. Se continuar diferente, avise o suporte (o sistema pode estar rodando um processo antigo)."
+    ok=1
+  fi
+  # o servidor roda o compilado (server/dist e web/dist), que vai junto no GitHub: se o código-fonte mudou depois
+  # do último compilado, a ONE UP esqueceu de compilar e a versão nova não está valendo de verdade
+  for parte in server web; do
+    src=$(git -C "$APP" log -1 --format=%ct -- "$parte/src" 2>/dev/null)
+    dist=$(git -C "$APP" log -1 --format=%ct -- "$parte/dist" 2>/dev/null)
+    if [[ "$src" =~ ^[0-9]+$ ]] && [[ "$dist" =~ ^[0-9]+$ ]] && [ "$src" -gt "$dist" ]; then
+      vermelho "Atenção: o código de '$parte' é mais novo que o compilado ($parte/dist) nesta versão. Avise o suporte: falta compilar."
+      ok=1
+    fi
+  done
+  [ "$ok" = 0 ] && verde "Versão no ar confere: $esperada."
+  return "$ok"
+}
+
+status() {
+  local ult h t d ext url mail web
+  web=$(envget ONEUP_WEB)
+  systemctl --no-pager --lines=0 status oneup "${web:-caddy}" postgresql 2>/dev/null | grep -E '●|Active'; echo
+  saude 3 && verde "Sistema respondendo." || vermelho "Sistema NÃO está respondendo."
+  echo "Endereço base: $(envget BASE_DOMAIN) · servidor web: $(envget ONEUP_WEB) · porta interna: $(porta) · versão: $(node -p "require('$APP/server/package.json').version" 2>/dev/null)"
+  pg_isready -q && verde "Banco de dados respondendo." || vermelho "Banco de dados NÃO responde (sudo systemctl restart postgresql)."
+  ult=$(ultimo_dump)
+  if [ -n "$ult" ]; then h=$(horas_desde "$(stat -c %Y "$ult")"); [ "$h" -le "$ATRASO_MAX_H" ] && echo "Última cópia local: $(basename "$ult") (há ${h} h)" || vermelho "Última cópia local há ${h} h: o backup diário NÃO está rodando."; else vermelho "Nenhuma cópia de segurança encontrada."; fi
+  ext=$(externo_remoto)
+  if [ -z "$ext" ]; then
+    amarelo "Cópia externa NÃO configurada: se o servidor sumir, as cópias somem junto. Ligue com: oneup backup-externo configurar"
+  else
+    t=$(cat "$ESTADO/ultimo-envio-externo" 2>/dev/null || true)
+    if [[ "$t" =~ ^[0-9]+$ ]]; then
+      h=$(horas_desde "$t")
+      [ "$h" -le "$ATRASO_MAX_H" ] && echo "Cópia no Google Drive ($ext): $(cat "$ESTADO/ultimo-envio-externo.nome" 2>/dev/null) em $(quando_txt "$t") (há ${h} h)" \
+        || vermelho "Cópia no Google Drive: a última chegou há ${h} h ($(quando_txt "$t")). Rode: oneup backup-externo agora"
+    else vermelho "Cópia no Google Drive configurada ($ext), mas nenhuma enviada ainda. Rode: oneup backup-externo agora"; fi
+  fi
+  url=$(envget ALERTA_URL); mail=$(envget ALERTA_EMAIL)
+  if [ -n "$url$mail" ]; then echo "Avisos: $([ -n "$url" ] && { [[ "$url" == *callmebot* ]] && echo -n "WhatsApp " || echo -n "URL "; })$([ -n "$mail" ] && echo -n "e-mail $mail")"
+  else amarelo "Avisos NÃO configurados (ninguém fica sabendo se algo falhar). Ligue com: oneup alertas configurar"; fi
+  systemctl is-active -q oneup-vigia.timer 2>/dev/null && echo "Vigia de hora em hora: ligado." || amarelo "Vigia de hora em hora: desligado (rode o instalador de novo)."
+  if [ "$(envget ONEUP_WEB)" = nginx ] && [ -f "$CERT_LE" ]; then
+    d=$(dias_para_vencer "$CERT_LE" || echo '?'); echo "Cadeado HTTPS: vence em $d dias (renova sozinho perto do fim)."
+  fi
+  du -sh "$BKP" 2>/dev/null | awk '{print "Pasta de cópias: "$1}'
+  df -h "$BASE" 2>/dev/null | tail -1 | awk '{print "Disco: "$3" usados de "$2" ("$5")"}'
+}
 
 # HTTPS no modo Nginx: um certificado com todos os restaurantes que já têm DNS apontando para cá
 certificado() {
   carregar_env
   [ "${ONEUP_WEB:-caddy}" = nginx ] || { verde "Caddy emite o certificado sozinho na primeira visita. Nada a fazer."; return 0; }
-  local ip nomes=() faltam=() n
+  local ip nomes=() faltam=() n slug
   ip=$(curl -4 -fsS --max-time 10 https://api.ipify.org 2>/dev/null || true)
   for slug in $(sudo -u postgres psql -d oneup -tAc "SELECT slug FROM empresas WHERE status <> 'CANCELADA' AND EXISTS (SELECT 1 FROM users u WHERE u.empresa_id = empresas.id) ORDER BY id"); do
     n="$slug.$BASE_DOMAIN"
@@ -35,9 +625,10 @@ certificado() {
   fi
   [ ${#nomes[@]} -gt 0 ] || return 1
   if [ "${ONEUP_ENSAIO:-}" = 1 ]; then verde "Ensaio: certificado pulado para ${nomes[*]}"; return 0; fi
-  local args=(); for n in "${nomes[@]}"; do args+=(-d "$n"); done
-  if certbot --nginx --non-interactive --agree-tos --redirect --expand --cert-name oneup-comanda \
-       $([ -n "${ONEUP_EMAIL:-}" ] && echo "-m $ONEUP_EMAIL" || echo "--register-unsafely-without-email") "${args[@]}"; then
+  local args=() email_args=(--register-unsafely-without-email)
+  for n in "${nomes[@]}"; do args+=(-d "$n"); done
+  [ -n "${ONEUP_EMAIL:-}" ] && email_args=(-m "$ONEUP_EMAIL")
+  if certbot --nginx --non-interactive --agree-tos --redirect --expand --cert-name oneup-comanda "${email_args[@]}" "${args[@]}"; then
     verde "HTTPS ativo: ${nomes[*]} (renovação automática pelo certbot)"
     [ ${#faltam[@]} -eq 0 ]
   else
@@ -46,75 +637,97 @@ certificado() {
 }
 plataforma() { carregar_env; cd "$APP/server" && node dist/scripts/plataforma.js "$@"; local r=$?; chown -R oneup:oneup "$BASE/uploads" 2>/dev/null; return $r; }
 
-backup() {
-  mkdir -p "$BKP"; chmod 750 "$BKP"
-  local quando arq
-  quando=$(date +%Y-%m-%d_%H%M%S)
-  arq="$BKP/oneup-$quando.dump"
-  # o arquivo é criado pelo root já fechado (600): ninguém mais no servidor lê nem a cópia parcial
-  if ( umask 077; sudo -u postgres pg_dump -Fc -d oneup > "$arq.parcial" ) && mv "$arq.parcial" "$arq"; then
-    ( umask 077; tar -czf "$BKP/imagens-$quando.tar.gz" -C "$BASE" uploads 2>/dev/null ) || true
-    find "$BKP" -name 'oneup-*.dump' -mtime +"$GUARDAR_DIAS" -delete
-    find "$BKP" -name 'imagens-*.tar.gz' -mtime +"$GUARDAR_DIAS" -delete
-    verde "Cópia salva: $arq ($(du -h "$arq" | cut -f1)). Guardando os últimos $GUARDAR_DIAS dias."
-  else
-    rm -f "$arq.parcial"; vermelho "Falhou a cópia do banco."; return 1
-  fi
+atualizar() {
+  cd "$APP" || exit 1
+  local antes ramo copia ok t
+  antes=$(git rev-parse HEAD)
+  echo "Versão atual: $(git log -1 --format='%h %s')"
+  git fetch --quiet origin || { vermelho "Não consegui baixar do GitHub (chave de acesso?)."; exit 1; }
+  ramo=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$(git rev-parse "origin/$ramo")" = "$antes" ]; then verde "Já está na versão mais nova."; exit 0; fi
+  backup || { vermelho "Sem cópia de segurança, não atualizo."; exit 1; }
+  copia=$ULTIMO_DUMP
+  # o vigia não avisa "fora do ar" enquanto a atualização reinicia o sistema
+  mkdir -p "$ESTADO"; touch "$ESTADO/manutencao"; trap 'rm -f "$ESTADO/manutencao"' EXIT
+  voltar() {
+    vermelho "$1 Voltando para a versão anterior…"
+    git reset --quiet --hard "$antes"
+    local ok=0 t
+    for t in 1 2 3; do npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error && { ok=1; break; }; sleep 5; done
+    if [ "$ok" != 1 ]; then
+      # sem as dependências completas, reiniciar derrubaria de vez: o processo que está rodando continua
+      vermelho "Não consegui reinstalar as dependências da versão anterior (internet?). NÃO reiniciei: o sistema segue com o processo que já estava no ar."
+      echo "  Quando a internet voltar, rode: oneup atualizar   (ou chame o suporte). Cópia feita agora: $copia"
+      exit 1
+    fi
+    instalar_unidades && systemctl daemon-reload
+    systemctl restart oneup
+    if saude 60; then verde "Voltou para a versão anterior (dados preservados)."
+    else vermelho "A versão anterior também não ligou. Restaure a cópia feita agora: oneup restaurar $copia  — e chame o suporte."; fi
+    exit 1
+  }
+  git reset --quiet --hard "origin/$ramo" || voltar "Não consegui trocar o código."
+  ok=0; for t in 1 2 3; do npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error && { ok=1; break; }; sleep 5; done
+  [ "$ok" = 1 ] || voltar "Não consegui instalar as dependências (internet?)."
+  # troca o próprio comando por renomeação (o bash que está rodando continua lendo a versão antiga)
+  install -m 755 deploy/oneup /usr/local/bin/oneup.novo && mv -f /usr/local/bin/oneup.novo /usr/local/bin/oneup
+  instalar_unidades; systemctl daemon-reload
+  systemctl enable -q oneup-vigia.timer 2>/dev/null && systemctl start oneup-vigia.timer 2>/dev/null
+  systemctl restart oneup
+  saude 90 || voltar "A versão nova não ligou."
+  verde "Atualizado: $(git log -1 --format='%h %s')"
+  echo "Cópia de antes da atualização: $copia"
+  conferir_versao || true
 }
 
+# carregado pelo instalador ou pelos testes: só as funções
+# shellcheck disable=SC2317
+if [ "${ONEUP_SO_FUNCOES:-}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
+
+[ "$(id -u)" = 0 ] || { vermelho "Use como root."; exit 1; }
 case "${1:-ajuda}" in
-  status)
-    carregar_env; systemctl --no-pager --lines=0 status oneup "${ONEUP_WEB:-caddy}" postgresql | grep -E '●|Active' ; echo
-    saude 3 && verde "Sistema respondendo." || vermelho "Sistema NÃO está respondendo."
-    carregar_env; echo "Endereço base: $BASE_DOMAIN · servidor web: ${ONEUP_WEB:-caddy} · porta interna: $PORT · versão: $(node -p "require('$APP/server/package.json').version")"
-    pg_isready -q && verde "Banco de dados respondendo." || vermelho "Banco de dados NÃO responde (sudo systemctl restart postgresql)."
-    ult=$(ls -1t $BKP/oneup-*.dump 2>/dev/null | head -1)
-    if [ -n "$ult" ]; then h=$(( ( $(date +%s) - $(stat -c %Y "$ult") ) / 3600 )); [ "$h" -le 26 ] && echo "Última cópia: $(basename "$ult") (há ${h} h)" || vermelho "Última cópia há ${h} h: o backup diário NÃO está rodando."; else vermelho "Nenhuma cópia de segurança encontrada."; fi
-    du -sh "$BKP" 2>/dev/null | awk '{print "Pasta de cópias: "$1}'
-    df -h / | tail -1 | awk '{print "Disco: "$3" usados de "$2" ("$5")"}'
-    ;;
+  status) status ;;
   logs) journalctl -u oneup -n "${2:-100}" --no-pager ;;
   reiniciar) systemctl restart oneup && saude && verde "Reiniciado." || vermelho "Não voltou. Veja: oneup logs" ;;
   backup) backup ;;
+  backup-diario) backup_diario ;;
+  backup-externo)
+    case "${2:-}" in
+      configurar) configurar_externo ;;
+      agora) backup && enviar_externo "$ULTIMO_DUMP" ;;
+      listar) listar_externo ;;
+      usar) [ -n "${3:-}" ] || { echo "Uso: oneup backup-externo usar <remoto:pasta>  (remoto já criado com: RCLONE_CONFIG=$RCLONE_CONF rclone config)"; exit 1; }
+            testar_e_usar_remoto "$3" ;;
+      desligar) env_definir BACKUP_EXTERNO "" && amarelo "Cópia externa desligada (as cópias que já estão no Drive continuam lá)." ;;
+      *) echo "Uso: oneup backup-externo configurar | agora | listar | desligar"; exit 1 ;;
+    esac ;;
+  restaurar-externo)
+    if [ -z "${2:-}" ]; then listar_externo; exit 1; fi
+    restaurar_externo "$2" ;;
+  alertas)
+    case "${2:-}" in
+      configurar) configurar_alertas ;;
+      *) echo "Uso: oneup alertas configurar   ·   oneup alerta teste"; exit 1 ;;
+    esac ;;
+  alerta)
+    case "${2:-}" in
+      teste) if enviar_alerta "Teste: os avisos do ONE UP Comanda estão funcionando."; then verde "Aviso de teste enviado."
+             else r=$?; [ "$r" = 2 ] && amarelo "Nenhum destino de aviso configurado. Rode: oneup alertas configurar" || vermelho "O envio falhou (veja $LOG_ALERTAS)."; exit 1; fi ;;
+      *) echo "Uso: oneup alerta teste"; exit 1 ;;
+    esac ;;
+  alerta-falha) alerta_falha "${2:-desconhecido}" ;;
+  vigia) vigia ;;
   certificado) certificado ;;
   acessos) cat /root/oneup-acessos.txt 2>/dev/null || echo "Nenhum acesso registrado." ;;
-  atualizar)
-    cd "$APP" || exit 1
-    antes=$(git rev-parse HEAD)
-    echo "Versão atual: $(git log -1 --format='%h %s')"
-    git fetch --quiet origin || { vermelho "Não consegui baixar do GitHub (chave de acesso?)."; exit 1; }
-    ramo=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$(git rev-parse "origin/$ramo")" = "$antes" ]; then verde "Já está na versão mais nova."; exit 0; fi
-    backup || { vermelho "Sem cópia de segurança, não atualizo."; exit 1; }
-    copia=$(ls -1t "$BKP"/oneup-*.dump | head -1)
-    voltar() {
-      vermelho "$1 Voltando para a versão anterior…"
-      git reset --quiet --hard "$antes"
-      for t in 1 2 3; do npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error && break; sleep 5; done
-      systemctl restart oneup
-      if saude 60; then verde "Voltou para a versão anterior (dados preservados)."
-      else vermelho "A versão anterior também não ligou. Restaure a cópia feita agora: oneup restaurar $copia  — e chame o suporte."; fi
-      exit 1
-    }
-    git reset --quiet --hard "origin/$ramo" || voltar "Não consegui trocar o código."
-    ok=0; for t in 1 2 3; do npm ci --omit=dev -w server --no-audit --no-fund --loglevel=error && { ok=1; break; }; sleep 5; done
-    [ "$ok" = 1 ] || voltar "Não consegui instalar as dependências (internet?)."
-    # troca o próprio comando por renomeação (o bash que está rodando continua lendo a versão antiga)
-    install -m 755 deploy/oneup /usr/local/bin/oneup.novo && mv -f /usr/local/bin/oneup.novo /usr/local/bin/oneup
-    for u in oneup.service oneup-backup.service oneup-backup.timer; do install -m 644 "deploy/$u" "/etc/systemd/system/$u"; done
-    systemctl daemon-reload
-    systemctl restart oneup
-    saude 90 || voltar "A versão nova não ligou."
-    verde "Atualizado: $(git log -1 --format='%h %s')"
-    echo "Cópia de antes da atualização: $copia"
-    ;;
+  atualizar) atualizar ;;
+  versao) conferir_versao ;;
   nova-empresa)
     slug=${2:-}; nome=${3:-}
     [ -n "$slug" ] && [ -n "$nome" ] || { echo 'Uso: oneup nova-empresa <endereco> "Nome do restaurante" [login-do-dono]'; exit 1; }
     dono=${4:-dono}
     [[ "$slug" =~ ^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$ ]] || { echo "Endereço inválido: use letras minúsculas, números e hífen."; exit 1; }
     pd=$(senha 10); pc=$(pin 6); pk=$(pin 6)
-    carregar_env; cd "$APP/server"
+    carregar_env; cd "$APP/server" || exit 1
     node dist/scripts/setup.js --empresa="$slug" --nome="$nome" --admin-name="$nome" --admin-user="$dono" --admin-pass="$pd" --caixa-pass="$pc" --cozinha-pass="$pk" --cardapio=vazio || exit 1
     umask 077
     printf '==================== %s — criado em %s ====================\nEndereço:   https://%s.%s\nDono:       login %s   senha %s\nCaixa:      login caixa   senha %s\nCozinha:    login cozinha senha %s\n\n' \
@@ -130,32 +743,31 @@ case "${1:-ajuda}" in
     ;;
   restaurar)
     arq=${2:-}
-    [ -f "$arq" ] || { echo "Uso: oneup restaurar /opt/oneup/backups/oneup-AAAA-MM-DD_HHMM.dump"; ls -1t "$BKP"/oneup-*.dump 2>/dev/null | head -5; exit 1; }
-    vermelho "ATENÇÃO: o banco inteiro (todos os restaurantes) volta para o momento desta cópia: $arq"
-    read -r -p "Para continuar digite RESTAURAR: " ok; [ "$ok" = RESTAURAR ] || { echo "Cancelado."; exit 1; }
-    backup || { vermelho "Não consegui fazer a cópia do estado atual antes; cancelado."; exit 1; }
-    systemctl stop oneup
-    ( umask 077; cp "$arq" /tmp/oneup-restaurar.dump ) && chown postgres /tmp/oneup-restaurar.dump
-    if sudo -u postgres pg_restore --clean --if-exists --no-owner --role=oneup_dono --single-transaction --exit-on-error -d oneup /tmp/oneup-restaurar.dump; then r=0; else r=$?; fi
-    rm -f /tmp/oneup-restaurar.dump
-    systemctl start oneup
-    if [ "$r" != 0 ]; then
-      vermelho "A restauração FALHOU (nada foi mudado no banco: tudo ou nada). O sistema voltou com os dados de antes."
-      saude 90 || vermelho "E o sistema não respondeu: oneup logs"
-      exit 1
-    fi
-    saude 90 && verde "Restaurado e no ar." || { vermelho "Restaurado, mas o sistema não voltou: oneup logs"; exit 1; }
-    ;;
+    # shellcheck disable=SC2012
+    [ -f "$arq" ] || { echo "Uso: oneup restaurar /opt/oneup/backups/oneup-AAAA-MM-DD_HHMMSS.dump"; ls -1t "$BKP"/oneup-*.dump 2>/dev/null | head -5; exit 1; }
+    restaurar_banco "$arq" ;;
   plataforma) shift; plataforma "$@" ;;
   ajuda|*)
     cat <<'TXT'
 ONE UP Comanda — comandos do servidor
-  oneup status                 situação do sistema, endereço, última cópia e disco
+  oneup status                 situação do sistema, endereço, cópias (local e Google Drive), avisos e disco
   oneup logs [linhas]          últimos registros do sistema
   oneup reiniciar              reinicia o sistema
   oneup atualizar              baixa a versão nova do GitHub (faz cópia antes e volta sozinho se falhar)
-  oneup backup                 cópia de segurança agora (automática todo dia às 03:30, guarda 14 dias)
-  oneup restaurar <arquivo>    volta o banco para uma cópia (faz cópia do estado atual antes)
+  oneup versao                 confere se a versão no ar é a baixada
+  oneup backup                 cópia de segurança agora, no servidor (automática todo dia às 03:30, guarda 14 dias)
+  oneup restaurar <arquivo>    volta o banco para uma cópia do servidor (faz cópia do estado atual antes)
+
+  Cópia fora do servidor (Google Drive da ONE UP, cifrada; 30 diárias + 12 mensais):
+  oneup backup-externo configurar   conecta o Google Drive (passo a passo)
+  oneup backup-externo agora        faz uma cópia e envia agora
+  oneup backup-externo listar       mostra as cópias que estão no Drive
+  oneup restaurar-externo <nome>    baixa do Drive, abre e volta o banco (ex.: oneup-2026-10-04_033012.tar.gpg)
+
+  Avisos no WhatsApp/Telegram/e-mail (backup falhou, disco cheio, cadeado vencendo, sistema fora do ar):
+  oneup alertas configurar     escolhe para onde vão os avisos (passo a passo)
+  oneup alerta teste           manda um aviso de teste
+
   oneup acessos                mostra endereços e senhas criados na instalação
   oneup certificado            HTTPS dos restaurantes (modo Nginx; confere o DNS antes)
   oneup nova-empresa <endereco> "Nome" [login]   cria outro restaurante (ex.: oneup nova-empresa bom-sabor "Bom Sabor")

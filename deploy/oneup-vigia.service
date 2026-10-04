@@ -1,0 +1,9 @@
+[Unit]
+Description=ONE UP Comanda — vigia (disco, cópias, cadeado HTTPS e sistema no ar)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/oneup vigia
+TimeoutStartSec=10min
+Nice=10

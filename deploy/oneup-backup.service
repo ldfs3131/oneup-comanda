@@ -1,7 +1,14 @@
 [Unit]
-Description=ONE UP Comanda — cópia de segurança do banco
-After=postgresql.service
+Description=ONE UP Comanda — cópia de segurança do banco (no servidor e, se configurada, no Google Drive)
+After=postgresql.service network-online.target
+Wants=network-online.target
+# falhou a cópia local ou o envio ao Google Drive: aviso no WhatsApp/e-mail
+OnFailure=oneup-alerta@%N.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/oneup backup
+ExecStart=/usr/local/bin/oneup backup-diario
+# envio lento não fica preso para sempre
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle

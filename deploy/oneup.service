@@ -3,6 +3,8 @@ Description=ONE UP Comanda (sistema de gestão para restaurantes)
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
+# caiu e não voltou sozinho em ~45 s: aviso no WhatsApp/e-mail (oneup alertas configurar)
+OnFailure=oneup-alerta@%N.service
 
 [Service]
 Type=simple

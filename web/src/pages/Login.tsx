@@ -81,7 +81,7 @@ export default function Login() {
             <button type="button" className="linkish small" onClick={() => setForgot((f) => !f)}>Esqueci minha senha</button>
           </div>
           {forgot && <div className="info-box small">Peça ao Dono do restaurante para redefinir sua senha em <b>Usuários</b>. Por segurança, o sistema não envia senha por e-mail.</div>}
-          {error && <div className="login-error">{error}</div>}
+          {error && <div className="login-error" role="alert">{error}</div>}
           <button className="btn primary lg block" disabled={busy || !username || !password}>{busy ? 'Entrando…' : 'Entrar'}</button>
           {!remember && <div className="small faint center">Sem “lembrar”, o acesso expira ao fechar o navegador ou em até 14 horas.</div>}
           {pin?.aparelho && pin.pessoas.length > 0 && <button type="button" className="btn ghost block" onClick={() => setModoSenha(false)}>Entrar com PIN</button>}
@@ -136,7 +136,7 @@ function EntrarComPin({ pessoas, onEntrar, onSenha }: { pessoas: { id: number; n
       <div className={`pin-dots${erro ? ' erro' : ''}`} aria-label={`${pin.length} de 4 números`}>
         {[0, 1, 2, 3].map((i) => <span key={i} className={i < pin.length ? 'on' : ''} />)}
       </div>
-      {erro && <div className="login-error">{erro}</div>}
+      {erro && <div className="login-error" role="alert">{erro}</div>}
       <div className="pin-teclado">
         {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => <button key={d} disabled={busy} onClick={() => digitar(d)}>{d}</button>)}
         <button className="pin-sec" onClick={() => setPin('')} disabled={busy}>Limpar</button>

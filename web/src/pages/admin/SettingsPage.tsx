@@ -234,13 +234,24 @@ function Campo({ it, busy, dependeOk, onSave, onPadrao, onHist }: {
 
 const CORES = ['#FCB132', '#F2D38A', '#8FE153', '#4FD1C5', '#6CB4F5', '#A78BFA', '#F472B6', '#F2604F', '#FB923C', '#FFFFFF'];
 function CorPicker({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) {
+  // contraste do texto do botão principal sobre a cor (o sistema escolhe a tinta escura ou branca, a que ler melhor)
+  const lum = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }).reduce((s, c, i) => s + c * [0.2126, 0.7152, 0.0722][i], 0); };
+  const razao = (a: string, b: string) => { const [x, y] = [lum(a), lum(b)]; return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const valida = /^#[0-9a-f]{6}$/i.test(value);
+  const melhor = valida ? Math.max(razao(value, '#1a1508'), razao(value, '#ffffff')) : 21;
   return (
     <div className="row wrap" style={{ gap: 6 }}>
       {CORES.map((c) => (
-        <button key={c} type="button" disabled={disabled} className={`cfg-swatch${value.toUpperCase() === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Cor ${c}`} onClick={() => onChange(c)} />
+        <button key={c} type="button" disabled={disabled} className={`cfg-swatch${value.toUpperCase() === c ? ' on' : ''}`} style={{ background: c }} aria-label={`Cor ${c}`} aria-pressed={value.toUpperCase() === c} onClick={() => onChange(c)} />
       ))}
-      <label className="cfg-swatch custom" title="Outra cor"><input type="color" disabled={disabled} value={value} onChange={(e) => onChange(e.target.value.toUpperCase())} /></label>
+      <label className="cfg-swatch custom" title="Outra cor"><input type="color" disabled={disabled} value={value} aria-label="Escolher outra cor" onChange={(e) => onChange(e.target.value.toUpperCase())} /></label>
       <span className="mono small">{value.toUpperCase()}</span>
+      {melhor < 4.5 && (
+        <div className="cor-aviso small pending-alert" role="status">
+          Com esta cor, o texto dos botões fica com contraste {melhor.toFixed(1).replace('.', ',')}:1 — o mínimo para ler bem é 4,5:1.
+          Escolha uma cor mais clara ou mais escura.
+        </div>
+      )}
     </div>
   );
 }

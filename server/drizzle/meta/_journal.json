@@ -92,6 +92,20 @@
       "when": 1790900000000,
       "tag": "0012_happy_alpha",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790910000000,
+      "tag": "0013_analise",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790920000000,
+      "tag": "0014_crm",
+      "breakpoints": true
     }
   ]
 }

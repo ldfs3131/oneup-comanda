@@ -42,6 +42,7 @@ export default function AdminLayout() {
             <NavLink to="/admin/usuarios">👤 Usuários</NavLink>
             <NavLink to="/admin/caixas">💰 Caixas</NavLink>
             <NavLink to="/admin/contas">🧾 Contas</NavLink>
+            <NavLink to="/admin/clientes">🙋 Clientes</NavLink>
             <NavLink to="/admin/cancelamentos">✕ Cancelamentos</NavLink>
             <NavLink to="/admin/historico">🕘 Auditoria</NavLink>
           </>}

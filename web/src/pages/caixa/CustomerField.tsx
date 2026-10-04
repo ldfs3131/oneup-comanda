@@ -13,7 +13,7 @@ export function CustomerField({ value, onChange, onPick, autoFocus, label = 'Cli
 
   useEffect(() => {
     const q = value.trim();
-    if (q.length < 2 || picked?.name === q) { setList([]); return; }
+    if (q.length < 3 || picked?.name === q) { setList([]); return; }
     const t = setTimeout(() => {
       api.get<CustomerSuggestion[]>(`/api/customers/suggest${qs({ q })}`).then((r) => { setList(r); setOpen(true); }).catch(() => setList([]));
     }, 220);

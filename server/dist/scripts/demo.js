@@ -56,20 +56,21 @@ async function main() {
     const reqOptions = (pid) => groups.filter((g) => g.productId === pid && g.required).map((g) => opts.find((o) => o.groupId === g.id).id);
     const methods = await db.select().from(paymentMethods);
     const M = (code) => methods.find((m) => m.code === code).id;
-    // ---------- Histórico sintético: 42 dias ----------
+    // ---------- Histórico sintético: 42 dias (DEMO_DIAS=400 gera mais de um ano, para o Ritmo do mês ter todas as linhas) ----------
+    const DIAS = Math.max(7, Math.min(800, Number(process.env.DEMO_DIAS) || 42));
     const food = ['Batata Simples', 'Batata Cheddar e Bacon', 'Frango à Passarinho', 'Calabresa Acebolada', 'Jantinha Completa', 'Espeto de Frango',
         'Espeto de Contra-filé', 'Espeto de Coração', 'Hambúrguer', 'Filé com Fritas', 'Carne de Sol com Mandioca', 'Strogonoff de Frango', 'Filé de Frango à Parmegiana'];
     const drinks = ['Chope 300 ml', 'Chope 500 ml', 'Heineken', 'Coca-Cola lata', 'Guaraná Antarctica lata', 'Água sem gás', 'Caipirinha', 'Chope IPA 500 ml', 'Corona'];
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
     const dayMs = 86400_000;
     let histCount = 0;
-    for (let back = 42; back >= 1; back--) {
+    for (let back = DIAS; back >= 1; back--) {
         const d = new Date(new Date(today + 'T12:00:00-03:00').getTime() - back * dayMs);
         const wd = d.getUTCDay();
         if (wd === 1)
             continue; // segunda: fechado
         const weekend = wd === 5 || wd === 6;
-        const trend = 1 + (42 - back) * 0.006; // leve crescimento
+        const trend = 1 + ((DIAS - back) / DIAS) * 0.25; // leve crescimento
         const nAcc = Math.round((weekend ? 34 : wd === 0 ? 26 : 16) * trend * (0.85 + rnd() * 0.3));
         const dayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
         const openAt = new Date(`${dayStr}T17:00:00-03:00`);

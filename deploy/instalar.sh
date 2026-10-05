@@ -229,8 +229,8 @@ else
 fi
 if instalar_unidades; then systemctl daemon-reload; fi
 install -m 755 deploy/oneup /usr/local/bin/oneup.novo && mv -f /usr/local/bin/oneup.novo /usr/local/bin/oneup
-systemctl enable -q oneup oneup-backup.timer oneup-vigia.timer
-systemctl start oneup-backup.timer oneup-vigia.timer
+systemctl enable -q oneup oneup-backup.timer oneup-vigia.timer oneup-autoatualizar.timer
+systemctl start oneup-backup.timer oneup-vigia.timer oneup-autoatualizar.timer
 # reinicia só se algo que o sistema usa mudou (código compilado, dependências, .env, serviço, Node)
 impressao() {
   { cat "$ENVF" package-lock.json deploy/oneup.service; "$NODEDIR/bin/node" -v

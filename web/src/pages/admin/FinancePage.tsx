@@ -157,25 +157,21 @@ export default function FinancePage() {
 function Resumo({ f, periodo }: { f: Fin; periodo: Periodo }) {
   const varPct = f.anterior.temDados && f.anterior.lucroCents !== 0 ? (f.lucroCents - f.anterior.lucroCents) / Math.abs(f.anterior.lucroCents) : null;
   const anteriorTxt = { hoje: 'ontem', '7d': '7 dias anteriores', mes: 'mesmo nº de dias antes', ano: '12 meses anteriores' }[periodo];
-  const passos = [
-    { r: 'Vendido', v: f.grossSalesCents, sinal: '' },
-    { r: 'Descontos', v: -f.discountsCents, sinal: '−' },
-    { r: 'Custo dos produtos', v: -f.costCents, sinal: '−' },
-    { r: 'Despesas', v: -f.expensesCents, sinal: '−' },
-    ...(f.feesCents > 0 ? [{ r: 'Taxas da maquininha', v: -f.feesCents, sinal: '−' }] : []),
-  ];
-  const base = Math.max(1, f.grossSalesCents);
   const formas = f.receivedByMethod.filter((m) => m.cents > 0);
+  const positivo = f.lucroCents >= 0;
   return (
     <div className="col gap-lg">
       <div className="card lucro-hero">
-        <div className="small muted">Lucro do período</div>
-        <div className="lucro-valor" style={{ color: f.lucroCents >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{brl(f.lucroCents)}</div>
-        <div className="row wrap" style={{ gap: 10 }}>
-          <span className="small">Margem {f.margemLucro != null ? pct(f.margemLucro, 1) : '—'}</span>
+        <div className="lucro-topo">
+          <span className="small muted">Lucro do período</span>
           {varPct != null
-            ? <span className={`small ${varPct >= 0 ? 'ok-text' : 'cancel-text'}`}>{varPct >= 0 ? '▲' : '▼'} {pct(Math.abs(varPct), 0)} vs {anteriorTxt} ({brl(f.anterior.lucroCents)})</span>
+            ? <span className={`lucro-selo ${varPct >= 0 ? 'sobe' : 'desce'}`}>{varPct >= 0 ? '▲' : '▼'} {pct(Math.abs(varPct), 0)} <span className="lucro-selo-vs">vs {anteriorTxt}</span></span>
             : <span className="small faint">sem dados do período anterior para comparar</span>}
+        </div>
+        <div className="lucro-valor" style={{ color: positivo ? 'var(--ok)' : 'var(--danger)' }}>{brl(f.lucroCents)}</div>
+        <div className="row wrap lucro-sub">
+          <span>Margem <b>{f.margemLucro != null ? pct(f.margemLucro, 1) : '—'}</b></span>
+          {varPct != null && <span className="faint">{anteriorTxt}: {brl(f.anterior.lucroCents)}</span>}
         </div>
         <div className="small faint" style={{ marginTop: 6 }}>ⓘ Lucro = Vendido − Descontos − Custo dos produtos − Despesas lançadas{f.feesCents > 0 ? ' − Taxas da maquininha' : ''}. Não inclui impostos, pró-labore nem taxas que não foram lançadas.</div>
       </div>
@@ -186,21 +182,15 @@ function Resumo({ f, periodo }: { f: Fin; periodo: Periodo }) {
         <div className="tile"><div className="label">A receber (agora)</div><div className="value">{brl(f.pendingCents)}</div></div>
       </div>
       <div className="grid-2">
-        <div className="card">
-          <div className="panel-title">Do vendido ao lucro</div>
-          {passos.map((p) => (
-            <div key={p.r} className="barra-linha">
-              <div className="row between"><span>{p.sinal ? `${p.sinal} ` : ''}{p.r}</span><span className="num">{brl(Math.abs(p.v))}</span></div>
-              <div className="barra-trilho"><span style={{ width: `${Math.min(100, (Math.abs(p.v) / base) * 100)}%`, background: p.v >= 0 ? 'var(--cat-1)' : 'var(--faint)' }} /></div>
-            </div>
-          ))}
-          <div className="kv total"><span>= Lucro</span><span className="v" style={{ color: f.lucroCents >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{brl(f.lucroCents)}</span></div>
-        </div>
+        <EscadaLucro f={f} />
         <div className="card">
           <div className="panel-title">Como os clientes pagaram · {brl(f.receivedCents)}</div>
           {!formas.length ? <div className="muted small">Nenhum recebimento no período.</div> : <>
             <div className="barra-formas" role="img" aria-label={formas.map((m) => `${m.name} ${brl(m.cents)}`).join(', ')}>
-              {formas.map((m, i) => <span key={m.code} title={`${m.name}: ${brl(m.cents)} (${pct(m.cents / f.receivedCents, 0)})`} style={{ flexGrow: m.cents, background: CORES[i % CORES.length] }} />)}
+              {formas.map((m, i) => {
+                const parte = m.cents / f.receivedCents;
+                return <span key={m.code} title={`${m.name}: ${brl(m.cents)} (${pct(parte, 0)})`} style={{ flexGrow: m.cents, background: CORES[i % CORES.length] }}>{parte >= 0.12 ? pct(parte, 0) : ''}</span>;
+              })}
             </div>
             {formas.map((m, i) => (
               <div key={m.code} className="kv">
@@ -213,6 +203,59 @@ function Resumo({ f, periodo }: { f: Fin; periodo: Periodo }) {
         </div>
       </div>
       {periodo === 'ano' && f.meses && <AnoGrafico meses={f.meses} />}
+    </div>
+  );
+}
+
+/**
+ * "Do vendido ao lucro" em escada: cada saída começa onde a anterior terminou, os subtotais são barras cheias.
+ * Uma escala só (do menor valor, que pode ser prejuízo, até o vendido). Só números: nada de interpretação.
+ */
+function EscadaLucro({ f }: { f: Fin }) {
+  if (f.grossSalesCents <= 0) return (
+    <div className="card">
+      <div className="panel-title">Do vendido ao lucro</div>
+      <div className="muted small">Sem vendas no período.</div>
+    </div>
+  );
+  const bruto = f.grossSalesCents - f.discountsCents - f.costCents;
+  type Passo = { r: string; de: number; ate: number; tipo: 'entrada' | 'saida' | 'subtotal' | 'final'; v: number };
+  const passos: Passo[] = [];
+  let corrente = f.grossSalesCents;
+  passos.push({ r: 'Vendido', de: 0, ate: corrente, tipo: 'entrada', v: corrente });
+  const saida = (r: string, v: number) => { if (v <= 0) return; passos.push({ r, de: corrente - v, ate: corrente, tipo: 'saida', v }); corrente -= v; };
+  saida('Descontos', f.discountsCents);
+  saida('Custo dos produtos', f.costCents);
+  passos.push({ r: 'Lucro bruto', de: Math.min(0, bruto), ate: Math.max(0, bruto), tipo: 'subtotal', v: bruto });
+  saida('Despesas', f.expensesCents);
+  saida('Taxas da maquininha', f.feesCents);
+  passos.push({ r: 'Lucro', de: Math.min(0, f.lucroCents), ate: Math.max(0, f.lucroCents), tipo: 'final', v: f.lucroCents });
+  const min = Math.min(0, ...passos.map((p) => p.de));
+  const max = Math.max(...passos.map((p) => p.ate));
+  const pos = (v: number) => ((v - min) / Math.max(1, max - min)) * 100;
+  const zero = pos(0);
+  return (
+    <div className="card">
+      <div className="panel-title">Do vendido ao lucro</div>
+      <div className="escada" role="table" aria-label="Do vendido ao lucro">
+        {passos.map((p) => {
+          const esq = pos(p.de), larg = Math.max(0.6, pos(p.ate) - pos(p.de));
+          const negativo = (p.tipo === 'subtotal' || p.tipo === 'final') && p.v < 0;
+          return (
+            <div key={p.r} className={`escada-linha ${p.tipo}${negativo ? ' negativo' : ''}`} role="row">
+              <span className="escada-rot" role="cell">
+                {p.tipo === 'saida' ? '− ' : p.tipo === 'subtotal' || p.tipo === 'final' ? '= ' : ''}{p.r}
+                {p.tipo === 'saida' && <small>{pct(p.v / f.grossSalesCents, 0)} do vendido</small>}
+              </span>
+              <span className="escada-trilho" aria-hidden="true">
+                {min < 0 && <i className="escada-zero" style={{ left: `${zero}%` }} />}
+                <span className="escada-barra" style={{ left: `${esq}%`, width: `${larg}%` }} />
+              </span>
+              <span className="escada-val num" role="cell">{p.tipo === 'saida' ? `−${brl(p.v)}` : brl(p.v)}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

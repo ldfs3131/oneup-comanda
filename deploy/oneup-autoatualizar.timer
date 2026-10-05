@@ -1,0 +1,11 @@
+[Unit]
+Description=ONE UP Comanda — atualização automática de madrugada (04:10)
+
+[Timer]
+# depois da cópia das 03:30 (e do envio ao Google Drive); restaurante fechado
+OnCalendar=*-*-* 04:10:00 America/Sao_Paulo
+RandomizedDelaySec=10m
+Persistent=false
+
+[Install]
+WantedBy=timers.target

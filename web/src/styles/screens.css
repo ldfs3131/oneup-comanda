@@ -206,12 +206,17 @@
 
 /* ================= Cardápio público ================= */
 .pub { max-width: 640px; margin: 0 auto; min-height: 100%; padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
-.pub-head { position: sticky; top: 0; z-index: 10; background: var(--topbar); padding: max(12px, env(safe-area-inset-top)) 12px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.pub-head { background: var(--topbar); padding: max(12px, env(safe-area-inset-top)) 12px 12px; display: flex; flex-direction: column; gap: 10px; }
+/* Só a faixa de categorias gruda no topo; a altura dela é medida na hora (BarraCategorias). */
+.pub-catbar { position: sticky; top: 0; z-index: 10; background: var(--topbar); border-bottom: 1px solid var(--border); padding: max(8px, env(safe-area-inset-top)) 12px 0; transition: box-shadow .2s ease; }
+.pub-catbar.compacta { box-shadow: 0 8px 18px -12px rgba(0, 0, 0, 0.55); }
 .pub-logo { width: 100%; max-width: 360px; display: block; margin: 0 auto; border-radius: 10px; }
 .pub-cats { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
-.pub-cats a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--surface-2); color: var(--text); text-decoration: none; font-weight: 700; white-space: nowrap; }
+.pub-cats a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 999px; background: var(--surface-2); color: var(--text); text-decoration: none; font-weight: 700; white-space: nowrap; border: 2px solid transparent; transition: background .15s ease, color .15s ease; }
+.pub-cats a.on { background: var(--brand); color: var(--brand-ink); }
+.pub-cats a:focus-visible { border-color: var(--brand-text); outline: none; }
 .pub-main { padding: 0 12px; }
-.pub-cat-title { padding: 20px 2px 8px; color: var(--brand-text); scroll-margin-top: 170px; }
+.pub-cat-title { padding: 20px 2px 8px; color: var(--brand-text); scroll-margin-top: 72px; }
 .pub-item { display: flex; gap: 12px; align-items: center; width: 100%; padding: 12px; margin-bottom: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
 .pub-item:disabled { cursor: default; }
 .pub-item img { width: 72px; height: 72px; border-radius: 12px; object-fit: cover; }
@@ -488,14 +493,43 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) { .pedido-passos li.agora .pedido-bolinha { animation: none; } }
 
 /* ---------- Financeiro do Dono ---------- */
-.lucro-hero { display: flex; flex-direction: column; gap: 4px; }
-.lucro-valor { font-size: 2.2rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.lucro-hero { display: flex; flex-direction: column; gap: 6px; background: linear-gradient(135deg, color-mix(in srgb, var(--brand) 9%, transparent), transparent 60%), var(--surface); }
+.lucro-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.lucro-selo { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-weight: 800; font-size: 0.9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lucro-selo.sobe { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.lucro-selo.desce { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.lucro-selo-vs { font-weight: 600; opacity: .8; }
+.lucro-sub { gap: 14px; font-size: 0.95rem; color: var(--muted); }
+.lucro-sub b { color: var(--text); }
+.lucro-valor { font-size: clamp(2.2rem, 5vw, 3.2rem); font-weight: 900; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .ok-text { color: var(--ok); font-weight: 700; }
 .barra-linha { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
 .barra-trilho { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
 .barra-trilho span { display: block; height: 100%; border-radius: 4px; }
-.barra-formas { display: flex; gap: 2px; height: 16px; border-radius: 4px; overflow: hidden; margin: 4px 0 8px; }
-.barra-formas span { min-width: 4px; }
+.barra-formas { display: flex; gap: 2px; height: 30px; border-radius: 6px; overflow: hidden; margin: 6px 0 12px; }
+.barra-formas span { min-width: 4px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.8rem; font-weight: 800; font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px rgba(0,0,0,.45); overflow: hidden; white-space: nowrap; }
+/* Escada "Do vendido ao lucro" (FinancePage → EscadaLucro) */
+.escada { display: grid; gap: 10px; margin-top: 4px; }
+.escada-linha { display: grid; grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.escada-rot { display: flex; flex-direction: column; font-size: 0.95rem; color: var(--muted); line-height: 1.25; min-width: 0; }
+.escada-rot small { font-size: 0.75rem; color: var(--faint); }
+.escada-linha.subtotal .escada-rot, .escada-linha.final .escada-rot { color: var(--text); font-weight: 700; }
+.escada-trilho { position: relative; height: 24px; }
+.escada-barra { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--chart-atual); }
+.escada-linha.saida .escada-barra { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--faint) 45%, transparent) 0 2px, transparent 2px 7px); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--faint) 70%, transparent); }
+.escada-linha.subtotal .escada-barra { background: color-mix(in srgb, var(--chart-atual) 62%, var(--surface)); }
+.escada-linha.final .escada-barra { background: var(--ok); }
+.escada-linha.negativo .escada-barra { background: var(--danger); }
+.escada-zero { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--border); }
+.escada-val { font-size: 0.95rem; text-align: right; white-space: nowrap; min-width: 92px; color: var(--text); }
+.escada-linha.saida .escada-val { color: var(--muted); }
+.escada-linha.final .escada-val { font-weight: 800; color: var(--ok); }
+.escada-linha.final.negativo .escada-val { color: var(--danger); }
+.escada-linha.final { padding-top: 10px; border-top: 1px dashed var(--border); }
+@media (max-width: 600px) {
+  .escada-linha { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+  .escada-trilho { grid-column: 1 / -1; grid-row: 2; height: 20px; }
+}
 .legenda-cor { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
 .ano-svg { width: 100%; height: auto; margin-top: 6px; }
 .ano-mes { font-size: 11px; fill: var(--muted); }
@@ -526,6 +560,7 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
   .cfg-nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; }
   .k-prev-toggle { min-height: 44px; }
   .pub-head .btn.sm { min-height: 44px; }
+  .pub-catbar .pub-cats a { min-height: 44px; }
   .est-chip.btnlike, .logo-link { min-height: 44px; }
 }
 /* cozinha: Produção e Modo TV com 44 px em qualquer aparelho (tablet na parede, toque com luva/mão molhada) */

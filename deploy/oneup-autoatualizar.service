@@ -1,0 +1,10 @@
+[Unit]
+Description=ONE UP Comanda — atualização automática (só se houver versão nova; volta sozinha se falhar)
+After=network-online.target postgresql.service oneup-backup.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/oneup atualizar-automatico
+TimeoutStartSec=45min
+Nice=5

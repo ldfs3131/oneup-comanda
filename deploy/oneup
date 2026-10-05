@@ -599,6 +599,10 @@ status() {
   url=$(envget ALERTA_URL); mail=$(envget ALERTA_EMAIL)
   if [ -n "$url$mail" ]; then echo "Avisos: $([ -n "$url" ] && { [[ "$url" == *callmebot* ]] && echo -n "WhatsApp " || echo -n "URL "; })$([ -n "$mail" ] && echo -n "e-mail $mail")"
   else amarelo "Avisos NÃO configurados (ninguém fica sabendo se algo falhar). Ligue com: oneup alertas configurar"; fi
+  if auto_ligada && systemctl is-active -q oneup-autoatualizar.timer 2>/dev/null; then
+    echo "Atualização automática: ligada (todo dia às 04:10). Última: $(cat "$AUTO_ULTIMA" 2>/dev/null || echo 'ainda não rodou')"
+  elif auto_ligada; then amarelo "Atualização automática: o relógio está parado (rode o instalador de novo)."
+  else amarelo "Atualização automática: desligada (ligar: oneup atualizacao-automatica ligar)."; fi
   systemctl is-active -q oneup-vigia.timer 2>/dev/null && echo "Vigia de hora em hora: ligado." || amarelo "Vigia de hora em hora: desligado (rode o instalador de novo)."
   if [ "$(envget ONEUP_WEB)" = nginx ] && [ -f "$CERT_LE" ]; then
     d=$(dias_para_vencer "$CERT_LE" || echo '?'); echo "Cadeado HTTPS: vence em $d dias (renova sozinho perto do fim)."
@@ -673,11 +677,62 @@ atualizar() {
   install -m 755 deploy/oneup /usr/local/bin/oneup.novo && mv -f /usr/local/bin/oneup.novo /usr/local/bin/oneup
   instalar_unidades; systemctl daemon-reload
   systemctl enable -q oneup-vigia.timer 2>/dev/null && systemctl start oneup-vigia.timer 2>/dev/null
+  systemctl enable -q oneup-autoatualizar.timer 2>/dev/null && systemctl start oneup-autoatualizar.timer 2>/dev/null
   systemctl restart oneup
   saude 90 || voltar "A versão nova não ligou."
   verde "Atualizado: $(git log -1 --format='%h %s')"
   echo "Cópia de antes da atualização: $copia"
   conferir_versao || true
+}
+
+# ------------------------------------------------------------------------------------------------
+# Atualização automática (de madrugada, pelo oneup-autoatualizar.timer). Ligada de fábrica.
+# Só atualiza se houver versão nova; adia se teve pedido nos últimos 20 min (restaurante aberto até tarde);
+# avisa no WhatsApp/e-mail o resultado. Nunca roda junto com outra atualização.
+# ------------------------------------------------------------------------------------------------
+AUTO_DESLIGADA=$ESTADO/auto-atualizar-desligado
+AUTO_ULTIMA=$ESTADO/ultima-autoatualizacao
+auto_ligada() { [ ! -f "$AUTO_DESLIGADA" ]; }
+auto_registrar() { mkdir -p "$ESTADO"; printf '%s · %s\n' "$(date '+%d/%m/%Y %H:%M')" "$1" > "$AUTO_ULTIMA"; }
+pedidos_recentes() {  # quantos pedidos nos últimos N minutos (todas as empresas); vazio se não conseguiu ler
+  sudo -u postgres psql -d oneup -tAc "SELECT count(*) FROM orders WHERE created_at > now() - interval '${1:-20} minutes'" 2>/dev/null | tr -d ' '
+}
+atualizar_automatico() {
+  auto_ligada || { echo "Atualização automática desligada (oneup atualizacao-automatica ligar)."; return 0; }
+  cd "$APP" || return 1
+  local antes ramo novo depois log r n versao
+  mkdir -p "$ESTADO"; exec 9>"$ESTADO/.atualizando" && flock -n 9 || { echo "Outra atualização em andamento."; return 0; }
+  antes=$(git rev-parse HEAD)
+  if ! git fetch --quiet origin; then
+    auto_registrar "não consegui falar com o GitHub"
+    avisar_uma_vez auto-github "Atualização automática: não consegui falar com o GitHub (internet ou chave de acesso). O sistema segue normal na versão atual."
+    return 1
+  fi
+  limpar_aviso auto-github
+  ramo=$(git rev-parse --abbrev-ref HEAD); novo=$(git rev-parse "origin/$ramo")
+  if [ "$novo" = "$antes" ]; then auto_registrar "já estava na versão mais nova"; echo "Já está na versão mais nova."; return 0; fi
+  n=$(pedidos_recentes 20)
+  if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt 0 ]; then
+    auto_registrar "adiada: $n pedido(s) nos últimos 20 min"
+    echo "Teve pedido há pouco ($n). Fica para a próxima madrugada."
+    return 0
+  fi
+  log="$ESTADO/autoatualizacao.log"
+  ( atualizar ) > "$log" 2>&1; r=$?
+  depois=$(git rev-parse HEAD)
+  versao=$(node -p "require('$APP/server/package.json').version" 2>/dev/null)
+  if [ "$r" = 0 ] && [ "$depois" = "$novo" ] && saude 10; then
+    auto_registrar "atualizado para a versão $versao"
+    enviar_alerta "Sistema atualizado sozinho para a versão $versao ($(git log -1 --format='%s' | cut -c1-90)). Cópia de segurança feita antes." || true
+  elif [ "$depois" = "$antes" ] && saude 10; then
+    auto_registrar "falhou e voltou para a versão anterior"
+    enviar_alerta "A atualização automática falhou e o sistema VOLTOU sozinho para a versão anterior. Está no ar e nada foi perdido. Detalhes: $log" || true
+  else
+    auto_registrar "terminou com problema"
+    enviar_alerta "A atualização automática terminou com problema. Rode: oneup status  (detalhes em $log)" || true
+  fi
+  cat "$log"
+  return "$r"
 }
 
 # carregado pelo instalador ou pelos testes: só as funções
@@ -720,6 +775,18 @@ case "${1:-ajuda}" in
   certificado) certificado ;;
   acessos) cat /root/oneup-acessos.txt 2>/dev/null || echo "Nenhum acesso registrado." ;;
   atualizar) atualizar ;;
+  atualizar-automatico) atualizar_automatico ;;
+  atualizacao-automatica)
+    case "${2:-status}" in
+      ligar) rm -f "$AUTO_DESLIGADA"; systemctl enable -q --now oneup-autoatualizar.timer 2>/dev/null
+             verde "Atualização automática ligada: todo dia às 04:10 o servidor confere o GitHub e atualiza sozinho (avisa no WhatsApp)." ;;
+      desligar) mkdir -p "$ESTADO"; touch "$AUTO_DESLIGADA"
+                amarelo "Atualização automática desligada. Para atualizar: oneup atualizar   ·   religar: oneup atualizacao-automatica ligar" ;;
+      agora) atualizar_automatico ;;
+      status) auto_ligada && echo "Ligada (todo dia às 04:10)." || echo "Desligada."
+              echo "Última: $(cat "$AUTO_ULTIMA" 2>/dev/null || echo 'ainda não rodou')" ;;
+      *) echo "Uso: oneup atualizacao-automatica ligar | desligar | status"; exit 1 ;;
+    esac ;;
   versao) conferir_versao ;;
   nova-empresa)
     slug=${2:-}; nome=${3:-}
@@ -754,6 +821,8 @@ ONE UP Comanda — comandos do servidor
   oneup logs [linhas]          últimos registros do sistema
   oneup reiniciar              reinicia o sistema
   oneup atualizar              baixa a versão nova do GitHub (faz cópia antes e volta sozinho se falhar)
+  oneup atualizacao-automatica ligar|desligar|status
+                               atualização sozinha de madrugada (04:10), avisa no WhatsApp; ligada de fábrica
   oneup versao                 confere se a versão no ar é a baixada
   oneup backup                 cópia de segurança agora, no servidor (automática todo dia às 03:30, guarda 14 dias)
   oneup restaurar <arquivo>    volta o banco para uma cópia do servidor (faz cópia do estado atual antes)

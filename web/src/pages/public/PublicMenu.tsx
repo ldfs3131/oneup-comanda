@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api, chaveDoEnvio, idAparelho, type ChaveEnvio } from '../../api';
@@ -83,8 +83,8 @@ export default function PublicMenu() {
         {cfg.boas_vindas && <p className="pub-welcome">{cfg.boas_vindas}</p>}
         {ultimo && <a className="btn sm ghost" href={`/cardapio/pedido/${ultimo}`} onClick={(e) => { e.preventDefault(); nav(`/cardapio/pedido/${ultimo}`); }}>📍 Acompanhar meu último pedido</a>}
         <div className={`pub-app${new URLSearchParams(location.search).has('instalar') ? ' destaque' : ''}`}><BotaoBaixarApp para="cliente" className="btn sm" texto="Baixar o app" /></div>
-        <nav className="pub-cats" aria-label="Categorias do cardápio">{data.categories!.map((c) => <a key={c.id} href={`#cat-${c.id}`}>{c.name}</a>)}</nav>
       </header>
+      <BarraCategorias cats={data.categories!.map((c) => ({ id: c.id, name: c.name }))} />
       <main className="pub-main">
         {data.categories!.map((c) => (
           <section key={c.id} id={`cat-${c.id}`}>
@@ -114,6 +114,94 @@ export default function PublicMenu() {
       {pick && <PubOptions p={pick} onClose={() => setPick(null)} onAdd={(ids, q) => { add(pick, ids, q); setPick(null); }} />}
       {checkout && <Checkout cart={cart} setCart={setCart} total={total} deliveryOpen={!!data.deliveryOpen} restaurante={data.name} onClose={() => setCheckout(false)}
         onDone={(r) => { setCheckout(false); setCart([]); gravarLocal('oneup:ultimo-pedido', r.token); nav(`/cardapio/pedido/${r.token}`); }} />}
+    </div>
+  );
+}
+
+/**
+ * Faixa de categorias que gruda no topo (só ela; o logotipo e os avisos rolam para cima e liberam espaço).
+ * Mede a própria altura na hora, então o toque leva o título da categoria para logo abaixo da faixa em qualquer
+ * celular e com qualquer logotipo. Marca a categoria em que a pessoa está e mantém o botão dela visível na faixa.
+ */
+function BarraCategorias({ cats }: { cats: { id: number; name: string }[] }) {
+  const barra = useRef<HTMLDivElement>(null);
+  const faixa = useRef<HTMLElement>(null);
+  const [ativa, setAtiva] = useState<number | null>(cats[0]?.id ?? null);
+  const [compacta, setCompacta] = useState(false);
+  const travada = useRef<{ id: number; ate: number } | null>(null);
+  const suave = () => (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth') as ScrollBehavior;
+  const alturaBarra = () => barra.current?.getBoundingClientRect().height ?? 0;
+
+  // Categoria atual = a última cujo título já passou por baixo da faixa. No fim da página, a última que aparece.
+  useEffect(() => {
+    let quadro = 0;
+    const calcular = () => {
+      quadro = 0;
+      const el = barra.current;
+      if (!el) return;
+      setCompacta(el.getBoundingClientRect().top <= 1);
+      const trava = travada.current;
+      if (trava && Date.now() < trava.ate) { setAtiva(trava.id); return; }
+      travada.current = null;
+      const limite = alturaBarra() + 60;
+      let atual: number | null = cats[0]?.id ?? null;
+      for (const c of cats) {
+        const sec = document.getElementById(`cat-${c.id}`);
+        if (sec && sec.getBoundingClientRect().top <= limite) atual = c.id;
+      }
+      const fim = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      if (fim) {
+        for (const c of cats) {
+          const sec = document.getElementById(`cat-${c.id}`);
+          if (sec && sec.getBoundingClientRect().top < window.innerHeight * 0.6) atual = c.id;
+        }
+      }
+      setAtiva(atual);
+    };
+    const agendar = () => { if (!quadro) quadro = requestAnimationFrame(calcular); };
+    const soltar = () => { if (travada.current) travada.current.ate = Math.min(travada.current.ate, Date.now() + 120); };
+    calcular();
+    window.addEventListener('scroll', agendar, { passive: true });
+    window.addEventListener('resize', agendar);
+    // A pessoa voltou a rolar com o dedo: a categoria tocada deixa de mandar.
+    window.addEventListener('touchstart', soltar, { passive: true });
+    window.addEventListener('wheel', soltar, { passive: true });
+    return () => {
+      if (quadro) cancelAnimationFrame(quadro);
+      window.removeEventListener('scroll', agendar);
+      window.removeEventListener('resize', agendar);
+      window.removeEventListener('touchstart', soltar);
+      window.removeEventListener('wheel', soltar);
+    };
+  }, [cats]);
+
+  // O botão da categoria ativa fica sempre à vista na faixa (ex.: Bebidas, lá no fim).
+  useEffect(() => {
+    const f = faixa.current;
+    const b = f?.querySelector<HTMLElement>(`[data-cat="${ativa}"]`);
+    if (!f || !b) return;
+    const alvo = b.offsetLeft - (f.clientWidth - b.offsetWidth) / 2;
+    if (Math.abs(f.scrollLeft - alvo) > 4) f.scrollTo({ left: Math.max(0, alvo), behavior: suave() });
+  }, [ativa]);
+
+  const ir = (id: number) => {
+    const sec = document.getElementById(`cat-${id}`);
+    if (!sec) return;
+    const topo = sec.getBoundingClientRect().top + window.scrollY - alturaBarra() + 1;
+    travada.current = { id, ate: Date.now() + 1200 };
+    setAtiva(id);
+    window.scrollTo({ top: Math.max(0, topo), behavior: suave() });
+    history.replaceState(null, '', `#cat-${id}`);
+  };
+
+  return (
+    <div ref={barra} className={`pub-catbar${compacta ? ' compacta' : ''}`}>
+      <nav ref={faixa} className="pub-cats" aria-label="Categorias do cardápio">
+        {cats.map((c) => (
+          <a key={c.id} data-cat={c.id} href={`#cat-${c.id}`} className={ativa === c.id ? 'on' : undefined} aria-current={ativa === c.id ? 'true' : undefined}
+            onClick={(e) => { e.preventDefault(); ir(c.id); }}>{c.name}</a>
+        ))}
+      </nav>
     </div>
   );
 }

@@ -13,7 +13,7 @@ resultado (texto ou print) antes de passar para o próximo.
 - **Servidor:** VPS Hostinger KVM 1, Ubuntu 24.04. Uso o "Terminal do navegador" do painel da Hostinger (já entra como root).
 - **Já existe no servidor e NÃO pode parar:** o sistema de um lava-jato, rodando com Nginx e PM2
   (endereço `lavajato.oneupsistemas.com.br`). Depois vão entrar outros sistemas meus no mesmo servidor.
-- **O que vamos instalar:** ONE UP Comanda, sistema de restaurante (Node + PostgreSQL), versão 3.3.0, já testado
+- **O que vamos instalar:** ONE UP Comanda, sistema de restaurante (Node + PostgreSQL), versão 3.3.1, já testado
   e já compilado. O código está no meu GitHub, no repositório privado `ldfs3131/oneup-comanda` (ramo `main`).
 - **Primeiro restaurante:** endereço `happy-alpha`, nome "Happy Alpha". Endereço final:
   `https://happy-alpha.comanda.oneupsistemas.com.br`.
@@ -78,7 +78,7 @@ ou papel). Para ver de novo as senhas depois: `oneup acessos` (a frase NÃO apar
 rodar `oneup certificado`. O login só funciona com o cadeado.
 
 **Etapa 6. Conferir tudo.**
-- `oneup status` (no ar, versão 3.3.0, cadeado, disco)
+- `oneup status` (no ar, versão 3.3.1, cadeado, disco, atualização automática ligada)
 - `oneup versao` (deve dizer que confere)
 - `curl -s -o /dev/null -w "%{http_code}\n" https://lavajato.oneupsistemas.com.br` (o lava-jato continua respondendo)
 - No navegador: abrir `https://happy-alpha.comanda.oneupsistemas.com.br` e entrar com o login do Dono e com o
@@ -98,7 +98,7 @@ do guia).
 
 ## Para o futuro
 
-- Atualizar o sistema: `oneup atualizar` (faz cópia antes e volta sozinho se a versão nova não ligar).
+- Atualizar o sistema: é automático. Todo dia às 04:10 o servidor confere o GitHub e, se houver versão nova, atualiza sozinho (faz cópia antes, volta sozinho se a versão nova não ligar e avisa no WhatsApp). Para atualizar na hora: `oneup atualizar`. Desligar/ligar: `oneup atualizacao-automatica desligar|ligar`.
 - Criar outro restaurante: `oneup nova-empresa <endereco> "<Nome>"`.
 - Se a memória do servidor passar de 75% por vários dias, o caminho é trocar o plano para o KVM 2 no painel da Hostinger.
 

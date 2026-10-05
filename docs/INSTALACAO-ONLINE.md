@@ -60,7 +60,8 @@ marcado como padrão (`default_server`), o instalador só avisa — não mexe no
 | Comando | Para quê |
 |---|---|
 | `oneup status` | está no ar? endereço, versão, última cópia (servidor e Google Drive), avisos, cadeado, disco |
-| `oneup atualizar` | baixa a versão nova (faz cópia antes; se a nova não ligar, volta sozinho) |
+| `oneup atualizar` | baixa a versão nova agora (faz cópia antes; se a nova não ligar, volta sozinho) |
+| `oneup atualizacao-automatica status` | a atualização sozinha de madrugada está ligada? qual foi a última? (`ligar` / `desligar`) |
 | `oneup backup` | cópia agora no servidor (automática todo dia às 03:30, guarda 14 dias em `/opt/oneup/backups`) |
 | `oneup restaurar <arquivo>` | volta o banco para uma cópia do servidor (faz cópia do estado atual antes) |
 | `oneup backup-externo agora` | faz uma cópia e manda para o Google Drive agora |
@@ -72,6 +73,15 @@ marcado como padrão (`default_server`), o instalador só avisa — não mexe no
 | `oneup nova-empresa bom-sabor "Bom Sabor"` | cria outro restaurante (endereço próprio, cardápio em branco) |
 | `oneup certificado` | HTTPS dos restaurantes (confere o DNS antes; renova sozinho) |
 | `oneup logs` | últimos registros, para o suporte |
+
+## Atualização automática (ligada de fábrica)
+
+Todo dia às **04:10** o servidor confere o GitHub. Se houver versão nova, ele mesmo roda o `oneup atualizar`: faz a
+cópia de segurança antes, instala e, se a versão nova não ligar, volta sozinho para a anterior. O resultado chega no
+WhatsApp ("atualizado para a versão X" ou "falhou e voltou para a anterior").
+- Se teve pedido nos últimos 20 minutos (restaurante aberto até tarde), ele não mexe e tenta na madrugada seguinte.
+- Uma versão que falhou não é tentada de novo toda noite: o servidor espera a correção chegar.
+- Precisa na hora (erro no meio do expediente)? `oneup atualizar`. Não quer automático? `oneup atualizacao-automatica desligar`.
 
 ## Cópia no Google Drive (fora do servidor)
 

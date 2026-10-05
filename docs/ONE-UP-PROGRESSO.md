@@ -13,6 +13,18 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 | 6. Migração do Happy Alpha (paralelo e virada) | pendente | |
 | 7. Inteligência, Raio-X, Recuperador | 🟡 3.3.0 sem IA (Central de Análise, Recuperação de vendas) | suítes `analise`, `crm` |
 
+## Versão 3.3.1 (05/10) — ajustes do uso real
+
+- **Cardápio digital:** filtro de categorias corrigido (faixa grudada com altura medida, categoria ativa destacada,
+  faixa acompanha a rolagem, logotipo rola para cima). Detalhes em `docs/AJUSTES-PENDENTES.md`.
+- **Financeiro do Dono:** "Do vendido ao lucro" virou escada (Vendido → Descontos → Custo → Lucro bruto → Despesas →
+  Taxas → Lucro), uma escala só, prejuízo aparece do lado negativo, % do vendido em cada saída; destaque do lucro
+  maior com selo ▲▼; faixa das formas de pagamento com a % escrita. Continua só números (sem interpretação).
+- **Servidor:** atualização automática às 04:10 (`oneup-autoatualizar.timer`, `oneup atualizacao-automatica`),
+  adia se teve pedido nos últimos 20 min, não repete versão que já falhou, avisa o resultado no WhatsApp.
+  Ensaiada: versão boa, versão quebrada (volta sozinho), noite seguinte (não tenta de novo), correção chegando.
+- Testes: 16 suítes, TUDO OK (e2e 145, isolamento 145, crm 114, plataforma 87, análise 86, leva1 68, clientes 64).
+
 ## Versão 3.3.0 (04/10) — versão do Happy Alpha (decisões do comitê)
 
 - **Dono:** começa em Pedidos; Painel do dia sem ranking, movimento por hora e tempo de cozinha (só ONE UP);

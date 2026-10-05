@@ -711,6 +711,10 @@ atualizar_automatico() {
   limpar_aviso auto-github
   ramo=$(git rev-parse --abbrev-ref HEAD); novo=$(git rev-parse "origin/$ramo")
   if [ "$novo" = "$antes" ]; then auto_registrar "já estava na versão mais nova"; echo "Já está na versão mais nova."; return 0; fi
+  # versão que já falhou numa noite anterior: não tenta de novo toda madrugada (espera a correção chegar)
+  if [ "$novo" = "$(cat "$ESTADO/auto-falhou" 2>/dev/null)" ]; then
+    auto_registrar "esperando correção (a versão ${novo:0:7} já falhou antes)"; echo "Essa versão já falhou antes; esperando a correção."; return 0
+  fi
   n=$(pedidos_recentes 20)
   if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt 0 ]; then
     auto_registrar "adiada: $n pedido(s) nos últimos 20 min"
@@ -718,16 +722,20 @@ atualizar_automatico() {
     return 0
   fi
   log="$ESTADO/autoatualizacao.log"
-  ( atualizar ) > "$log" 2>&1; r=$?
+  # 9>&-: o sistema reiniciado (e qualquer filho) não herda a trava
+  ( atualizar ) 9>&- > "$log" 2>&1; r=$?
   depois=$(git rev-parse HEAD)
   versao=$(node -p "require('$APP/server/package.json').version" 2>/dev/null)
   if [ "$r" = 0 ] && [ "$depois" = "$novo" ] && saude 10; then
+    rm -f "$ESTADO/auto-falhou"
     auto_registrar "atualizado para a versão $versao"
     enviar_alerta "Sistema atualizado sozinho para a versão $versao ($(git log -1 --format='%s' | cut -c1-90)). Cópia de segurança feita antes." || true
   elif [ "$depois" = "$antes" ] && saude 10; then
+    echo "$novo" > "$ESTADO/auto-falhou"
     auto_registrar "falhou e voltou para a versão anterior"
     enviar_alerta "A atualização automática falhou e o sistema VOLTOU sozinho para a versão anterior. Está no ar e nada foi perdido. Detalhes: $log" || true
   else
+    echo "$novo" > "$ESTADO/auto-falhou"
     auto_registrar "terminou com problema"
     enviar_alerta "A atualização automática terminou com problema. Rode: oneup status  (detalhes em $log)" || true
   fi

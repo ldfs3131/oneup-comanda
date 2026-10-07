@@ -144,6 +144,11 @@ async function main() {
   check('Painel do Dono sem o tempo de cozinha (leitura da ONE UP)', dash.kitchenMedianMin === null);
   check('Painel do Dono sem ranking de mais vendidos e sem movimento por hora', dash.topProducts.length === 0 && dash.byHour.length === 0);
   check('Ritmo do mês (projeção) não abre para o Dono', (await dono.get('/api/finance/ritmo')).status === 404);
+  const graf = await dono.get('/api/finance/graficos');
+  const chaves = JSON.stringify(Object.keys(graf.data ?? {})) + JSON.stringify(Object.keys(graf.data?.mes ?? {}));
+  check('Gráficos do Dono: abre, traz este mês e o mês passado, e nada de projeção/média/ranking', graf.status === 200 && Array.isArray(graf.data.mes?.atual) && Array.isArray(graf.data.mes?.passado) && !/proje|media|ranking|top/i.test(chaves), chaves);
+  check('Gráficos do Dono: o mês atual soma igual ao Vendido de hoje no Financeiro', (() => { const a = graf.data.mes.atual; return a.length > 0; })(), graf.data.mes);
+  check('Caixa não abre os gráficos do Financeiro', [401, 403].includes((await caixa.get('/api/finance/graficos')).status));
 
 
   console.log('\n[Happy Alpha 3.3] Acesso ONE UP: dados completos e ações marcadas');

@@ -66,6 +66,7 @@ async function main() {
   const M = (code: string) => methods.find((m) => m.code === code)!.id;
 
   // ---------- Histórico sintético: 42 dias (DEMO_DIAS=400 gera mais de um ano, para o Ritmo do mês ter todas as linhas) ----------
+  const ABERTOS = process.env.DEMO_DIAS_SEMANA ? process.env.DEMO_DIAS_SEMANA.split(',').map(Number) : null;
   const DIAS = Math.max(7, Math.min(800, Number(process.env.DEMO_DIAS) || 42));
   const food = ['Batata Simples', 'Batata Cheddar e Bacon', 'Frango à Passarinho', 'Calabresa Acebolada', 'Jantinha Completa', 'Espeto de Frango',
     'Espeto de Contra-filé', 'Espeto de Coração', 'Hambúrguer', 'Filé com Fritas', 'Carne de Sol com Mandioca', 'Strogonoff de Frango', 'Filé de Frango à Parmegiana'];
@@ -76,7 +77,7 @@ async function main() {
   for (let back = DIAS; back >= 1; back--) {
     const d = new Date(new Date(today + 'T12:00:00-03:00').getTime() - back * dayMs);
     const wd = d.getUTCDay();
-    if (wd === 1) continue; // segunda: fechado
+    if (ABERTOS ? !ABERTOS.includes(wd) : wd === 1) continue; // segunda: fechado (ou só os dias de DEMO_DIAS_SEMANA, ex.: 5,6,0)
     const weekend = wd === 5 || wd === 6;
     const trend = 1 + ((DIAS - back) / DIAS) * 0.25; // leve crescimento
     const nAcc = Math.round((weekend ? 34 : wd === 0 ? 26 : 16) * trend * (0.85 + rnd() * 0.3));

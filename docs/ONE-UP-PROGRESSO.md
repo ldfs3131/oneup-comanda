@@ -13,6 +13,19 @@ Leia este arquivo no início de cada sessão (o prompt mestre manda começar pel
 | 6. Migração do Happy Alpha (paralelo e virada) | pendente | |
 | 7. Inteligência, Raio-X, Recuperador | 🟡 3.3.0 sem IA (Central de Análise, Recuperação de vendas) | suítes `analise`, `crm` |
 
+## Versão 3.3.2 (07/10) — pronto para a entrega
+
+- **`oneup zerar <endereço>`:** apaga os dados de teste de um restaurante (pedidos, contas, pagamentos, caixas,
+  fiado, despesas, clientes, histórico) e zera as quantidades do estoque; mantém cardápio, custos, configurações,
+  formas de pagamento/taxas, logins/PINs e a base de comparação. Cópia antes, confirmação pelo endereço, tudo ou nada
+  (as travas de "não apagar" do banco ficam desligadas só dentro da transação). Ensaiado: outro restaurante intacto,
+  logins funcionam, primeiro pedido volta a ser o nº 1.
+- **Financeiro do Dono com gráficos** (`/api/finance/graficos`, só números): Acompanhamento do mês (vendido acumulado
+  deste mês × mês passado no mesmo dia, sem projeção nem médias), Semana a semana (barras de cada dia aberto nas
+  últimas 8 semanas, cor fixa por dia da semana), O que o cliente compra (categorias na ordem do cardápio),
+  cartões Contas atendidas e Gasto médio por conta com mini gráfico.
+- **Adiado:** virada do dia às 05:00 (próxima semana; é regra de relatório, recalcula sem perder dados).
+
 ## Versão 3.3.1 (05/10) — ajustes do uso real
 
 - **Cardápio digital:** filtro de categorias corrigido (faixa grudada com altura medida, categoria ativa destacada,

@@ -542,7 +542,7 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
 .sidenav .nav-mais:hover { color: var(--text); background: var(--surface-2); }
 .banner.info { background: var(--surface-3); color: var(--text); font-weight: 600; }
 @media (max-width: 900px) { .sidenav .nav-mais { white-space: nowrap; flex: none; } .nav-count { margin-left: 6px; } }
-.fin-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.fin-cartoes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .fin-cartoes .tile .value { font-size: clamp(1.15rem, 1.9vw, 1.6rem); overflow: visible; text-overflow: clip; }
 @media (max-width: 600px) { .fin-cartoes { grid-template-columns: 1fr 1fr; } .fin-cartoes .tile .value { font-size: 1.1rem; } }
 
@@ -667,3 +667,57 @@ tr.strike td { text-decoration: line-through; opacity: 0.55; }
 .banner.licenca.aviso { background: color-mix(in srgb, var(--warn) 18%, var(--surface)); color: var(--text); border-bottom: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
 .banner.licenca.bloqueio { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); color: var(--text); border-bottom: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); }
 .banner.licenca b { color: var(--text); }
+
+/* ===== Gráficos do Financeiro do Dono (GraficosDono.tsx) ===== */
+.graf-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.graf-mes-num { font-size: 1.2rem; margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.graf-mes-num b { font-size: 1.5rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+.graf-legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; color: var(--muted); }
+.graf-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.lg-linha { display: inline-block; width: 22px; height: 0; border-top: 3px solid var(--chart-atual); border-radius: 2px; }
+.lg-linha.passado { border-top: 2px dashed var(--chart-passado); }
+.graf-dica { min-height: 20px; margin: 6px 0 2px; }
+.graf-svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
+.graf-grade { stroke: var(--border); stroke-width: 1; }
+.graf-eixo { fill: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.graf-linha { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.graf-linha.atual { stroke: var(--chart-atual); stroke-width: 3; }
+.graf-linha.passado { stroke: var(--chart-passado); stroke-width: 2; stroke-dasharray: 6 5; }
+.graf-area { fill: color-mix(in srgb, var(--chart-atual) 14%, transparent); }
+.graf-hoje { stroke: var(--faint); stroke-dasharray: 2 4; }
+.graf-cursor { stroke: var(--muted); stroke-width: 1; }
+.graf-ponto.atual { fill: var(--chart-atual); stroke: var(--surface); stroke-width: 2; }
+.graf-ponto.passado { fill: var(--chart-passado); stroke: var(--surface); stroke-width: 2; }
+.graf-rot { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.graf-rot.atual { fill: var(--chart-atual); }
+.graf-rot.passado { fill: var(--chart-passado); font-weight: 700; }
+.semanas { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; align-items: end; margin-top: 8px; }
+.semana { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
+.semana-total { font-size: 0.72rem; font-weight: 800; text-align: center; color: var(--text); white-space: nowrap; }
+.semana-barras { height: 220px; display: flex; align-items: flex-end; justify-content: center; gap: 3px; border-bottom: 1px solid var(--border); }
+.semana-barra { flex: 1 1 0; max-width: 18px; min-width: 6px; border: 0; padding: 0; border-radius: 4px 4px 0 0; cursor: pointer; opacity: .92; }
+.semana-barra:hover, .semana-barra.on { opacity: 1; outline: 2px solid var(--text); outline-offset: 1px; }
+.semana-vazia { flex: 1 1 0; max-width: 18px; min-width: 6px; height: 3px; border-radius: 2px; background: var(--border); }
+.semana-rot { font-size: 0.75rem; color: var(--faint); text-align: center; font-variant-numeric: tabular-nums; }
+.cats { display: grid; gap: 10px; }
+.cat-linha { display: grid; grid-template-columns: minmax(0, 130px) minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.cat-nome { display: flex; flex-direction: column; font-weight: 700; line-height: 1.2; min-width: 0; overflow-wrap: anywhere; }
+.cat-nome small, .cat-val small { font-size: 0.75rem; color: var(--faint); font-weight: 600; }
+.cat-trilho { height: 14px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.cat-trilho span { display: block; height: 100%; border-radius: 4px; background: var(--chart-atual); }
+.cat-val { display: flex; flex-direction: column; align-items: flex-end; white-space: nowrap; font-weight: 700; min-width: 86px; }
+.cartao-mini { display: flex; flex-direction: column; gap: 2px; }
+.mini-svg { width: 100%; height: 34px; margin-top: 4px; overflow: visible; }
+.mini-linha { fill: none; stroke: var(--chart-atual); stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.mini-ponto { fill: var(--chart-atual); }
+@media (max-width: 600px) {
+  .semanas { gap: 4px; }
+  .semana-total { font-size: 0.62rem; }
+  .semana-barras { height: 150px; gap: 2px; }
+  .cat-linha { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+  .cat-trilho { grid-column: 1 / -1; grid-row: 2; }
+  .graf-mes-num { font-size: 1rem; }
+  .graf-mes-num b { font-size: 1.3rem; }
+}
+.graf-topo > div { min-width: 0; }
+.graf-mes-num .lucro-selo { white-space: normal; flex-wrap: wrap; }

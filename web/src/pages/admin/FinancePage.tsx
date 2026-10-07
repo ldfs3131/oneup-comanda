@@ -6,6 +6,7 @@ import { api, qs, chaveDoEnvio, type ChaveEnvio } from '../../api';
 import { addDaysISO, brl, dateOnly, fmtDay, pct, todayISO } from '../../format';
 import { Badge, Modal, MoneyInput, ReasonModal, Spinner, useAction } from '../../components/ui';
 import RitmoMes from './RitmoMes';
+import { AcompanhamentoMes, CartaoMini, Categorias, FinsDeSemana, type Graficos } from './GraficosDono';
 
 type Fin = {
   from: string; to: string; grossSalesCents: number; discountsCents: number; revenueCents: number; receivedCents: number;
@@ -44,6 +45,7 @@ export default function FinancePage() {
   const [cancel, setCancel] = useState<Expense | null>(null);
   const [custo, setCusto] = useState<Fin['tabela'][number] | null>(null);
   const { data: f, isLoading } = useQuery({ queryKey: ['finance', range], queryFn: () => api.get<Fin>(`/api/finance${qs(range)}`) });
+  const { data: g } = useQuery({ queryKey: ['finance-graficos', range.from, range.to], queryFn: () => api.get<Graficos>(`/api/finance/graficos${qs({ from: range.from, to: range.to })}`) });
   const { data: exps = [] } = useQuery({ queryKey: ['expenses', range], queryFn: () => api.get<Expense[]>(`/api/expenses${qs({ from: range.from, to: range.to })}`) });
   const { run } = useAction();
   const qc = useQueryClient();
@@ -74,7 +76,7 @@ export default function FinancePage() {
         {f.semCusto.length > 0 && (tab === 'resumo' || tab === 'produtos') && (
           <div className="info-box small">⚠ {f.semCusto.length} produto(s) vendidos sem custo cadastrado ({f.semCusto.slice(0, 3).map((x) => x.name).join(', ')}{f.semCusto.length > 3 ? '…' : ''}): <b>o lucro pode estar maior que o real</b>. <Link to="/admin/pendencias">Preencher os custos</Link></div>
         )}
-        {tab === 'resumo' && <Resumo f={f} periodo={periodo} />}
+        {tab === 'resumo' && <Resumo f={f} periodo={periodo} g={g} />}
         {tab === 'produtos' && (
           <div className="card" style={{ padding: 0 }}>
             <div className="small muted" style={{ padding: 12 }}>Todos os produtos ativos, em ordem alfabética. Margem = (preço − custo) ÷ preço. Lucro total = vendas com custo − custo.</div>
@@ -154,7 +156,7 @@ export default function FinancePage() {
 }
 
 /** Resumo do Dono: só números. Lucro com ▲▼ vs período anterior, 4 cartões, cascata exata, formas de pagamento e (no Ano) 12 meses. */
-function Resumo({ f, periodo }: { f: Fin; periodo: Periodo }) {
+function Resumo({ f, periodo, g }: { f: Fin; periodo: Periodo; g?: Graficos }) {
   const varPct = f.anterior.temDados && f.anterior.lucroCents !== 0 ? (f.lucroCents - f.anterior.lucroCents) / Math.abs(f.anterior.lucroCents) : null;
   const anteriorTxt = { hoje: 'ontem', '7d': '7 dias anteriores', mes: 'mesmo nº de dias antes', ano: '12 meses anteriores' }[periodo];
   const formas = f.receivedByMethod.filter((m) => m.cents > 0);
@@ -175,11 +177,14 @@ function Resumo({ f, periodo }: { f: Fin; periodo: Periodo }) {
         </div>
         <div className="small faint" style={{ marginTop: 6 }}>ⓘ Lucro = Vendido − Descontos − Custo dos produtos − Despesas lançadas{f.feesCents > 0 ? ' − Taxas da maquininha' : ''}. Não inclui impostos, pró-labore nem taxas que não foram lançadas.</div>
       </div>
+      {g && <AcompanhamentoMes g={g.mes} />}
       <div className="fin-cartoes">
         <div className="tile"><div className="label">Vendido</div><div className="value">{brl(f.grossSalesCents)}</div></div>
         <div className="tile"><div className="label">Custo dos produtos</div><div className="value">{brl(f.costCents)}</div></div>
         <div className="tile"><div className="label">Despesas</div><div className="value">{brl(f.expensesCents)}</div></div>
         <div className="tile"><div className="label">A receber (agora)</div><div className="value">{brl(f.pendingCents)}</div></div>
+        {g && <CartaoMini rotulo="Contas atendidas" valor={String(g.periodo.contas)} serie={g.periodo.dias.map((d) => d.contas)} />}
+        {g && <CartaoMini rotulo="Gasto médio por conta" valor={g.periodo.gastoMedio != null ? brl(g.periodo.gastoMedio) : '—'} serie={g.periodo.dias.map((d) => (d.contas ? Math.round(d.vendido / d.contas) : 0))} />}
       </div>
       <div className="grid-2">
         <EscadaLucro f={f} />
@@ -202,6 +207,7 @@ function Resumo({ f, periodo }: { f: Fin; periodo: Periodo }) {
           </>}
         </div>
       </div>
+      {g && <div className="grid-2"><FinsDeSemana dias={g.semanas} /><Categorias cats={g.categorias} vendido={g.periodo.vendido} /></div>}
       {periodo === 'ano' && f.meses && <AnoGrafico meses={f.meses} />}
     </div>
   );

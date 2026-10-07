@@ -156,6 +156,65 @@ export async function managementRoutes(app) {
             return { mes, vendidoCents: vendido, lucroCents: vendido - n(v?.cost) - n(E.get(mes)?.cents) - n(T.get(mes)?.cents) };
         });
     }
+    // =============== GRÁFICOS DO FINANCEIRO DO DONO ===============
+    // Só números (sem projeção, média de meses, ranking nem interpretação). "Vendido" = soma dos itens ativos
+    // de pedidos vivos pela data do pedido, igual ao cartão "Vendido".
+    app.get('/api/finance/graficos', admin, async (req) => {
+        const qy = parse(z.object({ from: dateSchema.optional(), to: dateSchema.optional() }), req.query);
+        const r = rangeOf(qy);
+        const q = async (s) => (await db.execute(s)).rows;
+        const live = sql `o.status NOT IN ('AWAITING_CONFIRMATION','CANCELLED') AND oi.status = 'ACTIVE'`;
+        const hoje = todayLocal();
+        const mes = hoje.slice(0, 7);
+        const [ano, m] = mes.split('-').map(Number);
+        const mesPassado = m === 1 ? `${ano - 1}-12` : `${ano}-${String(m - 1).padStart(2, '0')}`;
+        const diasNo = (k) => { const [a, mm] = k.split('-').map(Number); return new Date(Date.UTC(a, mm, 0)).getUTCDate(); };
+        const porDia = async (from, to) => q(sql `
+      SELECT to_char((o.created_at AT TIME ZONE ${TZ})::date, 'YYYY-MM-DD') AS dia,
+             COALESCE(SUM(oi.unit_price_cents*oi.quantity),0) AS vendido,
+             COUNT(DISTINCT o.account_id) AS contas
+      FROM orders o JOIN order_items oi ON oi.order_id = o.id
+      WHERE ${inRange('o.created_at', { from, to })} AND ${live}
+      GROUP BY 1 ORDER BY 1`);
+        const acumular = (rows, k, ate) => {
+            const v = new Map(rows.map((x) => [Number(String(x.dia).slice(8, 10)), n(x.vendido)]));
+            const out = [];
+            let t = 0;
+            for (let d = 1; d <= ate; d++) {
+                t += v.get(d) ?? 0;
+                out.push(t);
+            }
+            return out;
+        };
+        const [atualRows, passadoRows] = await Promise.all([
+            porDia(`${mes}-01`, hoje),
+            porDia(`${mesPassado}-01`, `${mesPassado}-${String(diasNo(mesPassado)).padStart(2, '0')}`),
+        ]);
+        const diaHoje = Number(hoje.slice(8, 10));
+        // últimas 8 semanas (segunda a domingo), só dias com venda
+        const d0 = new Date(Date.parse(hoje + 'T12:00:00Z'));
+        const seg = new Date(d0.getTime() - (((d0.getUTCDay() + 6) % 7) + 7 * 7) * 86400_000).toISOString().slice(0, 10);
+        const semanas = await porDia(seg, hoje);
+        const periodo = await porDia(r.from, r.to);
+        const categorias = await q(sql `
+      SELECT COALESCE(c.name, 'Outros') AS nome, COALESCE(MIN(c.sort_order), 9999) AS ordem,
+             COALESCE(SUM(oi.unit_price_cents*oi.quantity),0) AS vendido, COALESCE(SUM(oi.quantity),0) AS itens
+      FROM orders o JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products p ON p.id = oi.product_id LEFT JOIN categories c ON c.id = p.category_id
+      WHERE ${inRange('o.created_at', r)} AND ${live}
+      GROUP BY COALESCE(c.name, 'Outros') ORDER BY 2, 1`);
+        const contas = periodo.reduce((s, x) => s + n(x.contas), 0);
+        const vendido = periodo.reduce((s, x) => s + n(x.vendido), 0);
+        return {
+            mes: { mes, mesPassado, diaHoje, diasNoMes: diasNo(mes), diasNoMesPassado: diasNo(mesPassado),
+                atual: acumular(atualRows, mes, diaHoje), passado: acumular(passadoRows, mesPassado, diasNo(mesPassado)),
+                diasComVenda: atualRows.map((x) => Number(String(x.dia).slice(8, 10))) },
+            semanas: semanas.map((x) => ({ dia: x.dia, vendido: n(x.vendido), contas: n(x.contas) })),
+            periodo: { dias: periodo.map((x) => ({ dia: x.dia, vendido: n(x.vendido), contas: n(x.contas) })), contas, vendido,
+                gastoMedio: contas > 0 ? Math.round(vendido / contas) : null },
+            categorias: categorias.map((x) => ({ nome: x.nome, vendido: n(x.vendido), itens: n(x.itens) })),
+        };
+    });
     // =============== RITMO DO MÊS (mesma permissão do financeiro) ===============
     app.get('/api/finance/ritmo', { preHandler: requireOneup() }, async (req) => {
         const q = parse(z.object({ mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(), modo: z.enum(['liquido', 'bruto']).default('liquido') }), req.query);

@@ -743,6 +743,86 @@ atualizar_automatico() {
   return "$r"
 }
 
+# ------------------------------------------------------------------------------------------------
+# Zerar os dados de TESTE de um restaurante antes da entrega: pedidos, contas, pagamentos, caixas, fiado,
+# despesas, clientes, histórico; quantidades do estoque voltam a 0 (para a contagem inicial).
+# Mantém: empresa, cardápio (produtos, preços, custos, fotos, categorias, opções), configurações, formas de
+# pagamento e taxas, logins/senhas/PINs/aparelhos e a base de comparação da maquininha.
+# As travas do banco que impedem apagar pedidos ficam desligadas SÓ dentro desta transação (superusuário).
+# ------------------------------------------------------------------------------------------------
+psql_oneup() { sudo -u postgres psql -d "${ONEUP_DB:-oneup}" -v ON_ERROR_STOP=1 -qtAX "$@"; }
+zerar_contagens() {  # id → "rótulo:quantidade" por linha
+  psql_oneup -c "
+    SELECT 'Pedidos', count(*) FROM orders WHERE empresa_id=$1 UNION ALL
+    SELECT 'Contas', count(*) FROM accounts WHERE empresa_id=$1 UNION ALL
+    SELECT 'Contas pendentes (fiado)', count(*) FROM accounts WHERE empresa_id=$1 AND status='PENDING' UNION ALL
+    SELECT 'Pagamentos', count(*) FROM payments WHERE empresa_id=$1 UNION ALL
+    SELECT 'Aberturas de caixa', count(*) FROM cash_registers WHERE empresa_id=$1 UNION ALL
+    SELECT 'Despesas', count(*) FROM expenses WHERE empresa_id=$1 UNION ALL
+    SELECT 'Clientes cadastrados', count(*) FROM customers WHERE empresa_id=$1 UNION ALL
+    SELECT 'Movimentações de estoque', count(*) FROM stock_movements WHERE empresa_id=$1 UNION ALL
+    SELECT 'Produtos com quantidade em estoque', count(*) FROM products WHERE empresa_id=$1 AND stock_qty<>0" | tr '|' ':'
+}
+zerar_empresa() {  # slug
+  local slug=$1 id nome conf aberto
+  [[ "$slug" =~ ^[a-z0-9-]+$ ]] || { echo "Uso: oneup zerar <endereco-do-restaurante>   (ex.: oneup zerar happy-alpha)"; return 1; }
+  id=$(psql_oneup -c "SELECT id FROM empresas WHERE slug='$slug'")
+  [[ "$id" =~ ^[0-9]+$ ]] || { vermelho "Restaurante \"$slug\" não encontrado. Veja os endereços com: oneup plataforma empresas"; return 1; }
+  nome=$(psql_oneup -c "SELECT nome FROM empresas WHERE id=$id")
+  echo; amarelo "ZERAR OS DADOS DE TESTE — $nome ($slug)"
+  echo "Vai APAGAR:"; zerar_contagens "$id" | sed 's/^/   · /; s/:/: /'
+  echo "Vai MANTER: cardápio (produtos, preços, custos, fotos e categorias), configurações, formas de pagamento e taxas,"
+  echo "            logins, senhas e PINs, e a base de comparação da maquininha. As quantidades do estoque voltam a 0."
+  aberto=$(psql_oneup -c "SELECT count(*) FROM cash_registers WHERE empresa_id=$id AND status='OPEN'")
+  [ "${aberto:-0}" = 0 ] || amarelo "Há um caixa aberto: ele também será apagado (use só antes da entrega, nunca com o restaurante funcionando)."
+  echo
+  if [ -n "${ONEUP_CONFIRMAR:-}" ]; then conf=$ONEUP_CONFIRMAR
+  else read -r -p "Para confirmar, digite o endereço do restaurante ($slug): " conf; fi
+  [ "$conf" = "$slug" ] || { amarelo "Não confirmado. Nada foi apagado."; return 1; }
+  backup || { vermelho "Sem cópia de segurança, não apago nada."; return 1; }
+  local copia=$ULTIMO_DUMP
+  if ! psql_oneup <<SQL
+BEGIN;
+SET LOCAL session_replication_role = replica;
+DELETE FROM crm_comprovantes WHERE empresa_id=$id;
+DELETE FROM crm_eventos WHERE empresa_id=$id;
+DELETE FROM crm_cobrancas WHERE empresa_id=$id;
+DELETE FROM order_time_corrections WHERE empresa_id=$id;
+DELETE FROM cancellations WHERE empresa_id=$id;
+DELETE FROM stock_movements WHERE empresa_id=$id;
+DELETE FROM discounts WHERE empresa_id=$id;
+DELETE FROM payments WHERE empresa_id=$id;
+DELETE FROM order_items WHERE empresa_id=$id;
+DELETE FROM orders WHERE empresa_id=$id;
+DELETE FROM accounts WHERE empresa_id=$id;
+DELETE FROM expenses WHERE empresa_id=$id;
+DELETE FROM cash_movements WHERE empresa_id=$id;
+DELETE FROM cash_registers WHERE empresa_id=$id;
+DELETE FROM customers WHERE empresa_id=$id;
+DELETE FROM status_events WHERE empresa_id=$id;
+DELETE FROM idempotency_keys WHERE empresa_id=$id;
+DELETE FROM insight_log WHERE empresa_id=$id;
+DELETE FROM analise_relatorios WHERE empresa_id=$id;
+DELETE FROM pendencias_resolvidas WHERE empresa_id=$id;
+DELETE FROM excluded_days WHERE empresa_id=$id;
+DELETE FROM audit_logs WHERE empresa_id=$id;
+DELETE FROM counters WHERE empresa_id=$id AND name IN ('account','order');
+UPDATE products SET stock_qty = 0 WHERE empresa_id=$id;
+UPDATE restaurant_settings SET is_open = false WHERE empresa_id=$id;
+UPDATE delivery_settings SET is_open = false WHERE empresa_id=$id;
+INSERT INTO audit_logs (empresa_id, action, entity_type, message, user_role)
+  VALUES ($id, 'sistema.zerado', 'empresa', 'Dados de teste apagados para a entrega (pedidos, caixas, clientes e estoque zerados) pela ONE UP em ' || to_char(now() AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') || '.', 'ONEUP');
+COMMIT;
+SQL
+  then vermelho "A limpeza falhou e NADA foi apagado (tudo ou nada). Mande esta tela para o suporte."; return 1; fi
+  systemctl restart oneup; saude 60 || amarelo "O sistema demorou a voltar. Rode: oneup status"
+  echo; verde "Pronto: $nome está zerado para a entrega."
+  echo "Agora:"; zerar_contagens "$id" | sed 's/^/   · /; s/:/: /'
+  echo "Produtos no cardápio (mantidos): $(psql_oneup -c "SELECT count(*) FROM products WHERE empresa_id=$id")"
+  echo "O primeiro pedido real será o nº 1. Próximo passo: o Dono faz a contagem inicial em Estoque."
+  echo "Cópia de antes da limpeza (se precisar voltar): $copia"
+}
+
 # carregado pelo instalador ou pelos testes: só as funções
 # shellcheck disable=SC2317
 if [ "${ONEUP_SO_FUNCOES:-}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
@@ -783,6 +863,7 @@ case "${1:-ajuda}" in
   certificado) certificado ;;
   acessos) cat /root/oneup-acessos.txt 2>/dev/null || echo "Nenhum acesso registrado." ;;
   atualizar) atualizar ;;
+  zerar) zerar_empresa "${2:-}" ;;
   atualizar-automatico) atualizar_automatico ;;
   atualizacao-automatica)
     case "${2:-status}" in
@@ -846,6 +927,8 @@ ONE UP Comanda — comandos do servidor
   oneup alerta teste           manda um aviso de teste
 
   oneup acessos                mostra endereços e senhas criados na instalação
+  oneup zerar <endereco>       apaga os dados de TESTE antes da entrega (pedidos, caixas, clientes; estoque a 0)
+                               mantém cardápio, configurações e senhas; faz cópia antes e pede confirmação
   oneup certificado            HTTPS dos restaurantes (modo Nginx; confere o DNS antes)
   oneup nova-empresa <endereco> "Nome" [login]   cria outro restaurante (ex.: oneup nova-empresa bom-sabor "Bom Sabor")
   oneup senha <empresa> <login>                  gera senha nova para alguém que esqueceu

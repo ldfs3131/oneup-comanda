@@ -67,6 +67,7 @@ marcado como padrão (`default_server`), o instalador só avisa — não mexe no
 | `oneup backup-externo agora` | faz uma cópia e manda para o Google Drive agora |
 | `oneup backup-externo listar` | mostra as cópias que estão no Google Drive |
 | `oneup restaurar-externo <nome>` | baixa uma cópia do Google Drive, abre com a frase e volta o banco |
+| `oneup zerar happy-alpha` | **só antes da entrega:** apaga os dados de teste (pedidos, caixas, fiado, clientes, despesas) e zera as quantidades do estoque; mantém cardápio, configurações e senhas; faz cópia antes e pede para digitar o endereço |
 | `oneup alerta teste` | manda um aviso de teste para o seu WhatsApp/e-mail |
 | `oneup versao` | confere se a versão no ar é a mesma que foi baixada |
 | `oneup senha happy-alpha caixa` | senha nova para quem esqueceu (derruba os aparelhos conectados) |

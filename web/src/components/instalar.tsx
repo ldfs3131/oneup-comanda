@@ -56,7 +56,7 @@ export function ComoInstalar({ para, iphone, onClose }: { para: 'cliente' | 'equ
   const { meta } = useAuth();
   const nome = meta?.nomeApp || meta?.restaurantName || 'o restaurante';
   return (
-    <Modal title={`Baixar o app ${para === 'cliente' ? 'de ' + nome : `da equipe — ${nome}`}`} onClose={onClose} footer={<button className="btn primary block" onClick={onClose}>Entendi</button>}>
+    <Modal title={`Baixar o app ${para === 'cliente' ? 'de ' + nome : `— ${nome}`}`} onClose={onClose} footer={<button className="btn primary block" onClick={onClose}>Entendi</button>}>
       <div className="app-passos">
         {iphone ? <ol>
           <li>Abra esta página no <b>Safari</b> (o navegador da Apple).</li>

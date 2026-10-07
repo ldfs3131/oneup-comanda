@@ -24,8 +24,8 @@ export default function AppPage() {
           <a className="btn go lg block" href="/cardapio?instalar=1">📲 Baixar o app de clientes</a>
         </section>
         <section className="card col gap-lg">
-          <div className="row" style={{ gap: 12 }}><img src={icone} alt="" className="app-mini-icone" /><div><b>Para a equipe</b><div className="small muted">Caixa, cozinha e painel do Dono. Entra com usuário e senha (ou PIN).</div></div></div>
-          <BotaoBaixarApp para="equipe" className="btn primary lg block" texto="Baixar o app da equipe" />
+          <div className="row" style={{ gap: 12 }}><img src={icone} alt="" className="app-mini-icone" /><div><b>Para quem trabalha no restaurante</b><div className="small muted">Caixa, cozinha e painel do Dono. Entra com usuário e senha (ou PIN).</div></div></div>
+          <BotaoBaixarApp para="equipe" className="btn primary lg block" texto="Baixar o app do sistema" />
           <Link className="small center" to="/login">Só entrar no sistema</Link>
         </section>
       </div>

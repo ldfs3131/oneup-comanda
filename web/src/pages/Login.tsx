@@ -88,7 +88,7 @@ export default function Login() {
           {pin?.aparelho && pin.pessoas.length > 0 && <button type="button" className="btn ghost block" onClick={() => setModoSenha(false)}>Entrar com PIN</button>}
         </form>
         </>}
-        <BotaoBaixarApp para="equipe" className="btn ghost" texto="Baixar o app da equipe" />
+        <BotaoBaixarApp para="equipe" className="btn ghost" texto="Baixe o app!" />
         <OneUpCredit version={meta?.version} />
       </section>
     </div>

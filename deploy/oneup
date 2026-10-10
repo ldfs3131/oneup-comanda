@@ -872,7 +872,9 @@ case "${1:-ajuda}" in
       desligar) mkdir -p "$ESTADO"; touch "$AUTO_DESLIGADA"
                 amarelo "Atualização automática desligada. Para atualizar: oneup atualizar   ·   religar: oneup atualizacao-automatica ligar" ;;
       agora) atualizar_automatico ;;
-      status) auto_ligada && echo "Ligada (todo dia às 04:10)." || echo "Desligada."
+      status) if ! auto_ligada; then echo "Desligada."
+              elif systemctl is-enabled -q oneup-autoatualizar.timer 2>/dev/null && systemctl is-active -q oneup-autoatualizar.timer 2>/dev/null; then echo "Ligada (todo dia às 04:10)."
+              else amarelo "O relógio está PARADO. Ligue com: oneup atualizacao-automatica ligar"; fi
               echo "Última: $(cat "$AUTO_ULTIMA" 2>/dev/null || echo 'ainda não rodou')" ;;
       *) echo "Uso: oneup atualizacao-automatica ligar | desligar | status"; exit 1 ;;
     esac ;;
